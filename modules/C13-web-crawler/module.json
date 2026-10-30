@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "C13",
+  "slug": "web-crawler",
+  "title": "Case study (STRETCH): web crawler",
+  "track": "C",
+  "status": "planned",
+  "core": false,
+  "summary": "Frontier management, politeness, dedupe, distributed scheduling.",
+  "hours": {
+    "core": 5,
+    "stretch": 1,
+    "total": 6
+  },
+  "prerequisites": [
+    "A6",
+    "A7"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/C13-web-crawler",
+    "readme": "modules/C13-web-crawler/README.md",
+    "quiz": "modules/C13-web-crawler/quiz.json",
+    "design_exercise": "modules/C13-web-crawler/design-exercise.md",
+    "teachback": "modules/C13-web-crawler/teachback.md"
+  }
+}

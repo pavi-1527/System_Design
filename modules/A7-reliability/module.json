@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "id": "A7",
+  "slug": "reliability",
+  "title": "Reliability: timeouts, retries, circuit breakers, rate limiting, bulkheads, multi-region",
+  "track": "A",
+  "status": "written",
+  "core": true,
+  "summary": "Designing for partial failure: timeouts and deadline budgets, retries with jitter and retry budgets, circuit breakers, rate limiting, bulkheads, load shedding, multi-region DR, correlated failures and chaos.",
+  "hours": {
+    "core": 15,
+    "stretch": 3,
+    "total": 18
+  },
+  "prerequisites": [
+    "A1",
+    "A6"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/A7-reliability",
+    "readme": "modules/A7-reliability/README.md",
+    "quiz": "modules/A7-reliability/quiz.json",
+    "design_exercise": "modules/A7-reliability/design-exercise.md",
+    "teachback": "modules/A7-reliability/teachback.md",
+    "lab": "labs/a7",
+    "solution": "solutions/a7"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Timeouts, retries and retry budgets",
+      "file": "modules/A7-reliability/unit-1-timeouts-retries.md",
+      "hours": {
+        "core": 4.5,
+        "stretch": 0.5
+      },
+      "labs": [
+        "retry"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Circuit breakers and rate limiting",
+      "file": "modules/A7-reliability/unit-2-breakers-rate-limits.md",
+      "hours": {
+        "core": 5,
+        "stretch": 0.5
+      },
+      "labs": [
+        "breaker",
+        "ratelimit"
+      ]
+    },
+    {
+      "n": 3,
+      "title": "Isolation, degradation and surviving failure domains",
+      "file": "modules/A7-reliability/unit-3-isolation-degradation-dr.md",
+      "hours": {
+        "core": 5.5,
+        "stretch": 2
+      },
+      "labs": [
+        "bulkhead"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "retry",
+      "title": "Retry executor: exponential backoff, full/equal/decorrelated jitter, deadline budget, Retry-After, idempotency gate, shared retry budget",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "breaker",
+      "title": "Circuit breaker: rolling window, half-open probing, outcome classification, state-change callback",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "ratelimit",
+      "title": "Rate limiters: token bucket, sliding-window log and counter, bounded per-key memory, Retry-After, 429 middleware",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "bulkhead",
+      "title": "Bulkheads per dependency (bounded FIFO queue) and an AIMD adaptive concurrency limit",
+      "unit": 3,
+      "core": false
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Derive per-hop timeouts from a propagated deadline budget, order them across hops, and explain why a timeout is a capacity control as much as a correctness control.",
+      "core": true
+    },
+    {
+      "text": "Implement a retry executor with exponential backoff and full/equal/decorrelated jitter, Retry-After handling, a deadline budget, an idempotency gate and error classification.",
+      "core": true
+    },
+    {
+      "text": "Compute retry amplification, size a shared retry budget, and explain metastable failures and the defences against them.",
+      "core": true
+    },
+    {
+      "text": "Implement a circuit breaker with a rolling window, limited half-open probing and correct outcome classification, and design its fallback.",
+      "core": true
+    },
+    {
+      "text": "Choose between fixed-window, sliding-window (log and counter), token-bucket, leaky-bucket and GCRA limiters for a requirement, and implement token-bucket and sliding-window limiters with bounded memory and correct Retry-After.",
+      "core": true
+    },
+    {
+      "text": "Design rate limiting for a multi-node, multi-tenant API: local vs shared counters vs leases, fairness, fail-open vs fail-closed, 429 vs 503, and client behaviour.",
+      "core": true
+    },
+    {
+      "text": "Apply bulkheads, cells and shuffle sharding to contain failure, and size pools and queues with Little's law.",
+      "core": true
+    },
+    {
+      "text": "Design load shedding and graceful degradation for an overloaded service: priority classes, queue bounds, deadline-aware servers, brownouts.",
+      "core": true
+    },
+    {
+      "text": "Choose a multi-AZ / multi-region topology and DR tier from RPO, RTO and cost, and walk through a failover including fencing, split brain and the dependencies that quietly don't replicate.",
+      "core": true
+    },
+    {
+      "text": "Reason about availability with correlated failures, and design deploy-safety and chaos/game-day practices that exercise the failure paths.",
+      "core": true
+    },
+    {
+      "text": "Compose retry, breaker, bulkhead and limiter into one vendor adapter with an explicit error taxonomy, and predict how mis-ordering them fails.",
+      "core": true
+    },
+    {
+      "text": "Implement semaphore bulkheads per dependency and an AIMD adaptive concurrency limit, and explain hedged requests, GCRA and the leaky bucket as a shaper.",
+      "core": false
+    }
+  ]
+}

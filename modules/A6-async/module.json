@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "id": "A6",
+  "slug": "async",
+  "title": "Async: queues, logs, pub/sub, outbox, sagas, backpressure",
+  "track": "A",
+  "status": "written",
+  "core": true,
+  "summary": "Decoupling in time: when a queue helps and when it hides a problem, queue vs log semantics, partitions and consumer groups, delivery guarantees, the transactional outbox, idempotent consumers, DLQs, pub/sub fan-out, sagas, backpressure and load shedding.",
+  "hours": {
+    "core": 15,
+    "stretch": 3,
+    "total": 18
+  },
+  "prerequisites": [
+    "A2",
+    "A4"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/A6-async",
+    "readme": "modules/A6-async/README.md",
+    "quiz": "modules/A6-async/quiz.json",
+    "design_exercise": "modules/A6-async/design-exercise.md",
+    "teachback": "modules/A6-async/teachback.md",
+    "lab": "labs/a6",
+    "solution": "solutions/a6"
+  },
+  "labs": [
+    {
+      "package": "tinylog",
+      "title": "Tiny partitioned log with consumer groups and offsets",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "outbox",
+      "title": "Transactional outbox relay with idempotent consumer",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "saga",
+      "title": "Saga orchestrator with compensations",
+      "unit": 3,
+      "core": true
+    },
+    {
+      "package": "backpressure",
+      "title": "Bounded queues and load shedding",
+      "unit": 3,
+      "core": false
+    }
+  ],
+  "units": [
+    {
+      "n": 1,
+      "title": "Queues, logs and delivery guarantees",
+      "file": "modules/A6-async/unit-1-queues-logs.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "tinylog"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Reliable events: outbox, idempotent consumers, DLQs and fan-out",
+      "file": "modules/A6-async/unit-2-outbox-consumers.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "outbox"
+      ]
+    },
+    {
+      "n": 3,
+      "title": "Sagas, backpressure and load shedding",
+      "file": "modules/A6-async/unit-3-sagas-backpressure.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "saga",
+        "backpressure"
+      ]
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Decide when a queue helps and when it hides a problem: size a queue by latency budget and capacity, compute backlog and recovery time with Little's law, and recognise a metastable failure.",
+      "core": true
+    },
+    {
+      "text": "Choose between a queue and a log for a workload, pick a partition key and count, and state precisely what ordering a partitioned log does and does not give.",
+      "core": true
+    },
+    {
+      "text": "Implement a partitioned log with keyed placement, offsets, retention, consumer groups, commits and rebalancing (labs/a6/tinylog).",
+      "core": true
+    },
+    {
+      "text": "Explain consumer-group rebalancing, generation fencing, hot partitions and how to commit safely when messages are processed in parallel.",
+      "core": true
+    },
+    {
+      "text": "Choose a delivery guarantee (at-most-once, at-least-once, effectively-once) from ack and commit timing, and explain what Kafka-style transactions do and do not cover.",
+      "core": true
+    },
+    {
+      "text": "Explain the dual-write problem and implement a transactional outbox with a leased, at-least-once relay (labs/a6/outbox).",
+      "core": true
+    },
+    {
+      "text": "Design idempotent consumers: dedupe table, offset-in-database, natural idempotence or a downstream idempotency key, and size dedupe retention against replay (labs/a6/outbox).",
+      "core": true
+    },
+    {
+      "text": "Handle poison messages: classify failures, bound retries, use DLQs with context, reason about ordering consequences and replay safely.",
+      "core": true
+    },
+    {
+      "text": "Design pub/sub fan-out with isolated subscriptions, choose log versus queue-per-subscriber and push versus pull, and evolve event schemas safely.",
+      "core": true
+    },
+    {
+      "text": "Design and implement a saga orchestrator: orchestration versus choreography, compensations, pivot and retriable steps, timeouts as unknown outcomes, and isolation countermeasures (labs/a6/saga).",
+      "core": true
+    },
+    {
+      "text": "Apply backpressure and load shedding: bound queues by age, size admission limits with Little's law, shed by priority and tenant, and avoid autoscaling past the bottleneck.",
+      "core": true
+    },
+    {
+      "text": "Implement bounded queues with block, drop-newest and drop-oldest policies, priority shedding, credit-based flow control and a queueing simulator (labs/a6/backpressure).",
+      "core": false
+    }
+  ]
+}

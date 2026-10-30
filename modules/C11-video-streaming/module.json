@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "id": "C11",
+  "slug": "video-streaming",
+  "title": "Case study: video streaming",
+  "track": "C",
+  "status": "written",
+  "core": true,
+  "summary": "Upload and transcoding pipeline, adaptive bitrate, CDN economics: requirements and estimation, API and data model, a segment-parallel transcoding DAG that survives failure, packaging and the bitrate ladder, CDN hit ratio and storage tiers for the long tail, view counts at scale, live as stretch.",
+  "hours": {
+    "core": 7,
+    "stretch": 2,
+    "total": 9
+  },
+  "prerequisites": [
+    "A1",
+    "A6",
+    "C10"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/C11-video-streaming",
+    "readme": "modules/C11-video-streaming/README.md",
+    "quiz": "modules/C11-video-streaming/quiz.json",
+    "design_exercise": "modules/C11-video-streaming/design-exercise.md",
+    "teachback": "modules/C11-video-streaming/teachback.md",
+    "lab": "labs/c11",
+    "solution": "solutions/c11"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Guided design: requirements, estimation, API, data model, high-level design",
+      "file": "modules/C11-video-streaming/unit-1-guided-design.md",
+      "hours": {
+        "core": 3,
+        "stretch": 0.5
+      },
+      "labs": []
+    },
+    {
+      "n": 2,
+      "title": "Deep dives: the transcoding DAG and its failures, packaging and adaptive bitrate, CDN economics and storage tiers, view counts; live as stretch",
+      "file": "modules/C11-video-streaming/unit-2-deep-dives.md",
+      "hours": {
+        "core": 4,
+        "stretch": 1.5
+      },
+      "labs": [
+        "transcode",
+        "abr"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "transcode",
+      "title": "Transcoding pipeline as a DAG: segment × rendition transcodes, per-segment packaging, manifest; bounded worker pool, retries with backoff, per-attempt timeouts, panic containment, idempotent resume, leak-free cancellation",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "abr",
+      "title": "Adaptive bitrate selection: safety factor, immediate down-switch, buffer-gated up-switch, panic to the lowest rendition",
+      "unit": 2,
+      "core": false
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Scope a video platform in six minutes: the clarifying questions whose answers change the design (VOD or live, user-generated or curated, upload-to-watch ratio, devices, time to playable, protection, viewer geography) and non-functional requirements with numbers.",
+      "core": true
+    },
+    {
+      "text": "Estimate concurrent viewers, peak egress in Tbps, egress bytes and cost per month, segment request rate, ingest, storage per minute across a bitrate ladder and per year, and transcode compute, and tie each number to a decision.",
+      "core": true
+    },
+    {
+      "text": "Design the API (idempotent resumable upload, playback returning a signed manifest URL, watch progress, batched playback events) and a data model that separates metadata from blobs, with deterministic, versioned, immutable object keys and an artifacts record as the processing truth.",
+      "core": true
+    },
+    {
+      "text": "Draw the high-level design with the upload, processing and playback paths traced, and justify every box by a requirement or a number.",
+      "core": true
+    },
+    {
+      "text": "Design the transcoding pipeline as a dependency graph: segment-level parallelism, dependency-driven scheduling with one owner, bounded workers, fairness across jobs and a fast path to playable.",
+      "core": true
+    },
+    {
+      "text": "Make the pipeline survive failure: classify failures, bounded retries with backoff and jitter, per-attempt timeouts, poison inputs to dead letters, idempotent resume from finished artifacts, and cancellation that leaks nothing.",
+      "core": true
+    },
+    {
+      "text": "Implement the pipeline (labs/c11/transcode): the DAG, a bounded worker pool, retries with backoff, per-attempt timeouts, panic containment, resume from a store of artifacts, progress and leak-free cancellation, passing under -race.",
+      "core": true
+    },
+    {
+      "text": "Explain packaging (HLS, DASH, CMAF, segment duration, aligned keyframes), bitrate-ladder design, and how a player adapts quality per segment (safety factor, immediate down-switch, buffer-gated up-switch, panic rule).",
+      "core": true
+    },
+    {
+      "text": "Reason about CDN economics and storage: egress dominates, byte hit ratio, cache keys and TTLs, shield tiers and request collapsing, head versus long tail, multi-CDN and ISP-embedded caches, storage tiers by last access and lazy rungs for the tail.",
+      "core": true
+    },
+    {
+      "text": "Design view counts and watch progress at scale: an event log with windowed aggregation, hot-key handling, a fast approximate display versus an exact batch recount, and last-writer-wins progress partitioned by user.",
+      "core": true
+    },
+    {
+      "text": "Implement an adaptive bitrate policy (labs/c11/abr) and explain per-title encoding and when it pays back.",
+      "core": false
+    },
+    {
+      "text": "Adapt the design for live streaming: a latency budget, real-time transcoding, low-latency HLS/DASH, playlist caching and collapsing, and redundant ingest.",
+      "core": false
+    }
+  ]
+}

@@ -1,0 +1,769 @@
+{
+  "module": "E3",
+  "title": "Build: async job / notification pipeline",
+  "draw": 12,
+  "questions": [
+    {
+      "id": "E3-001",
+      "type": "single",
+      "tags": [
+        "queues",
+        "durability"
+      ],
+      "difficulty": 2,
+      "prompt": "The transfers service moved its SMS send into `go sendSMS(...)` to stop the vendor's p99 from hurting transfers. What new failure did that introduce?",
+      "choices": [
+        "Alerts in flight or sleeping between retries are lost on every restart or deploy, with no record they existed",
+        "Transfers become slower because goroutines are expensive to start",
+        "The vendor receives fewer requests, so alerts are delayed",
+        "Nothing new: the goroutine decouples latency and keeps alerts durable"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A goroutine fixes the coupling (the request no longer waits) but the job now lives only in that process's memory, so every deploy or crash drops it silently. Goroutines are cheap (≈ KB), so start cost is not the issue; the vendor sees the same requests; and decoupling is not durability: only a queue whose 'accepted' survives a crash fixes loss.",
+      "ref": "unit-1-durable-queue.md#1-why-a-broker-between-the-producer-and-the-vendor"
+    },
+    {
+      "id": "E3-002",
+      "type": "single",
+      "tags": [
+        "queues",
+        "messaging"
+      ],
+      "difficulty": 2,
+      "prompt": "Which statement about the E3 broker is accurate?",
+      "choices": [
+        "It is a queue with per-job state that uses an append-only log internally for durability",
+        "It is a log like Kafka: consumers keep offsets and the broker never deletes anything",
+        "It is a log because it writes queue.log, so jobs must be consumed in strict order",
+        "It is a queue, so it needs no write-ahead log"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Queue semantics (per-job state, ack deletes, no consumer offsets) are what the API exposes; the log is the broker's write-ahead log for that state. It is not Kafka-style (no offsets, acked jobs disappear); writing a log file doesn't impose consumption order (a nacked job steps out of line); and without the log the state would not survive a crash.",
+      "ref": "unit-1-durable-queue.md#1-why-a-broker-between-the-producer-and-the-vendor"
+    },
+    {
+      "id": "E3-003",
+      "type": "single",
+      "tags": [
+        "durability",
+        "wal"
+      ],
+      "difficulty": 2,
+      "prompt": "Recovery finds that the last frame of queue.log is cut short. What should the broker do?",
+      "choices": [
+        "Keep the complete frames, truncate the file to the end of the last good frame, and continue appending from there",
+        "Refuse to start, because the log is corrupt and an operator must inspect it",
+        "Skip the torn bytes and append new frames after them",
+        "Delete the whole log and start empty, since its integrity can't be trusted"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A torn tail is the normal result of a crash or power loss during an append; that record was never acknowledged, so dropping it loses nothing promised. Refusing to start turns a routine event into an outage. Skipping without truncating hides every later append behind garbage, lost on the next recovery. Deleting the log loses every acknowledged job.",
+      "ref": "unit-1-durable-queue.md#2-durability-a-framed-log-fsync-and-torn-tails"
+    },
+    {
+      "id": "E3-004",
+      "type": "single",
+      "tags": [
+        "durability",
+        "wal"
+      ],
+      "difficulty": 3,
+      "prompt": "Your recovery skips a torn tail but forgets to truncate it. 5 jobs are in the log, you restart, enqueue 1 more (201), and restart again. What is the depth after the second restart, and why?",
+      "choices": [
+        "5: the sixth job's frame sits after the garbage, where recovery stops reading",
+        "6: recovery skipped the garbage the first time and will again",
+        "0: the log is treated as corrupt and discarded",
+        "7: the torn record is recovered on the second pass"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Recovery stops at the first bad frame, so anything appended after the torn bytes is unreadable: an acknowledged job vanishes one restart later. That is why the spec requires truncation, and why TestM1_ATornLogTailIsTruncatedOnRecovery restarts twice. Recovery can't skip past garbage (it no longer knows where the next frame starts); nothing discards the good prefix; and the torn record is gone for good.",
+      "ref": "unit-1-durable-queue.md#2-durability-a-framed-log-fsync-and-torn-tails"
+    },
+    {
+      "id": "E3-005",
+      "type": "multi",
+      "tags": [
+        "durability",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL broker writes that must be fsynced before the broker answers, given that workers send an Idempotency-Key to the vendor.",
+      "choices": [
+        "Enqueue (and replay)",
+        "Lease",
+        "Ack",
+        "Nack"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Losing an enqueue after a power cut loses a message the producer was told was accepted, so it needs an fsync before the 201 (replay recreates live work, so it counts too). Losing a lease, ack or nack only makes the job look unleased or unacked, so it is redelivered, and the consumer key makes that redelivery harmless. Those still have to be written before the response, which protects against a process crash.",
+      "ref": "unit-1-durable-queue.md#2-durability-a-framed-log-fsync-and-torn-tails"
+    },
+    {
+      "id": "E3-006",
+      "type": "numeric",
+      "tags": [
+        "durability",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Each fsync on the broker's disk takes ≈ 5 ms and every enqueue is synced on its own (no group commit). What is the maximum enqueue rate on one connection, in enqueues per second?",
+      "value": 200,
+      "tolerance": 0.25,
+      "unit": "enqueues/s",
+      "explanation": "1 / 5 ms = 200 per second per connection when each enqueue waits for its own fsync. The break-it measured ≈ 4.6 ms (≈ 220/s) on a laptop with F_FULLFSYNC versus ≈ 7,000/s unsynced. Group commit (one fsync for many concurrent enqueues) raises the rate by the batch size with the same guarantee.",
+      "ref": "unit-1-durable-queue.md#2-durability-a-framed-log-fsync-and-torn-tails"
+    },
+    {
+      "id": "E3-007",
+      "type": "single",
+      "tags": [
+        "durability",
+        "testing"
+      ],
+      "difficulty": 3,
+      "prompt": "The E3 tests SIGKILL the broker and check that every acknowledged job survives. What does a passing test prove?",
+      "choices": [
+        "That the broker wrote each job before answering 201; not that it fsynced, because the page cache survives a process kill",
+        "That the broker fsynced every enqueue, since SIGKILL is the harshest failure",
+        "That the broker survives power loss, because SIGKILL gives it no chance to flush",
+        "Nothing about durability, because the test restarts on the same machine"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "SIGKILL kills the process, not the kernel: written-but-unsynced data is still in the page cache and reaches disk later. So the test proves write ordering (write before 201), not fsync. Power loss is a different failure model that it cannot simulate; the torn-tail and bit-flip tests simulate what power loss leaves behind. It does prove something real: an implementation that answers before writing fails it.",
+      "ref": "unit-1-durable-queue.md#2-durability-a-framed-log-fsync-and-torn-tails"
+    },
+    {
+      "id": "E3-008",
+      "type": "single",
+      "tags": [
+        "durability",
+        "wal"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does AppendFrame write the header and payload in a single Write call?",
+      "choices": [
+        "So a process killed between two writes can't leave a header without its payload",
+        "Because two Write calls are slower than one by an order of magnitude",
+        "Because the CRC can only be computed over a single buffer",
+        "Because the operating system rejects writes shorter than 8 bytes"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A single small write(2) is completed by the kernel even if the process is killed, so a process crash can't tear it; two writes leave a window in which a kill leaves half a frame. Power loss can still tear a single write, which the CRC detects. Speed is a minor effect, the CRC is computed before writing either way, and short writes are allowed.",
+      "ref": "unit-1-durable-queue.md#2-durability-a-framed-log-fsync-and-torn-tails"
+    },
+    {
+      "id": "E3-009",
+      "type": "single",
+      "tags": [
+        "queues",
+        "delivery-guarantees"
+      ],
+      "difficulty": 2,
+      "prompt": "Worker A's lease on job j7 expires while A is still waiting on the vendor; the broker leases j7 to worker B (attempt 2). Then A finishes and acks with its lease token. What should happen?",
+      "choices": [
+        "The broker rejects A's ack with 409, because the token is for attempt 1 and the job now belongs to attempt 2",
+        "The broker accepts the ack and deletes j7, since the work was done",
+        "The broker accepts the ack and cancels B's attempt",
+        "The broker returns 404, because j7 is no longer leased to A"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Lease tokens are attempt-scoped so the broker can tell a late ack from the current one. Accepting A's ack would delete j7 while B is mid-attempt; if B then fails and nacks, the retry is lost. The broker has no way to cancel B. 404 is for unknown or acked jobs; j7 exists. A's effect may still have happened at the vendor, which is why the consumer key exists.",
+      "ref": "unit-1-durable-queue.md#3-leases-and-visibility-timeouts"
+    },
+    {
+      "id": "E3-010",
+      "type": "single",
+      "tags": [
+        "queues",
+        "timeouts"
+      ],
+      "difficulty": 3,
+      "prompt": "The vendor's calls take up to 40 s on bad days. The visibility timeout is 30 s and the worker's call timeout is 60 s. What happens on a bad day?",
+      "choices": [
+        "Leases expire mid-call, a second worker sends the same job in parallel, and only the vendor's key prevents a duplicate effect",
+        "Nothing: the call timeout is longer than the call, so every call succeeds once",
+        "The broker extends the lease automatically because the worker is still connected",
+        "The job is dead-lettered after the first 30 s"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A call outliving its lease means the broker redelivers while the first call is in flight: two workers on one job. The fix is a call deadline capped by the lease (the spec's min(call timeout, lease left − margin)) and visibility > call timeout, or heartbeat extension. This broker doesn't extend leases implicitly, and an expiry with attempts left is a redelivery, not a dead letter.",
+      "ref": "unit-1-durable-queue.md#3-leases-and-visibility-timeouts"
+    },
+    {
+      "id": "E3-011",
+      "type": "single",
+      "tags": [
+        "queues",
+        "durability"
+      ],
+      "difficulty": 2,
+      "prompt": "The broker restarts while worker A holds a lease that still has 8 s left. In the E3 design, what happens to that lease?",
+      "choices": [
+        "It is still valid after recovery: its absolute expiry is in the log, so A can ack, and if it doesn't the job returns on schedule",
+        "It is voided: every leased job is ready again at once",
+        "It is extended by a full visibility timeout from the restart",
+        "It is converted into a dead letter because its holder is unknown"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Lease expiries are absolute times recorded in the log, so recovery restores them. Voiding all leases redelivers everything in flight on every broker restart (a duplicate burst per deploy); extending them hides crashed workers; and dead-lettering in-flight jobs would be absurd. TestM1_ALeaseSurvivesABrokerRestart checks the chosen behaviour.",
+      "ref": "unit-1-durable-queue.md#3-leases-and-visibility-timeouts"
+    },
+    {
+      "id": "E3-012",
+      "type": "numeric",
+      "tags": [
+        "concurrency",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "The vendor allows 100 sends/s and each send takes ≈ 300 ms. You run 3 workers. What -concurrency per worker keeps total load at the contract (no more)?",
+      "value": 10,
+      "tolerance": 0.25,
+      "unit": "goroutines",
+      "explanation": "Little's law: in flight = rate × latency = 100/s × 0.3 s = 30 calls in total, so 30 / 3 = 10 per worker. More concurrency only earns 429s; less leaves contract capacity unused. If latency varies a lot, a rate limiter in front of the vendor is the more precise control.",
+      "ref": "unit-1-durable-queue.md#4-the-worker-pool-bounded-concurrency-and-long-polling"
+    },
+    {
+      "id": "E3-013",
+      "type": "single",
+      "tags": [
+        "timeouts",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "A worker's lease requests use `http.DefaultClient`. A network partition makes the broker silent (packets dropped, no resets). What happens?",
+      "choices": [
+        "Every pool goroutine blocks in a read that never completes; no lease errors are counted and nothing recovers until the connections are closed",
+        "The worker gets 'connection refused' and backs off",
+        "The lease requests return 204 after the long-poll wait, so the worker keeps polling normally",
+        "The worker exits because the broker is unreachable"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "http.DefaultClient has no timeout, and a blackhole produces silence, not errors, so the reads wait forever. Connection refused is what a dead host with a live network looks like, not a partition. A 204 needs the broker to answer, which it can't. The worker doesn't exit; it hangs, which is worse because it looks alive. The lease client timeout must be a little longer than the long-poll wait.",
+      "ref": "unit-1-durable-queue.md#4-the-worker-pool-bounded-concurrency-and-long-polling"
+    },
+    {
+      "id": "E3-014",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "backpressure"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does the E3 worker pull jobs with a fixed pool instead of having the broker push jobs to it?",
+      "choices": [
+        "A worker asks only when it has a free slot, so its load is bounded and a dead worker simply stops asking",
+        "Push is impossible over HTTP",
+        "Pull has lower latency than push",
+        "Pull lets the broker skip tracking leases"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Pull gives backpressure for free: the fixed pool bounds in-flight jobs, and a crashed or slow worker takes no more work. Push is possible over HTTP but makes the broker track every worker's capacity and liveness. Push usually has *lower* latency (long-polling closes most of the gap). Leases are still needed in either model because a worker can die holding a job.",
+      "ref": "unit-1-durable-queue.md#4-the-worker-pool-bounded-concurrency-and-long-polling"
+    },
+    {
+      "id": "E3-015",
+      "type": "multi",
+      "tags": [
+        "retries",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL outcomes the E3 worker should retry (nack with a delay) rather than dead-letter immediately.",
+      "choices": [
+        "A read timeout after the request was sent",
+        "429 Too Many Requests with Retry-After: 30",
+        "422 Unprocessable Entity",
+        "503 Service Unavailable",
+        "400 Bad Request"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "Timeouts, 429 and 5xx are transient or rate-related; retry them, with the same key, after the right delay (≥ Retry-After for the 429). 400 and 422 mean the payload is wrong, so the same request fails the same way forever: retrying wastes attempts, vendor quota and the time until someone fixes the template. Note that 429 is a 4xx you must retry.",
+      "ref": "unit-2-retries-idempotency.md#1-classifying-failures-at-the-vendor-boundary"
+    },
+    {
+      "id": "E3-016",
+      "type": "single",
+      "tags": [
+        "retries",
+        "circuit-breaker"
+      ],
+      "difficulty": 3,
+      "prompt": "After a credential rotation, every send gets 401. With per-job classification only, 12,000 jobs dead-letter one by one over an hour. What is the better response?",
+      "choices": [
+        "Treat a burst of 401s as a lane-wide failure: stop leasing for that vendor (a breaker) and page, instead of spending every job's attempts",
+        "Retry 401s with exponential backoff until the credentials come back",
+        "Classify 401 as success so the queue keeps draining",
+        "Increase max_attempts so fewer jobs reach the DLQ"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "401 is permanent for the job but says the *worker* is broken, so every job will fail identically; the right unit of response is the lane, not the job. Retrying 401s burns attempts and vendor quota for nothing; 'success' would silently drop alerts; more attempts only delay the same outcome.",
+      "ref": "unit-2-retries-idempotency.md#1-classifying-failures-at-the-vendor-boundary"
+    },
+    {
+      "id": "E3-017",
+      "type": "single",
+      "tags": [
+        "retries",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does the broker, not the worker, count attempts and decide when a job is dead?",
+      "choices": [
+        "Only the broker sees every lease of a job across workers and restarts, and it persists the count in its log",
+        "Workers are too busy to count",
+        "The broker has a faster clock",
+        "It doesn't matter where it is counted as long as max_attempts is the same"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The worker that made attempt 3 may be dead; a worker-side counter resets on every crash, which is exactly when a poison job most needs to run out of attempts. Business and clocks are irrelevant here; and it matters a lot where the count lives, because only a persisted, central count survives crashes.",
+      "ref": "unit-2-retries-idempotency.md#1-classifying-failures-at-the-vendor-boundary"
+    },
+    {
+      "id": "E3-018",
+      "type": "numeric",
+      "tags": [
+        "retries",
+        "backoff"
+      ],
+      "difficulty": 2,
+      "prompt": "Exponential backoff with base 100 ms, cap 1 s, no jitter. What is Backoff(5, 100ms, 1s, none), the delay before the fifth retry, in milliseconds?",
+      "value": 1000,
+      "tolerance": 0.05,
+      "unit": "ms",
+      "explanation": "cap(5) = min(1 s, 100 ms × 2^(5−1)) = min(1 s, 1.6 s) = 1 s. With no jitter the delay is the cap. Retries 1–4 would be 100, 200, 400, 800 ms.",
+      "ref": "unit-2-retries-idempotency.md#2-backoff-jitter-and-retry-after"
+    },
+    {
+      "id": "E3-019",
+      "type": "single",
+      "tags": [
+        "retries",
+        "backoff"
+      ],
+      "difficulty": 2,
+      "prompt": "The vendor answers 429 with `Retry-After: 2`. The worker's backoff for this attempt is 150 ms and its cap is 1 s. When should the retry happen?",
+      "choices": [
+        "No earlier than 2 s from now: Retry-After is a floor and may exceed the backoff cap",
+        "After 150 ms, since that is the computed backoff",
+        "After 1 s, the backoff cap",
+        "After 2.15 s: the backoff is added to Retry-After"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The delay is max(backoff, Retry-After): the vendor's header is a fact about when it will accept you, your cap is a general guess. Retrying at 150 ms or 1 s earns another 429. Adding them isn't wrong for correctness but isn't the rule; it only delays further.",
+      "ref": "unit-2-retries-idempotency.md#2-backoff-jitter-and-retry-after"
+    },
+    {
+      "id": "E3-020",
+      "type": "single",
+      "tags": [
+        "retries",
+        "backoff"
+      ],
+      "difficulty": 3,
+      "prompt": "3,000 jobs fail at the same moment during a vendor brownout. Compared with no jitter, what does full jitter change?",
+      "choices": [
+        "The same number of retries, spread across each backoff window, so the vendor sees a lower peak instead of synchronised waves",
+        "Fewer total retries, because some jobs skip retrying",
+        "Longer total recovery for every job",
+        "Nothing, unless the workers are on different machines"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Jitter doesn't reduce work (the break-it shows 600 sends for 200 jobs either way); it removes synchronisation: without it, every job retries at 200 ms and 600 ms together. Reducing total retries is a budget's or breaker's job. Average recovery isn't longer in any important way, and synchronised failure happens on one machine as easily as on many.",
+      "ref": "unit-2-retries-idempotency.md#2-backoff-jitter-and-retry-after"
+    },
+    {
+      "id": "E3-021",
+      "type": "single",
+      "tags": [
+        "retries",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does the E3 worker send its retry delay to the broker (retry_after_ms) instead of sleeping in the worker before retrying?",
+      "choices": [
+        "So the job releases its pool slot and lease while waiting, the delay survives restarts in the log, and other jobs proceed",
+        "Because time.Sleep is inaccurate in Go",
+        "Because the broker's clock is authoritative",
+        "So the vendor sees the delay"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Sleeping holds a pool slot and the lease for the whole delay, and the wait is lost if the worker crashes. not-before in the broker's log fixes both and lets the scan serve other jobs. time.Sleep is accurate enough; clocks aren't the point; and the vendor doesn't care where the wait happens.",
+      "ref": "unit-2-retries-idempotency.md#2-backoff-jitter-and-retry-after"
+    },
+    {
+      "id": "E3-022",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "delivery-guarantees"
+      ],
+      "difficulty": 2,
+      "prompt": "A worker sends job j42, the vendor sends the text, and the worker is SIGKILLed before acking. Another worker gets j42 after the lease expires. What prevents a second text?",
+      "choices": [
+        "The vendor recognises Idempotency-Key: j42 on the redelivery and doesn't repeat the effect",
+        "The broker notices the first attempt succeeded and skips the redelivery",
+        "The lease token prevents the second worker from sending",
+        "Nothing can prevent it; at-least-once means duplicates reach members"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The effect happened at the vendor, so only the vendor can recognise the second delivery, and only if every delivery carries the same key: the job id. The broker never learned the first attempt succeeded (that's what the missing ack means); lease tokens only fence acks at the broker; and at-least-once *delivery* plus an idempotent *effect* is exactly how duplicates are kept from members.",
+      "ref": "unit-2-retries-idempotency.md#3-idempotency-at-both-ends"
+    },
+    {
+      "id": "E3-023",
+      "type": "single",
+      "tags": [
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "Which value should the worker send as the vendor's Idempotency-Key?",
+      "choices": [
+        "The broker's job id, the same on every attempt, redelivery and replay",
+        "A new UUID per attempt",
+        "The lease token",
+        "A hash of the payload"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The key must identify the intent and be stable across every delivery. A UUID or lease token changes per attempt, so a redelivery looks new. A payload hash merges distinct jobs with identical payloads (two genuine OTP alerts) and splits one job if any field changes between attempts.",
+      "ref": "unit-2-retries-idempotency.md#3-idempotency-at-both-ends"
+    },
+    {
+      "id": "E3-024",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "20 producer retries with the same Idempotency-Key reach the broker concurrently. The broker checks the key under its mutex, unlocks, then locks again to insert. What happens under load, and will `go test -race` flag it?",
+      "choices": [
+        "Occasionally 2+ jobs are created for one key; -race may stay silent, because it is a check-then-act logic race, not an unsynchronised access",
+        "Exactly one job is always created, because each step holds the mutex",
+        "-race always reports it as a data race",
+        "The broker deadlocks, because it locks twice"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Two requests can both pass the check before either inserts. Every memory access is under a lock, so the race detector sees nothing to report: it finds data races, not atomicity bugs. Holding the mutex for each step separately isn't atomicity. There is no deadlock: the lock is released between steps. Tests with real concurrency (TestM3_ConcurrentDuplicateEnqueuesCreateOneJob) catch it.",
+      "ref": "unit-2-retries-idempotency.md#3-idempotency-at-both-ends"
+    },
+    {
+      "id": "E3-025",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "backpressure"
+      ],
+      "difficulty": 2,
+      "prompt": "The alerts queue is full. The transfers service retries an enqueue (same Idempotency-Key) for a job the broker already accepted a second ago. What should the broker answer?",
+      "choices": [
+        "200 with the original job id and duplicate: true",
+        "429 with Retry-After, because the queue is full",
+        "201 with a new id, since the producer asked again",
+        "409 Conflict, because the key exists"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The job is accepted; refusing it with 429 tells the producer it wasn't, so it keeps retrying something already queued, adding load during overload. A new id creates the duplicate the key exists to prevent. 409 gives the producer an error it can't act on instead of the id it needs. Dedupe is checked before the depth bound.",
+      "ref": "unit-2-retries-idempotency.md#3-idempotency-at-both-ends"
+    },
+    {
+      "id": "E3-026",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "delivery-guarantees"
+      ],
+      "difficulty": 3,
+      "prompt": "Your design doc says the pipeline is 'exactly-once'. Which phrasing would survive a senior review?",
+      "choices": [
+        "Delivery is at-least-once; the effect is exactly-once at the vendor within its key-retention window, because every delivery of a job carries the same key",
+        "The broker guarantees exactly-once delivery because of leases",
+        "Exactly-once is achieved by fsyncing acks",
+        "Exactly-once is impossible, so duplicates are unavoidable and acceptable"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Exactly-once is an end-to-end property built from at-least-once delivery and an idempotent effect, and it has a boundary: outside the vendor's retention (or with a vendor without keys) a redelivery is a duplicate. Leases bound duplicates but can't prevent them; fsyncing acks doesn't stop a crash between effect and ack; and 'impossible, so acceptable' ignores that idempotency makes the effect exactly-once in practice.",
+      "ref": "unit-2-retries-idempotency.md#3-idempotency-at-both-ends"
+    },
+    {
+      "id": "E3-027",
+      "type": "single",
+      "tags": [
+        "queues",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A job's payload makes the renderer panic, killing the worker every time it is leased. It is never nacked. How does it leave the queue in the E3 design?",
+      "choices": [
+        "Each lease expiry counts as an attempt; when attempts run out, the broker dead-letters it with a lease-expired error",
+        "A worker eventually nacks it as permanent",
+        "It stays in the queue forever, redelivered every visibility timeout",
+        "The worker's panic handler deletes it from the broker"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The attempt number rises with every lease, and the broker persists it, so a job whose leases keep expiring reaches max_attempts and is dead-lettered on its next expiry (TestM4_AJobThatKeepsKillingWorkersRunsOutOfAttempts). No worker lives long enough to nack it. Without the attempt cap it would loop forever, which is the incident the cap prevents. A dying worker can't delete anything.",
+      "ref": "unit-3-dead-letters-backpressure.md#1-poison-jobs-dead-letters-and-replay"
+    },
+    {
+      "id": "E3-028",
+      "type": "single",
+      "tags": [
+        "queues",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A poison job at the head of the queue fails with 503 forever. With one worker at concurrency 1, why don't the 20 jobs behind it wait for its retries?",
+      "choices": [
+        "Its nack sets a not-before time and the lease scan takes the first eligible job, so it steps out of line while it waits",
+        "The broker moves it to the DLQ on its first failure",
+        "The worker skips it because it remembers the payload",
+        "Concurrency 1 runs jobs in parallel threads"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Per-job state is what lets a queue avoid head-of-line blocking: a delayed job isn't eligible, so the scan serves the next one. It is dead-lettered only after its attempts (503 is retryable). Workers keep no memory of payloads, and concurrency 1 means one job at a time. In a log consumed by offset, the same job would block its partition.",
+      "ref": "unit-3-dead-letters-backpressure.md#1-poison-jobs-dead-letters-and-replay"
+    },
+    {
+      "id": "E3-029",
+      "type": "multi",
+      "tags": [
+        "queues",
+        "operations"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL that a dead-lettered job should keep so that an operator can fix the cause and replay safely.",
+      "choices": [
+        "The payload",
+        "The original job id",
+        "Every attempt's time and error",
+        "The worker's goroutine stack"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "The payload is what gets resent; the id is the vendor key, so a replay of something that was actually delivered is deduplicated; the history and last error explain what happened and let 18,000 dead jobs be grouped into one cause. A goroutine stack belongs in logs or crash reports, not in the job record.",
+      "ref": "unit-3-dead-letters-backpressure.md#1-poison-jobs-dead-letters-and-replay"
+    },
+    {
+      "id": "E3-030",
+      "type": "single",
+      "tags": [
+        "backpressure",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "An alerts queue drains at 100 jobs/s (the vendor's contract) and an alert is useless after ≈ 10 minutes. Which -max-depth follows from that, and why?",
+      "choices": [
+        "≈ 60,000: drain rate × useful life; a deeper backlog holds alerts that will be stale when sent",
+        "≈ 2,000,000: as large as memory allows, to never reject",
+        "≈ 100: one second of drain, to keep latency low",
+        "≈ 6,000: ten times the per-minute rate"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Size the bound from time: 100/s × 600 s = 60,000. Beyond that, new alerts would wait past their useful life, so refusing them at the door (letting the producer choose a fallback) is better; then check memory (≈ 60 MB at ≈ 1 KB/job). Memory-sized bounds hide hours of staleness; 100 rejects normal bursts; 6,000 is one minute of drain, below the stated tolerance.",
+      "ref": "unit-3-dead-letters-backpressure.md#2-backpressure-a-bounded-queue-and-429"
+    },
+    {
+      "id": "E3-031",
+      "type": "single",
+      "tags": [
+        "backpressure"
+      ],
+      "difficulty": 3,
+      "prompt": "The depth bound counts ready + leased jobs but not delayed ones. The vendor goes down for an hour. What happens?",
+      "choices": [
+        "Every job is nacked and delayed, depth drops to ≈ 0, producers are admitted without limit, and the backlog grows unbounded",
+        "Depth fills up quickly and producers get 429s",
+        "Nothing changes, because delayed jobs drain on their own",
+        "The broker dead-letters delayed jobs to make room"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Delayed jobs are work the pipeline has promised to deliver; leaving them out removes the bound exactly when the vendor is down. Producers would see 429s only if delayed jobs counted. They don't drain while the vendor is down, and the broker doesn't dead-letter jobs to make room.",
+      "ref": "unit-3-dead-letters-backpressure.md#2-backpressure-a-bounded-queue-and-429"
+    },
+    {
+      "id": "E3-032",
+      "type": "single",
+      "tags": [
+        "backpressure",
+        "load-shedding"
+      ],
+      "difficulty": 2,
+      "prompt": "What is the difference between the broker's 429 and load shedding?",
+      "choices": [
+        "429 refuses work at the door so the producer still owns it; shedding drops work already accepted",
+        "They are the same thing with different names",
+        "429 drops the job after accepting it; shedding refuses it",
+        "Shedding only applies to synchronous APIs"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Backpressure tells the producer 'not now' before it hands the job over, so the producer can retry, fall back or slow down. Shedding discards work the system already accepted, which is sometimes necessary (an intake you can't refuse) but loses the producer's knowledge of it. Shedding applies to queues as much as to synchronous APIs.",
+      "ref": "unit-3-dead-letters-backpressure.md#2-backpressure-a-bounded-queue-and-429"
+    },
+    {
+      "id": "E3-033",
+      "type": "single",
+      "tags": [
+        "graceful-shutdown",
+        "idempotency"
+      ],
+      "difficulty": 3,
+      "prompt": "On SIGTERM your worker cancels its root context, which also cancels in-flight vendor calls, and exits 0 without acking them. A replacement worker takes over. What does the vendor see?",
+      "choices": [
+        "Duplicate sends for the cancelled calls it had already accepted; with keys the effects stay at one each, but the duplicate count rises",
+        "Nothing unusual: the cancelled calls never reached the vendor",
+        "Lost alerts, because the cancelled jobs are deleted",
+        "An error from the broker, because the leases are still held"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A vendor that already accepted a request finishes it even if the caller disconnects. The worker never acks, so the leases expire and the jobs are redelivered: duplicates, hidden from the effect count only by the keys. TestM5_SIGTERMDrainsAWorkerWithoutLosingOrDuplicating checks duplicates == 0 to catch it. Nothing is deleted, and lease expiry is silent, not an error.",
+      "ref": "unit-3-dead-letters-backpressure.md#3-graceful-drain"
+    },
+    {
+      "id": "E3-034",
+      "type": "single",
+      "tags": [
+        "graceful-shutdown",
+        "timeouts"
+      ],
+      "difficulty": 2,
+      "prompt": "Order these from shortest to longest for a well-behaved worker: the orchestrator's grace period, the worker's drain timeout, the per-call timeout.",
+      "choices": [
+        "call timeout < drain timeout < grace period",
+        "drain timeout < call timeout < grace period",
+        "grace period < drain timeout < call timeout",
+        "call timeout < grace period < drain timeout"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "An in-flight call must be able to finish inside the drain, and the drain must finish before the orchestrator SIGKILLs the process (Kubernetes' default grace period is 30 s), e.g. 5 s < 15 s < 30 s. A drain shorter than a call abandons calls it could have finished; a drain longer than the grace period is cut off by SIGKILL anyway.",
+      "ref": "unit-3-dead-letters-backpressure.md#3-graceful-drain"
+    },
+    {
+      "id": "E3-035",
+      "type": "single",
+      "tags": [
+        "testing",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "In the failure run, which prediction about F2 (broker SIGKILL mid-delivery, restart after 300 ms) is correct?",
+      "choices": [
+        "Some acks fail while the broker is down, so those jobs are redelivered; the vendor's duplicate count may rise but its effects stay at one per job",
+        "No job is redelivered, because the worker retries its acks until the broker is back",
+        "Members receive duplicate texts, because the broker lost its acks",
+        "Jobs enqueued before the crash are lost, because the broker had no time to flush"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The worker retries an ack only briefly; with the broker down, some acks never land, the leases (restored from the log) expire and the jobs are redelivered. The vendor sees duplicate *sends* but, thanks to the job-id key, no duplicate *effects*. Acknowledged enqueues were written before their 201s, so they survive a process kill.",
+      "ref": "unit-3-dead-letters-backpressure.md#4-the-failure-injection-run-predicted-vs-observed"
+    },
+    {
+      "id": "E3-036",
+      "type": "single",
+      "tags": [
+        "outbox",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "STRETCH. The transfers service commits a transfer and an outbox row in one transaction; a relay enqueues the outbox row. Which Idempotency-Key should the relay send, and what must hold for it to work?",
+      "choices": [
+        "The outbox row's id (or the business fact it records), and the relay's retry horizon must be shorter than the broker's dedupe window",
+        "A new UUID per enqueue attempt, with the broker's window irrelevant",
+        "No key: the outbox already guarantees exactly-once",
+        "The transfer amount, so identical amounts dedupe"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The relay may crash after the enqueue but before marking the row published, and resend; the outbox row id makes the resend a duplicate as long as it arrives within the dedupe window. A UUID per attempt defeats the dedupe; the outbox guarantees the job will be *sent*, at least once, not exactly once; amounts are not identities.",
+      "ref": "unit-3-dead-letters-backpressure.md#5-stretch-where-the-outbox-sits-and-scaling-the-broker-out"
+    },
+    {
+      "id": "E3-037",
+      "type": "single",
+      "tags": [
+        "durability",
+        "operations"
+      ],
+      "difficulty": 2,
+      "prompt": "STRETCH. queue.log has grown to 40 GB, almost all of it about jobs acked weeks ago, and restarts take minutes. Which compaction procedure never risks losing an acknowledged job?",
+      "choices": [
+        "Write the live state to a new file, fsync it, rename it over queue.log, then fsync the directory",
+        "Truncate queue.log to its last 1 GB",
+        "Delete queue.log and rebuild it from the in-memory state on the next restart",
+        "Rewrite queue.log in place, record by record"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Write-new-then-rename keeps either the complete old log or the complete, synced new one in place at every moment; the directory fsync makes the rename durable. Truncating keeps a suffix that refers to jobs whose enqueue records are gone. Deleting first leaves a window with no log at all. Rewriting in place can leave a half-rewritten file after a crash.",
+      "ref": "unit-1-durable-queue.md#5-stretch-compacting-the-log"
+    }
+  ]
+}

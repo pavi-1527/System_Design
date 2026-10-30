@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "id": "A3",
+  "slug": "caching",
+  "title": "Caching",
+  "track": "A",
+  "status": "written",
+  "core": true,
+  "summary": "Where caches sit, what they cost, and how they fail: hit-rate math and sizing, cache-aside and its siblings, eviction, invalidation races, stampedes, negative caching, hot keys, and consistency with the source of truth.",
+  "hours": {
+    "core": 10,
+    "stretch": 2,
+    "total": 12
+  },
+  "prerequisites": [
+    "A1",
+    "A2"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/A3-caching",
+    "readme": "modules/A3-caching/README.md",
+    "quiz": "modules/A3-caching/quiz.json",
+    "design_exercise": "modules/A3-caching/design-exercise.md",
+    "teachback": "modules/A3-caching/teachback.md",
+    "lab": "labs/a3",
+    "solution": "solutions/a3"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Why, where and how much",
+      "file": "modules/A3-caching/unit-1-why-where-how-much.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "lru",
+        "lfu"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Correctness: invalidation, stampedes, hot keys and consistency",
+      "file": "modules/A3-caching/unit-2-correctness.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "cacheaside"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "lru",
+      "title": "LRU cache with O(1) ops, TTL and cost weighting",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "cacheaside",
+      "title": "Cache-aside with stampede protection (singleflight), negative caching and safe invalidation",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "lfu",
+      "title": "LFU / TinyLFU-style admission with a count-min sketch",
+      "unit": 1,
+      "core": false
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Compute effective latency and backend load from a hit ratio, and explain why moving from a 95% to a 99% hit ratio is a 5x cut in backend load and a very different tail.",
+      "core": true
+    },
+    {
+      "text": "Place caches along a request path (browser, CDN, gateway, in-process, remote, database buffer pool) and choose between cache-aside, read-through, write-through, write-back, write-around and refresh-ahead, stating the failure semantics of each.",
+      "core": true
+    },
+    {
+      "text": "Choose an eviction policy (LRU, LFU, CLOCK, TinyLFU admission, TTL) for a workload and explain when scans, skew or one-hit wonders flip the answer.",
+      "core": true
+    },
+    {
+      "text": "Size a cache from working set, key skew and per-entry overhead, and decide whether the extra memory is worth the hit ratio it buys.",
+      "core": true
+    },
+    {
+      "text": "Implement an O(1) LRU with per-entry TTL on an injected clock, cost weighting, an eviction callback and concurrent safety (labs/a3/lru).",
+      "core": true
+    },
+    {
+      "text": "Reproduce the cache-aside stale-set race step by step, and design invalidation (delete after write, versioned keys, leases, short TTLs, event-driven invalidation) that bounds staleness.",
+      "core": true
+    },
+    {
+      "text": "Prevent stampedes with singleflight, TTL jitter, stale-while-revalidate, probabilistic early refresh and cache warming, and show why a cold cache must never be the only thing keeping the database alive.",
+      "core": true
+    },
+    {
+      "text": "Defend a cache against nonexistent keys (negative caching, Bloom filter) and hot keys (local L1, key replication), and know where the full hot-key treatment lives (A4).",
+      "core": true
+    },
+    {
+      "text": "Decide the acceptable staleness for each class of banking data, keep tenants' entries apart, and refuse to cache authorisation decisions blindly.",
+      "core": true
+    },
+    {
+      "text": "Implement a cache-aside loader with your own singleflight, negative and error caching, jitter, safe invalidation and stale-while-revalidate (labs/a3/cacheaside).",
+      "core": true
+    },
+    {
+      "text": "Operate a cache: pick the metrics that matter (hit ratio, eviction rate, p99, key cardinality), and plan for failover, memory pressure and loss of the whole cache.",
+      "core": true
+    },
+    {
+      "text": "Implement frequency-aware admission with a count-min sketch and show scan resistance against plain LRU (labs/a3/lfu).",
+      "core": false
+    }
+  ]
+}

@@ -1,0 +1,678 @@
+{
+  "module": "C5",
+  "title": "Case study: news feed",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "C5-001",
+      "type": "single",
+      "tags": ["design", "requirements", "fan-out"],
+      "difficulty": 2,
+      "prompt": "You have one clarifying question left before you must start designing a news feed. Which answer changes the design the most?",
+      "choices": [
+        "Whether users can like and comment on posts",
+        "How skewed the follower distribution is, including the largest follower counts",
+        "Whether posts can contain images",
+        "Which programming language the team prefers"
+      ],
+      "answer": [1],
+      "explanation": "Skew decides push vs pull vs hybrid, the cost drivers and the hot keys: with no large accounts, fan-out on write for everyone works; with 50 M-follower accounts it does not. Likes and comments are separate pipelines that consume the same events. Images change the media path (object storage + CDN), not the feed's shape. The language is irrelevant to the design.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions-that-change-the-design"
+    },
+    {
+      "id": "C5-002",
+      "type": "single",
+      "tags": ["design", "requirements", "consistency"],
+      "difficulty": 2,
+      "prompt": "The interviewer says a post must be visible to all followers \"within a few seconds\" and to the author \"immediately\". What design freedom does the first number buy you?",
+      "choices": [
+        "Nothing; a few seconds is effectively synchronous and the fan-out must happen in the request",
+        "Fan-out can be asynchronous behind a bounded queue, with a backlog sized from the lag target and the delivery rate",
+        "The feed can be served from a 30-second TTL cache of a database query",
+        "Timelines can be persisted to disk instead of cached in memory"
+      ],
+      "answer": [1],
+      "explanation": "A lag target of seconds allows asynchronous delivery and tells you how much backlog is acceptable (lag × delivery rate), which bounds the queue and the shedding policy. It is not synchronous: 50 M synchronous writes per celebrity post is not a design. A 30-second query cache violates the author's immediacy and gives everyone stale data. Disk vs memory for timelines is a cost/latency decision unrelated to the freshness target.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions-that-change-the-design"
+    },
+    {
+      "id": "C5-003",
+      "type": "numeric",
+      "tags": ["estimation", "qps"],
+      "difficulty": 1,
+      "prompt": "100 M posts per day. What is the average post rate? Answer in posts per second.",
+      "value": 1157,
+      "tolerance": 0.25,
+      "unit": "posts/s",
+      "explanation": "100,000,000 / 86,400 ≈ 1,157 posts/s (≈ 1.2k/s). The napkin version 100 M / 10^5 = 1,000 is within tolerance. Peak is roughly 3× this, ≈ 3.5k/s.",
+      "ref": "unit-1-guided-design.md#2-estimation-six-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C5-004",
+      "type": "numeric",
+      "tags": ["estimation", "fan-out"],
+      "difficulty": 2,
+      "prompt": "100 M posts per day, an average of 200 followers per author, fan-out on write for everyone. How many timeline deliveries per day is that? Answer as a count per day.",
+      "value": 20000000000,
+      "tolerance": 0.25,
+      "unit": "deliveries/day",
+      "explanation": "100 M × 200 = 20 B deliveries per day (≈ 230k/s average, ≈ 700k/s at a 3× peak). The 200× multiplier is the whole fan-out problem; forgetting it is the most common estimation error on this design.",
+      "ref": "unit-1-guided-design.md#2-estimation-six-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C5-005",
+      "type": "numeric",
+      "tags": ["estimation", "caching", "capacity"],
+      "difficulty": 2,
+      "prompt": "300 M daily active users, 800 entries per cached timeline, 8 bytes per entry (time-sortable IDs). How much raw memory do the timelines need? Answer in TB.",
+      "value": 2.4,
+      "tolerance": 0.25,
+      "unit": "TB",
+      "explanation": "300 M × 800 × 8 B = 1.92 × 10^12 B ≈ 2.4 TB (2.4 × 10^12 bytes; either decimal reading is within tolerance). Real data-structure overhead multiplies this by ≈ 2–3, and replication by 2, which is why RAM for timelines is the cost driver of the design.",
+      "ref": "unit-1-guided-design.md#2-estimation-six-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C5-006",
+      "type": "numeric",
+      "tags": ["estimation", "fan-out", "hot-key"],
+      "difficulty": 2,
+      "prompt": "A fan-out fleet delivers 700k timeline writes per second in total. An account with 50 M followers posts once. If the whole fleet worked only on that post, how long would delivery take? Answer in seconds.",
+      "value": 71,
+      "tolerance": 0.25,
+      "unit": "s",
+      "explanation": "50,000,000 / 700,000 ≈ 71 s of the entire fleet's capacity, during which every other author's posts wait. On a single worker at ≈ 50k/s it would be ≈ 17 minutes. This burst, not the per-follower cost, is what makes the celebrity case a pull-on-read case.",
+      "ref": "unit-2-deep-dives.md#5-fan-out-on-write-fan-out-on-read-and-the-hybrid"
+    },
+    {
+      "id": "C5-007",
+      "type": "numeric",
+      "tags": ["estimation", "caching"],
+      "difficulty": 2,
+      "prompt": "Peak feed reads are 100k per second and each page holds 20 posts. How many post-body lookups per second must the read path serve at peak? Answer as lookups per second.",
+      "value": 2000000,
+      "tolerance": 0.25,
+      "unit": "lookups/s",
+      "explanation": "100,000 × 20 = 2 M hydrations per second. This is why post bodies live in a separate cache tier keyed by post ID and are fetched with one batched request per page; no database serves 2 M point reads per second on the hot path.",
+      "ref": "unit-1-guided-design.md#2-estimation-six-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C5-008",
+      "type": "numeric",
+      "tags": ["estimation", "bandwidth"],
+      "difficulty": 2,
+      "prompt": "Peak feed reads 100k/s, 20 posts per page, ≈ 1 KB per post, text only. What is the peak egress? Answer in Gbps.",
+      "value": 16,
+      "tolerance": 0.25,
+      "unit": "Gbps",
+      "explanation": "100,000 × 20 × 1 KB ≈ 2 GB/s; × 8 bits ≈ 16 Gbps. Forgetting the ×8 gives 2 \"Gbps\", the classic bytes-vs-bits slip. 16 Gbps spread over a fleet is unremarkable, and a personalised authenticated feed is not CDN-cacheable; the CDN belongs in front of media.",
+      "ref": "unit-1-guided-design.md#2-estimation-six-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C5-009",
+      "type": "numeric",
+      "tags": ["estimation", "storage"],
+      "difficulty": 2,
+      "prompt": "100 M posts per day at ≈ 1 KB each, replicated 3×. How much storage does one year of posts take? Answer in TB.",
+      "value": 110,
+      "tolerance": 0.25,
+      "unit": "TB",
+      "explanation": "100 M × 1 KB = 100 GB/day; × 365 ≈ 36.5 TB raw; × 3 replicas ≈ 110 TB per year. Large, but on disk and growing linearly; the posts store is partitioned by size, not by write rate (≈ 3.5k/s peak fits a primary).",
+      "ref": "unit-1-guided-design.md#2-estimation-six-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C5-010",
+      "type": "numeric",
+      "tags": ["estimation", "backpressure", "fan-out"],
+      "difficulty": 2,
+      "prompt": "The freshness target says a post must reach followers within 5 s. Fan-out delivers 700k timeline writes per second at peak. What is the largest delivery backlog you can carry without breaking the target? Answer as a count of deliveries.",
+      "value": 3500000,
+      "tolerance": 0.25,
+      "unit": "deliveries",
+      "explanation": "Little's law: 5 s × 700k/s = 3.5 M deliveries. Beyond that backlog, the SLO is burning and the pipeline should prioritise (newer posts, ordinary authors over a celebrity backlog) or shed. The lag target is what sizes the queue.",
+      "ref": "unit-1-guided-design.md#2-estimation-six-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C5-011",
+      "type": "numeric",
+      "tags": ["estimation", "caching", "stampede"],
+      "difficulty": 3,
+      "prompt": "A timeline cache node without a replica dies. Its users generate 2,500 feed reads per second, and each miss rebuilds from 200 followees' recent posts (one read per followee). How many posts_by_author reads per second hit the backing store? Answer as reads per second.",
+      "value": 500000,
+      "tolerance": 0.25,
+      "unit": "reads/s",
+      "explanation": "2,500 × 200 = 500k reads/s against a store sized for ≈ 10k/s: a rebuild stampede that takes the posts store down for everyone. The fixes are replicas, per-user coalescing, a rebuild concurrency budget with thin pages beyond it, and rebuilding from the in-memory author projection instead of disk.",
+      "ref": "unit-2-deep-dives.md#6-the-timeline-cache-bounded-lists-misses-hot-keys"
+    },
+    {
+      "id": "C5-012",
+      "type": "numeric",
+      "tags": ["estimation", "capacity", "caching"],
+      "difficulty": 3,
+      "prompt": "Raw timeline IDs take 2.4 TB. The cache engine's data structures cost 2.5× the raw bytes, you keep one replica, and a node offers 200 GB of usable RAM. How many nodes? Answer as a count.",
+      "value": 60,
+      "tolerance": 0.25,
+      "unit": "nodes",
+      "explanation": "2.4 TB × 2.5 = 6 TB; × 2 replicas = 12 TB; / 200 GB = 60 nodes. This is the bill of the design, which is why entries are 8-byte IDs, the window is bounded, and inactive users' timelines are evicted.",
+      "ref": "unit-2-deep-dives.md#6-the-timeline-cache-bounded-lists-misses-hot-keys"
+    },
+    {
+      "id": "C5-013",
+      "type": "single",
+      "tags": ["estimation", "caching", "pitfalls"],
+      "difficulty": 2,
+      "prompt": "A candidate proposes storing each post's full body (≈ 1 KB) in every follower's timeline so reads don't need hydration. With 300 M DAU and 800-entry timelines, what does the proposal cost compared with storing 8-byte IDs?",
+      "choices": [
+        "About the same; the bodies are small",
+        "About 10× more memory",
+        "About 125× more memory, roughly 300 TB instead of 2.4 TB, plus stale copies on every edit or delete",
+        "Less memory, because the body cache is no longer needed"
+      ],
+      "answer": [2],
+      "explanation": "1 KB / 8 B = 125×: ≈ 300 TB of RAM instead of ≈ 2.4 TB, and every edit or delete must now touch up to 50 M copies. IDs plus one shared body cache (≈ 200 GB hot set) is the standard layout. The body cache is tiny compared with the duplicated bodies, so the last option inverts the arithmetic.",
+      "ref": "unit-1-guided-design.md#2-estimation-six-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C5-014",
+      "type": "single",
+      "tags": ["api-design", "pagination"],
+      "difficulty": 2,
+      "prompt": "A feed client is on page 3 (offset 40) when 5 new posts arrive at the top. What does it see on page 4 with offset pagination, and what does keyset (cursor) pagination do instead?",
+      "choices": [
+        "Offset shows 5 posts it already saw; a (time, ID) cursor continues strictly after the last seen post, so no duplicates",
+        "Offset skips 5 posts; a cursor shows them twice",
+        "Both behave identically because the feed is sorted by time",
+        "Offset is correct; cursors can only page backwards"
+      ],
+      "answer": [0],
+      "explanation": "Offset counts positions, and 5 inserts at the top shift every position down by 5, so page 4 repeats 5 posts from page 3. A keyset cursor encodes the last seen (time, ID) and the next page starts strictly after it, so inserts at the top are invisible to the walk. Sorting doesn't help offset; cursors page in either direction.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C5-015",
+      "type": "single",
+      "tags": ["api-design", "idempotency"],
+      "difficulty": 2,
+      "prompt": "A mobile client's POST /v1/posts times out after the server committed the post, and the client retries. Without an idempotency key, what happens end to end?",
+      "choices": [
+        "Nothing; the server detects the identical text and ignores the retry",
+        "A second post is created and fanned out to every follower, so followers see it twice and the author must delete one",
+        "The retry fails with 409 because the first request is still in flight",
+        "The load balancer deduplicates the retry"
+      ],
+      "answer": [1],
+      "explanation": "Without a key the retry is a new request: a second post, a second fan-out (200 more deliveries, or a second celebrity merge), and duplicates in every feed. Servers don't dedupe by content (two identical posts are legitimate). 409 needs a key to recognise the duplicate; load balancers don't deduplicate POSTs.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C5-016",
+      "type": "single",
+      "tags": ["partitioning", "hot-key", "storage"],
+      "difficulty": 2,
+      "prompt": "The posts table is partitioned by author_id \"so a profile page is one partition\". What goes wrong on the feed read path?",
+      "choices": [
+        "Nothing; profile pages and feeds use the same access pattern",
+        "Hydrating a 20-post page touches up to 20 partitions, and a celebrity's partition becomes a read hot spot the moment they post",
+        "Writes become impossible because author_id is not unique",
+        "The follow graph can no longer be stored"
+      ],
+      "answer": [1],
+      "explanation": "Feed hydration reads by post ID across many authors, so author partitioning spreads one page over many partitions and concentrates a celebrity's reads on one. Partition by hashed post_id for hydration and keep an author-keyed projection for profiles. Non-unique partition keys are normal; the graph is a separate table.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C5-017",
+      "type": "single",
+      "tags": ["partitioning", "secondary-index"],
+      "difficulty": 2,
+      "prompt": "The follow graph is one table (follower_id, followee_id) partitioned by follower_id. The fan-out worker asks \"who follows author A?\" 3,500 times a second. What does that query cost, and what is the fix?",
+      "choices": [
+        "One partition read; no fix needed",
+        "A scatter-gather over every partition on each post; keep a second table partitioned by followee_id, kept in sync idempotently",
+        "A full table scan that can be fixed with a larger cache",
+        "It is impossible to answer without a graph database"
+      ],
+      "answer": [1],
+      "explanation": "The question is keyed by the non-partition column, so it fans out to every partition (A4 §9). Two tables, one per direction, make each question a single-partition read; the second write is rare (follows are hundreds per second) and applied idempotently. A cache doesn't fix the write-path scatter; a graph database is not required for two adjacency lists.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C5-018",
+      "type": "single",
+      "tags": ["design", "ids", "caching"],
+      "difficulty": 1,
+      "prompt": "Why does the design use time-sortable 64-bit post IDs (Snowflake-style) instead of random UUIDs?",
+      "choices": [
+        "They are easier to type in URLs",
+        "A timeline entry needs no stored timestamp, merges compare integers, and the cursor is one number",
+        "They make posts impossible to enumerate",
+        "They are required by the cache engine"
+      ],
+      "answer": [1],
+      "explanation": "Embedding the millisecond in the high bits makes IDs sort by creation time, so an 8-byte entry carries both identity and order; merges and cursors work on integers. Random UUIDs are 16 bytes with no order and would need a separate timestamp per entry. Time-sortable IDs are more enumerable, not less; no cache requires them.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C5-019",
+      "type": "single",
+      "tags": ["outbox", "messaging", "durability"],
+      "difficulty": 2,
+      "prompt": "The post service commits the post row, returns 201, and then publishes \"post created\" to the fan-out log. A deploy kills the process between the commit and the publish. What is the consequence, and the fix?",
+      "choices": [
+        "The post is lost entirely; fix by publishing before committing",
+        "The post exists but is never delivered to followers' timelines; fix with a transactional outbox row committed with the post and a relay that publishes at least once",
+        "Followers receive the post twice; fix with a dedupe table",
+        "Nothing; the log retries automatically"
+      ],
+      "answer": [1],
+      "explanation": "The row is durable (the author sees it on their profile) but no event was published, so fan-out never happens: a silently missing post in every follower's feed. Publishing first invents events for rolled-back writes. The outbox (A6 Unit 2 §1) makes the event part of the same transaction; the relay delivers at least once and idempotent timeline inserts absorb duplicates. The log can't retry an event it never received.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-both-paths-end-to-end-by-025"
+    },
+    {
+      "id": "C5-020",
+      "type": "single",
+      "tags": ["messaging", "ordering", "queues"],
+      "difficulty": 2,
+      "prompt": "Why is the post event stream a log partitioned by author_id rather than a plain work queue?",
+      "choices": [
+        "Queues cannot carry more than a few thousand messages per second",
+        "Per-author ordering of deliveries, replay of a range after a bug or cache rebuild, and fan-out to other consumers such as search from the same stream",
+        "Logs are always cheaper to operate than queues",
+        "A queue would require a database transaction per message"
+      ],
+      "answer": [1],
+      "explanation": "A log keeps an author's posts in order within a partition, retains events for replay (re-fan-out, rebuilding timelines), and lets several consumer groups read the same events. A queue would be fine if fan-out were the only consumer and order didn't matter. Queues handle far more than thousands per second; operating cost is not inherently lower for logs; neither needs a transaction per message.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-both-paths-end-to-end-by-025"
+    },
+    {
+      "id": "C5-021",
+      "type": "single",
+      "tags": ["fan-out", "design"],
+      "difficulty": 2,
+      "prompt": "Every fan-out worker is down for 10 minutes. Which statement is true for readers during the outage?",
+      "choices": [
+        "No posts can be created because the queue is unavailable",
+        "Authors see their own posts, celebrity posts still appear (merged on read), and ordinary authors' posts are delayed until workers return",
+        "All feeds are empty because timelines are rebuilt from the workers",
+        "Followers see posts normally because the API falls back to synchronous fan-out"
+      ],
+      "answer": [1],
+      "explanation": "Posts commit with their outbox row regardless of workers; profiles read the truth; celebrity posts never depended on fan-out; only pushed deliveries queue up (≈ 2 M posts, ≈ 400 M deliveries in 10 minutes at peak) and drain afterwards. Timelines already cached keep serving. There is no synchronous fallback: it would reintroduce the 50 M-write problem.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-both-paths-end-to-end-by-025"
+    },
+    {
+      "id": "C5-022",
+      "type": "multi",
+      "tags": ["design", "fan-out", "caching"],
+      "difficulty": 2,
+      "prompt": "Select ALL the components a feed read touches on the hit path in the module's design.",
+      "choices": [
+        "The reader's cached timeline (post IDs after the cursor)",
+        "The recent-posts lists of celebrities the reader follows",
+        "The post body cache, with one batched lookup for the page",
+        "The followers table of every author on the page",
+        "The fan-out log, to check for undelivered posts",
+        "A tombstone or deleted check at hydration"
+      ],
+      "answer": [0, 1, 2, 5],
+      "explanation": "Hit path: timeline → celebrity merge → batched hydration → filter deleted/blocked → cursor. The followers table is a write-path structure (fan-out), and the log is never read by the read path; consulting either per read would be thousands of extra lookups per second for no gain.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-both-paths-end-to-end-by-025"
+    },
+    {
+      "id": "C5-023",
+      "type": "single",
+      "tags": ["fan-out", "estimation", "design"],
+      "difficulty": 3,
+      "prompt": "Per follower, pushing an author's posts costs P × w per day (posts × write cost) and pulling costs O × r per day (feed opens × list read cost). The follower count cancels. So why are the highest-follower accounts pulled on read instead of pushed?",
+      "choices": [
+        "Because per-follower cost is higher for them",
+        "Because one post is a burst of tens of millions of deliveries that blocks a partition and consumes the fleet for seconds to minutes, which is a latency and fairness problem, not a daily-throughput problem",
+        "Because celebrities post more often than ordinary users",
+        "Because their followers read less often"
+      ],
+      "answer": [1],
+      "explanation": "The total daily work is the same either way per follower; what differs is the shape: push concentrates 50 M deliveries into one event at the head of one partition (≈ 70 s of the whole fleet), while pull spreads the same work across follower reads. Pull for everyone fails for the opposite reason: merge width per read grows with followees. Posting frequency and reading frequency are part of the cancelled terms, not the reason.",
+      "ref": "unit-2-deep-dives.md#5-fan-out-on-write-fan-out-on-read-and-the-hybrid"
+    },
+    {
+      "id": "C5-024",
+      "type": "single",
+      "tags": ["fan-out", "consistency", "pitfalls"],
+      "difficulty": 3,
+      "prompt": "The feed service decides at READ time whether to merge an author's recent posts by checking their current follower count against the celebrity threshold. Alice had 1 follower when she posted p1, gained a second (crossing a threshold of 2), posted p2, then lost one. What do her followers see?",
+      "choices": [
+        "p1 and p2 exactly once each",
+        "p1 twice while she is above the threshold, and p2 vanishes once she drops below it",
+        "Only p2, because p1 was never fanned out",
+        "Neither post until the follower count stabilises"
+      ],
+      "answer": [1],
+      "explanation": "p1 was fanned out into timelines; once Alice is a celebrity the reader also merges her recent list, which includes p1: duplicate. p2 was never fanned out; when she drops below the threshold the reader stops merging her list, so p2 disappears. Recording the mode per post at write time (and hysteresis on the flag) prevents both, which is what the lab's threshold-crossing test checks.",
+      "ref": "unit-2-deep-dives.md#5-fan-out-on-write-fan-out-on-read-and-the-hybrid"
+    },
+    {
+      "id": "C5-025",
+      "type": "multi",
+      "tags": ["fan-out", "capacity"],
+      "difficulty": 3,
+      "prompt": "Select ALL the budgets that legitimately set the celebrity threshold in the hybrid design.",
+      "choices": [
+        "The burst a single post may cause, as a fraction of the fan-out fleet's capacity",
+        "The number of pulled sources a single feed read may have to merge",
+        "The read rate a celebrity's recent-posts hot key must sustain, given its replication",
+        "The number of characters in a post",
+        "The database's maximum row size"
+      ],
+      "answer": [0, 1, 2],
+      "explanation": "The threshold must keep every post's burst within ≈ 1–2 s of fleet capacity, keep merge width per read small (most readers follow few celebrities), and keep the hot key's read rate within what its replicas serve. Post length and row size have nothing to do with fan-out.",
+      "ref": "unit-2-deep-dives.md#5-fan-out-on-write-fan-out-on-read-and-the-hybrid"
+    },
+    {
+      "id": "C5-026",
+      "type": "single",
+      "tags": ["fan-out", "backpressure", "fairness"],
+      "difficulty": 2,
+      "prompt": "Accounts with 100k–1M followers are pushed, and one of them posts at peak. Ordinary authors whose posts hash to the same log partition see their freshness SLO burn for a minute. What is the right fix?",
+      "choices": [
+        "Lower the celebrity threshold to 100k so these accounts are pulled",
+        "A separate lane (consumer group or log) for mid-tier authors with a rate cap, so their bursts never delay ordinary posts",
+        "Make the post API synchronous for mid-tier authors",
+        "Increase the partition count until each partition has one author"
+      ],
+      "answer": [1],
+      "explanation": "Lanes with rate caps isolate the mid-tier burst (A6 Unit 3 §3 applied to authors) while keeping their posts pushed. Lowering the threshold moves the cost to every reader's merge width and is a blunt instrument. Synchronous push makes the API latency proportional to followers. One author per partition is not a real option and still leaves a worker busy for the burst.",
+      "ref": "unit-2-deep-dives.md#5-fan-out-on-write-fan-out-on-read-and-the-hybrid"
+    },
+    {
+      "id": "C5-027",
+      "type": "single",
+      "tags": ["fan-out", "capacity", "caching"],
+      "difficulty": 2,
+      "prompt": "30% of followers have not opened the app in a month. What does \"fan out to active followers only\" buy, and what does it cost?",
+      "choices": [
+        "Nothing; every follower must be delivered to for correctness",
+        "≈ 30% fewer deliveries and less timeline RAM, at the cost of a rebuild from followees' recent posts when an inactive user returns",
+        "It halves read latency",
+        "It removes the need for a celebrity merge"
+      ],
+      "answer": [1],
+      "explanation": "Inactive users have no cached timeline (evicted), so delivering to them is wasted write capacity and RAM. Skipping them cuts deliveries roughly by the inactive fraction; the price is a coalesced, budgeted rebuild when they come back. It doesn't change read latency for active users or the celebrity path.",
+      "ref": "unit-2-deep-dives.md#5-fan-out-on-write-fan-out-on-read-and-the-hybrid"
+    },
+    {
+      "id": "C5-028",
+      "type": "single",
+      "tags": ["caching", "eviction"],
+      "difficulty": 2,
+      "prompt": "In the timeline tier, what is the difference between trimming and eviction?",
+      "choices": [
+        "They are the same operation under two names",
+        "Trimming keeps one user's list at ≤ 800 entries on every insert; eviction removes whole timelines of inactive users by TTL or LRU on the key",
+        "Trimming removes inactive users; eviction removes old entries across all users",
+        "Eviction only happens when the cache is restarted"
+      ],
+      "answer": [1],
+      "explanation": "Trimming is per user and bounds the window; eviction is per cluster and bounds memory by dropping timelines nobody reads. Evicting the oldest entries across users would empty active users' timelines while keeping dead ones; restarts are unrelated.",
+      "ref": "unit-2-deep-dives.md#6-the-timeline-cache-bounded-lists-misses-hot-keys"
+    },
+    {
+      "id": "C5-029",
+      "type": "multi",
+      "tags": ["caching", "stampede", "reliability"],
+      "difficulty": 3,
+      "prompt": "A timeline cache node is lost and 7.5 M users start missing. Select ALL the mechanisms that keep the posts store from being overwhelmed by rebuilds.",
+      "choices": [
+        "Replicas, so the lost node fails over instead of missing",
+        "Per-user coalescing: one rebuild in flight per timeline, other readers wait for or share its result",
+        "A rebuild concurrency budget; beyond it, serve a thin page (celebrity lists only) rather than queue against the store",
+        "Rebuilding from the in-memory author projection rather than from disk",
+        "Retrying each failed rebuild immediately in a tight loop",
+        "Increasing the posts store's connection pool so more rebuilds run in parallel"
+      ],
+      "answer": [0, 1, 2, 3],
+      "explanation": "Replicas remove the miss; coalescing bounds rebuilds to one per user; a budget with thin pages sheds the rest; sourcing from RAM keeps the storm off disk. Tight retries and bigger pools make the stampede worse: they add load to the bottleneck instead of limiting it (A7's metastable failure).",
+      "ref": "unit-2-deep-dives.md#6-the-timeline-cache-bounded-lists-misses-hot-keys"
+    },
+    {
+      "id": "C5-030",
+      "type": "single",
+      "tags": ["caching", "hot-key"],
+      "difficulty": 2,
+      "prompt": "Which keys in the feed design are hot, and how are they served?",
+      "choices": [
+        "Every user's timeline is hot; shard them more finely",
+        "A celebrity's recent-posts list and viral post bodies; replicate them to several nodes or a dedicated tier and cache them in-process on feed servers for a few seconds",
+        "The follow graph's partition for the most active reader",
+        "Nothing is hot because consistent hashing spreads all keys evenly"
+      ],
+      "answer": [1],
+      "explanation": "A timeline is read by exactly one user, so it is never hot. A celebrity's list is read by millions of followers within minutes of a post, and a viral body by everyone whose page includes it; both are small and are served by replication plus short-lived in-process copies (A3 §7, A4 §8). Consistent hashing spreads keys, not the reads of one key.",
+      "ref": "unit-2-deep-dives.md#6-the-timeline-cache-bounded-lists-misses-hot-keys"
+    },
+    {
+      "id": "C5-031",
+      "type": "single",
+      "tags": ["caching", "capacity", "cost"],
+      "difficulty": 2,
+      "prompt": "Product asks for 8,000-entry timelines instead of 800 so power users can scroll further. What is the senior answer?",
+      "choices": [
+        "Agree; memory is cheap",
+        "Refuse; the feed should never go past 800 posts",
+        "Quantify it (≈ 10× the RAM tier) and offer a cheaper path: page past the window by pulling from the posts store, rate-limited, since deep scrolls are rare; flip to a persistent timeline store if data shows most users scroll deep",
+        "Store the extra entries in the follow graph"
+      ],
+      "answer": [2],
+      "explanation": "The window is a memory decision: 10× the entries is 10× the tier (≈ 24 TB raw). Rare deep scrolls are better served by the pull path; if deep scrolling is common, the design flips to persistent timelines rather than a bigger cache. Flat refusal and \"memory is cheap\" both skip the arithmetic; the graph is unrelated.",
+      "ref": "unit-2-deep-dives.md#6-the-timeline-cache-bounded-lists-misses-hot-keys"
+    },
+    {
+      "id": "C5-032",
+      "type": "single",
+      "tags": ["caching", "operations", "deploys"],
+      "difficulty": 2,
+      "prompt": "You must roll out a new version of the timeline cache tier. Which procedure avoids a miss storm?",
+      "choices": [
+        "Restart all nodes at once during the nightly low; timelines are just a cache",
+        "One node at a time: promote its replica, drain, upgrade, re-sync from the new primary, swap back, with the rebuild budget armed",
+        "Flush all timelines first so the new version starts clean",
+        "Disable the feed API for the duration"
+      ],
+      "answer": [1],
+      "explanation": "Treat the tier like a database for deploy purposes: never take a hash range out of service without a warm copy. Restarting everything at once (or flushing) turns the whole user base into misses and a rebuild storm against the posts store; disabling the API is an outage.",
+      "ref": "unit-2-deep-dives.md#6-the-timeline-cache-bounded-lists-misses-hot-keys"
+    },
+    {
+      "id": "C5-033",
+      "type": "single",
+      "tags": ["consistency", "fan-out"],
+      "difficulty": 2,
+      "prompt": "An author posts and refreshes 200 ms later. Their feed is served from their timeline and their profile from a read replica 2 s behind. They don't see the post, and they post again. Which single change fixes the cause (not just the symptom)?",
+      "choices": [
+        "Make fan-out synchronous so the timeline is updated before the 201",
+        "Give the author read-your-own-writes: merge their own recent post IDs into their feed page and serve their profile from the primary (or a caught-up replica) for a short window; and require an idempotency key so a second tap can't create a second post",
+        "Increase the replica count",
+        "Return 202 instead of 201 so the client waits longer"
+      ],
+      "answer": [1],
+      "explanation": "The author is the one reader who notices lag; serve them from the truth (A4 §3's read-your-writes, scoped to the writer) and merge their own fresh IDs. The idempotency key stops the duplicate on retry. Synchronous fan-out reintroduces the celebrity problem; more replicas don't reduce lag for the author's own write; 202 changes nothing about what the next read returns.",
+      "ref": "unit-2-deep-dives.md#7-freshness-ordering-and-consistency-and-what-a-ranked-feed-changes"
+    },
+    {
+      "id": "C5-034",
+      "type": "single",
+      "tags": ["consistency", "idempotency", "ordering"],
+      "difficulty": 2,
+      "prompt": "Fan-out deliveries can be replayed after a consumer rebalance and can arrive out of order. What property of the timeline write makes both invisible to readers?",
+      "choices": [
+        "Appending to the list and deduplicating on the client",
+        "An idempotent insert into a structure sorted by post ID: an existing ID is a no-op and the position is by ID, not by arrival",
+        "Locking the timeline for the duration of the fan-out",
+        "Using a queue that guarantees exactly-once delivery"
+      ],
+      "answer": [1],
+      "explanation": "Set semantics absorb replays; sorted placement absorbs out-of-order arrival; committing the offset after the write makes at-least-once safe (A6 Unit 2 §2). Appending breaks order and duplicates; locks don't address replay; no broker gives an external effect exactly-once.",
+      "ref": "unit-2-deep-dives.md#7-freshness-ordering-and-consistency-and-what-a-ranked-feed-changes"
+    },
+    {
+      "id": "C5-035",
+      "type": "single",
+      "tags": ["consistency", "deletes"],
+      "difficulty": 2,
+      "prompt": "A user deletes a post that was fanned out to 10 M timelines. What is the cheapest mechanism that guarantees no reader ever sees it again, including after a timeline rebuild?",
+      "choices": [
+        "Scan all 10 M timelines and remove the ID before acknowledging the delete",
+        "Write a tombstone for the post ID (in the body cache and the store) before acknowledging, and drop tombstoned IDs at hydration; clean timelines lazily",
+        "Set the post's text to empty so it renders blank",
+        "Rebuild every follower's timeline from scratch"
+      ],
+      "answer": [1],
+      "explanation": "Hydration is the one chokepoint every read passes through, so a tombstone there is O(1) per delete and survives rebuilds that re-read a lagging projection. Scanning 10 M timelines buys nothing readers can see (reserve it for compliance). A blank post is still served; rebuilding every timeline is the stampede you spent §6 avoiding.",
+      "ref": "unit-2-deep-dives.md#7-freshness-ordering-and-consistency-and-what-a-ranked-feed-changes"
+    },
+    {
+      "id": "C5-036",
+      "type": "single",
+      "tags": ["consistency", "design"],
+      "difficulty": 2,
+      "prompt": "A reader unfollows an account. Which handling matches the module's design?",
+      "choices": [
+        "Nothing changes until the timeline expires, because unfollow only edits the graph",
+        "Eagerly remove that author's recent IDs from the one affected timeline, so the next read is clean; celebrity lists stop being merged because the followee set changed",
+        "Rebuild the reader's whole timeline synchronously",
+        "Delete the author's posts"
+      ],
+      "answer": [1],
+      "explanation": "Unfollow affects exactly one timeline, so eager removal is cheap (the author's recent IDs come from the author projection; the lab filters by the stored author). The merged celebrity lists follow the followee set automatically. Leaving posts until expiry is the harassment case in the failure story; a full rebuild is wasteful; deleting the author's posts is absurd.",
+      "ref": "unit-2-deep-dives.md#7-freshness-ordering-and-consistency-and-what-a-ranked-feed-changes"
+    },
+    {
+      "id": "C5-037",
+      "type": "single",
+      "tags": ["consistency", "replication"],
+      "difficulty": 3,
+      "prompt": "After a timeline-cache failover, a reader's second refresh is served by a replica that has not yet received the inserts the first refresh showed, so a post disappears and later reappears. Which property was violated and what restores it?",
+      "choices": [
+        "Durability; add a write-ahead log to the cache",
+        "Monotonic reads; pin a session's reads to one replica, or carry the newest ID the client has seen and have the server skip or wait on replicas behind it",
+        "Linearizability; move timelines to a consensus-replicated store",
+        "Read-your-writes; serve the author from the primary"
+      ],
+      "answer": [1],
+      "explanation": "The feed went backwards between two reads by the same reader: a monotonic-reads anomaly (A4 §3). Sticky routing or a version-carrying read fixes it cheaply. Durability isn't the issue (the data exists), linearizability is far more than a feed needs, and read-your-writes concerns the author, not a follower's refresh.",
+      "ref": "unit-2-deep-dives.md#7-freshness-ordering-and-consistency-and-what-a-ranked-feed-changes"
+    },
+    {
+      "id": "C5-038",
+      "type": "multi",
+      "tags": ["consistency", "design"],
+      "difficulty": 2,
+      "prompt": "Select ALL the consistency promises the module's feed design actually makes.",
+      "choices": [
+        "Followers see a post within a stated lag target (eventual, with an SLO)",
+        "The author sees their own post immediately",
+        "A post appears at most once per page and per walk",
+        "Every follower sees every post at the same instant",
+        "A deleted post is never served after the delete is acknowledged",
+        "The feed is linearizable across all users"
+      ],
+      "answer": [0, 1, 2, 4],
+      "explanation": "Eventual-with-SLO for followers, read-your-writes for the author, no duplicates, and deletes enforced at hydration are the promises; simultaneous visibility for all followers and global linearizability are neither achievable at this fan-out nor what the product needs.",
+      "ref": "unit-2-deep-dives.md#7-freshness-ordering-and-consistency-and-what-a-ranked-feed-changes"
+    },
+    {
+      "id": "C5-039",
+      "type": "single",
+      "tags": ["ranking", "design"],
+      "difficulty": 2,
+      "prompt": "The product switches from a chronological feed to a ranked one. Which statement about the architecture is correct?",
+      "choices": [
+        "Nothing changes; ranking is a sort on the client",
+        "The chronological merge becomes candidate generation, followed by feature hydration, model scoring and re-ranking; the read path gains a feature store and model serving, latency roughly doubles, and freshness and consistency promises weaken",
+        "Fan-out on write is no longer needed because the model fetches posts directly",
+        "The timeline cache must now store full post bodies for the model"
+      ],
+      "answer": [1],
+      "explanation": "Ranking adds stages and infrastructure on the read path and makes a page seconds-to-minutes old by design; pull becomes more natural because candidates are scored anyway. Fan-out still produces candidates cheaply; models read features, not bodies from timelines; client-side sorting of 20 posts is not ranking.",
+      "ref": "unit-2-deep-dives.md#7-freshness-ordering-and-consistency-and-what-a-ranked-feed-changes"
+    },
+    {
+      "id": "C5-040",
+      "type": "single",
+      "tags": ["pitfalls", "design"],
+      "difficulty": 2,
+      "prompt": "A candidate says: \"We'll use Kafka for fan-out.\" The interviewer asks \"for what rate, and partitioned how?\" Which answer meets the senior bar?",
+      "choices": [
+        "\"Kafka scales horizontally, so rate doesn't matter\"",
+        "\"≈ 700k deliveries per second at peak, from ≈ 3.5k posts/s × 200 followers; partitioned by author ID so an author's posts stay ordered and a range can be replayed; workers commit offsets after idempotent timeline writes\"",
+        "\"One partition per user so every timeline is independent\"",
+        "\"We'll measure it in production\""
+      ],
+      "answer": [1],
+      "explanation": "A queue is a buffer, not a design; the senior answer names the rate, the partition key and why, and the commit discipline. Per-user partitions (300 M of them) are not a real option. Deferring to production measurement is not an answer in an interview.",
+      "ref": "unit-2-deep-dives.md#common-mistakes"
+    },
+    {
+      "id": "C5-041",
+      "type": "single",
+      "tags": ["pitfalls", "fan-out", "latency"],
+      "difficulty": 1,
+      "prompt": "Why must fan-out never run inside the request that creates the post?",
+      "choices": [
+        "Because HTTP requests cannot write to caches",
+        "Because the request's latency becomes proportional to the follower count, a celebrity post never returns, and a crash mid-loop loses deliveries with no record",
+        "Because it would make the post ID unpredictable",
+        "Because the database would be locked for the duration"
+      ],
+      "answer": [1],
+      "explanation": "Fan-out is a background job driven from a durable record (outbox → log → workers): bounded request latency, retries, replay. Requests can write to caches; IDs are assigned before fan-out; the database isn't involved in timeline writes.",
+      "ref": "unit-2-deep-dives.md#common-mistakes"
+    },
+    {
+      "id": "C5-042",
+      "type": "single",
+      "tags": ["banking", "fan-out", "design"],
+      "difficulty": 3,
+      "prompt": "You are designing a banking app's activity feed: each member's own transactions (fan-out factor 1) plus credit-union announcements that reach up to 2 M members. Transferring the news-feed decisions, which split is right?",
+      "choices": [
+        "Push everything, including announcements, into 2 M member timelines",
+        "Pull everything at read time from the transactions table and the announcements table",
+        "Push per-member events (one delivery each, trivially cheap) and merge announcements at read from small per-audience lists, since a 2 M-member announcement is a burst and readers must read the announcement list anyway",
+        "Push announcements and pull transactions"
+      ],
+      "answer": [2],
+      "explanation": "The shape is the hybrid with the roles reassigned: per-member events have no fan-out cost, so push; announcements are the celebrity case (one event, millions of recipients, withdrawable within a minute), so pull from a per-audience list and tombstone on withdrawal. Pushing announcements creates 2 M-write bursts on payday mornings; pulling transactions makes every read a multi-source query for no reason; the last option inverts both.",
+      "ref": "design-exercise.md"
+    },
+    {
+      "id": "C5-043",
+      "type": "single",
+      "tags": ["operations", "slo", "fan-out"],
+      "difficulty": 2,
+      "prompt": "Which metric tells you first that the feed's freshness promise is breaking?",
+      "choices": [
+        "CPU utilisation of the API servers",
+        "Fan-out lag: the age of the oldest undelivered post per partition (or lane), compared with the lag SLO",
+        "The number of posts created per second",
+        "The size of the posts table"
+      ],
+      "answer": [1],
+      "explanation": "Freshness is delivery lag; the age of the oldest undelivered post is the direct measure and the alertable one (A6 Unit 3 §3's \"age, not depth\"). CPU, post rate and table size are inputs or symptoms, not the promise.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-both-paths-end-to-end-by-025"
+    },
+    {
+      "id": "C5-044",
+      "type": "single",
+      "tags": ["cost", "caching", "fan-out"],
+      "difficulty": 2,
+      "prompt": "Which line dominates the cost of the module's feed design, and what lever reduces it most directly?",
+      "choices": [
+        "The posts store's disk; compress post text",
+        "The RAM of the timeline tier; bound entries, store 8-byte IDs, evict inactive users, and fan out only to active followers",
+        "Network egress; add a CDN in front of the feed",
+        "The fan-out log's retention; shorten it to one hour"
+      ],
+      "answer": [1],
+      "explanation": "Timelines in RAM (≈ 2.4 TB raw, ≈ 10–14 TB provisioned) are the bill; every lever that shrinks entries, windows or the number of cached users cuts it. Disk for posts is cheap by comparison; a personalised feed isn't CDN-cacheable; log retention is small next to the RAM tier.",
+      "ref": "unit-2-deep-dives.md#6-the-timeline-cache-bounded-lists-misses-hot-keys"
+    }
+  ]
+}

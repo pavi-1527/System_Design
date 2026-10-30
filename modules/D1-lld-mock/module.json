@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "id": "D1",
+  "slug": "lld-mock",
+  "title": "Mock: 45-minute LLD/OOD",
+  "track": "D",
+  "status": "written",
+  "core": true,
+  "summary": "Timed 45-minute LLD/OOD mocks with the tutor as interviewer: scope, domain model, Go interfaces, a coded core path, a requirement change at minute 30, and probes, scored on a seven-dimension senior rubric; unlocks after B1 and B2.",
+  "hours": {"core": 6, "stretch": 0, "total": 6},
+  "prerequisites": ["B1", "B2"],
+  "gate": {"requires": ["mocks"], "mocks_required": 3, "mock_formats": ["lld-45"]},
+  "paths": {
+    "dir": "modules/D1-lld-mock",
+    "readme": "modules/D1-lld-mock/README.md"
+  },
+  "units": [
+    {"n": 1, "title": "The 45-minute LLD round under the clock", "file": "modules/D1-lld-mock/unit-1-lld-round.md", "hours": {"core": 6, "stretch": 0}, "labs": []}
+  ],
+  "labs": [],
+  "outcomes": [
+    {"text": "Run a 45-minute LLD round to the clock: scope by 0:05, domain model with state owners by 0:12, the API as Go signatures by 0:15, a coded and tested core path by 0:30, and a clean stop at 0:45.", "core": true},
+    {"text": "Turn an underspecified prompt into 3–5 requirements, an explicit out-of-scope list and the named axes of change that justify each interface.", "core": true},
+    {"text": "Absorb a requirement change released at minute 30 as an addition behind an existing seam, or name the smallest edit when it lands on an axis you did not open.", "core": true},
+    {"text": "State who owns every piece of shared mutable state and which lock or goroutine guards it, and answer concurrency probes with a specific mechanism and its cost.", "core": true},
+    {"text": "Answer LLD probes (scale-up, failure, concurrency, extensibility, testing, over-engineering, security, why not X) with claim → why here → cost → when it flips.", "core": true},
+    {"text": "Score your own mock on the seven-dimension rubric with one line of evidence per dimension, within one level of the tutor's score.", "core": true}
+  ]
+}

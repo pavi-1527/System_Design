@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "C2",
+  "slug": "rate-limiter-service",
+  "title": "Case study: distributed rate limiter",
+  "track": "C",
+  "status": "written",
+  "core": true,
+  "summary": "Global limits across many gateways run through the 45-minute framework: one atomic decision per request against a shared store, the hot key and the price of accuracy, and a limiter that degrades instead of becoming the outage.",
+  "hours": {"core": 5, "stretch": 1, "total": 6},
+  "prerequisites": ["A3", "A7"],
+  "gate": {"requires": ["quiz", "lab", "design", "teachback"]},
+  "paths": {
+    "dir": "modules/C2-rate-limiter-service",
+    "readme": "modules/C2-rate-limiter-service/README.md",
+    "quiz": "modules/C2-rate-limiter-service/quiz.json",
+    "design_exercise": "modules/C2-rate-limiter-service/design-exercise.md",
+    "teachback": "modules/C2-rate-limiter-service/teachback.md",
+    "lab": "labs/c2",
+    "solution": "solutions/c2"
+  },
+  "units": [
+    {"n": 1, "title": "Guided design: requirements, estimation, API and model, HLD, three deep dives", "file": "modules/C2-rate-limiter-service/unit-1-rate-limiter-service.md", "hours": {"core": 5, "stretch": 1}, "labs": ["distlimit"]}
+  ],
+  "labs": [
+    {"package": "distlimit", "title": "Shared-store rate limiting: GCRA over compare-and-swap with refunds, a fail-policy guard with a timeout and local fallback, batched token leases with a deny cache", "unit": 1, "core": true}
+  ],
+  "outcomes": [
+    {"text": "Scope a rate-limiter prompt in ≤ 6 minutes: what each limit is for (protective, contractual, security), what is limited and how many checks per request, rate vs quota, the fail mode per limit, global vs per region, and the client contract.", "core": true},
+    {"text": "Estimate shared decisions per second, store shards from ops/s, state memory per algorithm, the hot key's share of one shard and per-gateway rate, and the round-trip latency against the budget, and state which decision each number drives.", "core": true},
+    {"text": "Design the decision call (all descriptors, a cost, remaining/retry/reset, the violated rule, its version and the decision source), the client contract (429 vs 503, Retry-After rounded up, RateLimit headers), the versioned rules API with shadow mode and expiring overrides, and the data model (rules apart from counters; one TAT per key with TTL = time to full; co-located account limits).", "core": true},
+    {"text": "Draw the HLD with the data path and the rule-distribution path, rates on the arrows and a justified placement (gateway filter vs library vs sidecar vs decision service), and say what each box does when it fails.", "core": true},
+    {"text": "Choose the algorithm and the atomic primitive for shared state (GCRA in a script or with compare-and-swap; fixed windows keyed by period for quotas; a log only for small exact limits), and explain what GET/SET, INCR-then-EXPIRE and client clocks each break.", "core": true},
+    {"text": "Implement GCRA over a compare-and-swap store with bounded retries and refunds, a guard with a timeout and per-rule fail modes including a scaled local fallback, and a lease client with a deny cache, lease expiry and refunds on drain, and show with break-its what a non-atomic store, clock skew, the batch size and each fail mode do (labs/c2/distlimit).", "core": true},
+    {"text": "Handle the hot key: lease sizing from per-gateway rate, lease TTL and burst; the N × batch overshoot bound and the synchronized burst that reaches it; stranded tokens; the deny cache; local pre-filters, routing by key and key splitting as alternatives.", "core": true},
+    {"text": "Design the limiter's failure behaviour and operations: timeouts and breakers, fail open/closed/local per rule, asynchronous failover as soft-state loss, rule rollout as a deploy (validate, shadow, canary, versioned rollback), the signals to watch, and what changes at 10× and 100×.", "core": true},
+    {"text": "Compare multi-region options (home region, static split, rebalanced shares, replicated counters) with their latency and overshoot, and estimate the limiter's monthly cost including cross-AZ traffic.", "core": false}
+  ]
+}

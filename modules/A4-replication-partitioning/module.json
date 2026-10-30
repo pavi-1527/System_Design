@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "id": "A4",
+  "slug": "replication-partitioning",
+  "title": "Replication, partitioning, hot keys, consistent hashing",
+  "track": "A",
+  "status": "written",
+  "core": true,
+  "summary": "Scaling past one box: leader/follower, multi-leader and leaderless replication, sync vs async and failover, replication lag anomalies and fixes, partitioning schemes, consistent hashing, rebalancing, hot keys, secondary indexes across partitions, and sizing a sharded replicated deployment.",
+  "hours": {
+    "core": 15,
+    "stretch": 3,
+    "total": 18
+  },
+  "prerequisites": [
+    "A2"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/A4-replication-partitioning",
+    "readme": "modules/A4-replication-partitioning/README.md",
+    "quiz": "modules/A4-replication-partitioning/quiz.json",
+    "design_exercise": "modules/A4-replication-partitioning/design-exercise.md",
+    "teachback": "modules/A4-replication-partitioning/teachback.md",
+    "lab": "labs/a4",
+    "solution": "solutions/a4"
+  },
+  "labs": [
+    {
+      "package": "ring",
+      "title": "Consistent-hash ring with virtual nodes and rebalancing stats",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "replkv",
+      "title": "Replicated KV with leader/follower and a lag simulator",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "hotkey",
+      "title": "Hot-key detection and key splitting",
+      "unit": 3,
+      "core": false
+    }
+  ],
+  "units": [
+    {
+      "n": 1,
+      "title": "Replication",
+      "file": "modules/A4-replication-partitioning/unit-1-replication.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "replkv"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Partitioning and consistent hashing",
+      "file": "modules/A4-replication-partitioning/unit-2-partitioning.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "ring"
+      ]
+    },
+    {
+      "n": 3,
+      "title": "Hot keys, secondary indexes and putting it together",
+      "file": "modules/A4-replication-partitioning/unit-3-hot-keys-indexes-sizing.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "hotkey"
+      ]
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Explain leader/follower log shipping (log positions, in-order apply, bootstrapping) and choose between physical, logical and statement-based replication",
+      "core": true
+    },
+    {
+      "text": "Choose between asynchronous, semi-synchronous and synchronous replication given RPO, latency and availability, compute async RPO from lag and write rate, and describe failover, lost writes, split brain and fencing",
+      "core": true
+    },
+    {
+      "text": "Implement a replicated KV store with in-order followers, synchronous waiting and failover that promotes the most up-to-date follower and reports lost writes (labs/a4/replkv)",
+      "core": true
+    },
+    {
+      "text": "Diagnose read-your-writes, monotonic-reads and consistent-prefix anomalies from replica lag and implement and defend the fixes: leader windows, LSN tokens, floors, sticky sessions (labs/a4/replkv)",
+      "core": true
+    },
+    {
+      "text": "Explain multi-leader and leaderless replication, why last-write-wins loses data, how CRDT merges and home-region routing avoid conflicts, and why cross-record invariants need coordination",
+      "core": true
+    },
+    {
+      "text": "Choose a partitioning scheme (range, hash, directory, composite) from the access pattern and quantify the resharding cost of mod N versus consistent hashing",
+      "core": true
+    },
+    {
+      "text": "Implement a consistent-hash ring with virtual nodes, weights, N-replica lookup on distinct nodes, movement and balance statistics, bounded loads and rendezvous/jump-hash alternatives (labs/a4/ring)",
+      "core": true
+    },
+    {
+      "text": "Plan and operate rebalancing: fixed partitions vs dynamic splitting vs tokens, live migration with a short cutover, routing with epochs and redirects, and skew monitoring",
+      "core": true
+    },
+    {
+      "text": "Diagnose hot keys and celebrity problems, choose among caching, key splitting, write coalescing and data-model changes, and detect hot keys with heavy-hitter summaries",
+      "core": true
+    },
+    {
+      "text": "Choose between local and global secondary indexes, compute scatter-gather tail latency (1 - 0.99^N), and outline cross-partition query and transaction options",
+      "core": true
+    },
+    {
+      "text": "Size a sharded, replicated deployment from estimates (partitions, replication factor, failure domains, rebalancing headroom) and defend it under an AZ loss at peak",
+      "core": true
+    },
+    {
+      "text": "Implement a Space-Saving / Count-Min hot-key detector and a key-splitting router (labs/a4/hotkey)",
+      "core": false
+    },
+    {
+      "text": "Demonstrate last-write-wins data loss versus CRDT merging and explain the leaderless mechanisms: hinted handoff, read repair, anti-entropy",
+      "core": false
+    }
+  ]
+}

@@ -1,0 +1,1358 @@
+{
+  "module": "B1",
+  "title": "Pragmatic OOD in Go",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "B1-001",
+      "type": "single",
+      "tags": [
+        "ood",
+        "refactoring",
+        "design"
+      ],
+      "difficulty": 1,
+      "prompt": "Which description best fits a 'god object' in the sense of this module?",
+      "choices": [
+        "Any type that has more than three methods",
+        "Any struct with more than twenty fields",
+        "A type with many unrelated reasons to change that reaches for ambient state and cannot be tested in isolation",
+        "A type that implements more than one interface"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The smell is about responsibilities and coupling: many unrelated reasons to change, reliance on globals, the clock and the network, and methods that cannot be understood or tested without the rest. Field count is not the test (http.Server and tls.Config are large configuration records and are fine), method count alone is not it either, and implementing several interfaces is normal and often a sign of small, well-factored behaviour.",
+      "ref": "unit-1-shaping-types.md#1-the-god-object-and-why-it-hurts"
+    },
+    {
+      "id": "B1-002",
+      "type": "single",
+      "tags": [
+        "ood",
+        "refactoring",
+        "testing"
+      ],
+      "difficulty": 2,
+      "prompt": "You inherit a 1,000-line OrderManager with 12 tests that assert on log output, and a release is due in two days. You may not rewrite it. What do you do first?",
+      "choices": [
+        "Put an interface in front of the struct and generate a mock for every method",
+        "Write a characterisation test that drives the outside of the code with realistic inputs and records what it does today, then cut one seam at a time",
+        "Split the file into five files by method name so each file is shorter",
+        "Rewrite it from scratch in a new package behind a feature flag and switch over at the end"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A characterisation (parity) test is what makes small refactoring steps safe: it detects any change in prices, charges and stock movements, bugs included. A rewrite on a money path rediscovers every edge case in production. Splitting the file moves lines but keeps every dependency, so you now have several god objects in one package. An interface over all 41 methods plus generated mocks freezes the bad boundary and adds generated code that asserts implementation details.",
+      "ref": "unit-1-shaping-types.md#1-the-god-object-and-why-it-hurts"
+    },
+    {
+      "id": "B1-003",
+      "type": "single",
+      "tags": [
+        "ood",
+        "refactoring",
+        "testing"
+      ],
+      "difficulty": 2,
+      "prompt": "A team replaces integer rounding in pricing with floating point while refactoring:\n\n  // before: Money((int64(subtotal)*bps + 5000) / 10000)\n  // after:  Money(float64(subtotal) * float64(bps) / 10000)\n\nA parity test against the old code fails for 3 of 12 inputs,\neach by exactly one cent. What is the most likely cause?",
+      "choices": [
+        "A data race between the old and new code paths",
+        "Map iteration order changed the order in which discounts were applied",
+        "The float conversion truncates toward zero where the old code rounded half up (for example 1,234.5 becomes 1,234 instead of 1,235)",
+        "The tax table was copied incorrectly in the new constructor"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Converting a float to an integer truncates toward zero, while the original formula adds half a unit before integer division, which rounds half up. The cases that fail are exactly those whose exact discount has a fractional part of one half or more. Nothing here is concurrent, so a race is not the cause; discounts are computed from a single formula, not a map iteration; and a wrong tax table would break many more cases and not by a uniform one cent.",
+      "ref": "unit-1-shaping-types.md#1-the-god-object-and-why-it-hurts"
+    },
+    {
+      "id": "B1-004",
+      "type": "multi",
+      "tags": [
+        "ood",
+        "refactoring",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL that are legitimate seams to cut when breaking up a god object that places orders:",
+      "choices": [
+        "The call to time.Now() used for timestamps and cut-offs",
+        "A package-level *sql.DB used for inventory",
+        "The HTTP call to the payment vendor",
+        "A pure function that computes a discount from a subtotal and a coupon code"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Seams belong where the code touches the outside world or ambient state: the clock, the network and the global database handle. Each becomes a small interface (or function value) passed in through the constructor. The discount computation is pure integer arithmetic with one implementation and no side effects, so it needs no interface or fake; it becomes a plain function tested with a table.",
+      "ref": "unit-1-shaping-types.md#1-the-god-object-and-why-it-hurts"
+    },
+    {
+      "id": "B1-005",
+      "type": "single",
+      "tags": [
+        "ood",
+        "refactoring",
+        "design"
+      ],
+      "difficulty": 3,
+      "prompt": "In a refactoring you fix three real bugs in the old code (stock leaked on a declined payment, no rollback on partial reservation, notification errors swallowed) while also moving to the new design. A reviewer objects. What is the strongest objection?",
+      "choices": [
+        "The new design cannot express the corrected behaviour",
+        "Bug fixes should never be made during any refactoring project",
+        "Fixing behaviour in the same step makes it impossible to tell whether the refactoring preserved behaviour; pin parity first, then change behaviour in separate, separately tested commits",
+        "The bugs should be left in place because customers may depend on them"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Mixing the two destroys the value of the parity test: when it fails you cannot tell a refactoring mistake from an intended change. The sound order is parity first, then deliberate behaviour changes with their own tests, as the lab does. It is not true that bugs must never be fixed (they are fixed deliberately and visibly), it is rarely right to preserve a stock leak on purpose, and the new design expresses the corrections easily.",
+      "ref": "unit-1-shaping-types.md#1-the-god-object-and-why-it-hurts"
+    },
+    {
+      "id": "B1-006",
+      "type": "single",
+      "tags": [
+        "go",
+        "embedding",
+        "ood"
+      ],
+      "difficulty": 2,
+      "prompt": "What does this program print?\n\ntype Base struct{}\nfunc (Base) Name() string       { return \"base\" }\nfunc (b Base) Describe() string { return \"I am \" + b.Name() }\ntype Premium struct{ Base }\nfunc (Premium) Name() string { return \"premium\" }\n\nfmt.Println(Premium{}.Describe())",
+      "choices": [
+        "It does not compile because Name is declared twice",
+        "I am ",
+        "I am base",
+        "I am premium"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A promoted method runs with the embedded value as its receiver. Inside Describe, b is a Base, so b.Name() is Base.Name: Go has no virtual dispatch through embedding. 'I am premium' is the Java/C++ expectation and is wrong. The string never loses its Name part. Declaring Name on Premium is legal: it shadows the promoted method at a shallower depth.",
+      "ref": "unit-1-shaping-types.md#2-gos-object-model-structs-methods-and-embedding"
+    },
+    {
+      "id": "B1-007",
+      "type": "single",
+      "tags": [
+        "go",
+        "embedding",
+        "interfaces"
+      ],
+      "difficulty": 2,
+      "prompt": "Does this compile, and what happens at run time?\n\ntype Store interface{ Get(string) string; Put(string, string) }\ntype audit struct {\n\tStore\n\tputs []string\n}\nfunc (a *audit) Put(k, v string) { a.puts = append(a.puts, k); a.Store.Put(k, v) }\n\nvar a audit\na.Put(\"x\", \"1\")",
+      "choices": [
+        "It compiles and allocates a default Store on first use",
+        "It compiles and silently does nothing, because a nil Store ignores calls",
+        "It fails to compile because audit does not implement Get",
+        "It compiles and panics with a nil pointer dereference, because the embedded Store is a nil interface"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "audit gets Get by promotion and overrides Put, so it satisfies Store and compiles. The embedded interface field is nil in the zero value, and calling a method on a nil interface panics at run time. There is no 'ignore calls' behaviour for nil interfaces, promotion does satisfy Get so there is no compile error, and Go never allocates defaults for you. Build such wrappers only through a constructor, or make the zero value safe.",
+      "ref": "unit-1-shaping-types.md#2-gos-object-model-structs-methods-and-embedding"
+    },
+    {
+      "id": "B1-008",
+      "type": "multi",
+      "tags": [
+        "go",
+        "embedding",
+        "ood"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL statements about struct embedding that are true:",
+      "choices": [
+        "A promoted method still runs with the embedded value as its receiver",
+        "Embedding sync.Mutex in an exported struct makes Lock and Unlock part of that type's exported API",
+        "If two embedded types declare the same method name at the same depth, the declaration itself is rejected by the compiler",
+        "Embedding an interface in a struct lets you override one method and delegate the rest"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "Promotion is syntax only, so the receiver is the embedded value; embedding a mutex exports Lock/Unlock; and embedding an interface is the standard decorator technique (sort.Reverse does it). Two embedded types with the same method name at the same depth are not rejected where they are declared: the name is ambiguous and the method drops out of the method set, and the error appears only where it is used.",
+      "ref": "unit-1-shaping-types.md#2-gos-object-model-structs-methods-and-embedding"
+    },
+    {
+      "id": "B1-009",
+      "type": "single",
+      "tags": [
+        "go",
+        "embedding",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "An adapter struct embeds *http.Client 'to avoid writing forwarding methods'. What is the main design risk?",
+      "choices": [
+        "The adapter automatically implements http.Handler",
+        "Every exported method of http.Client becomes part of the adapter's API, so callers can bypass the adapter's own logic such as its circuit breaker",
+        "The adapter can no longer be used from more than one goroutine",
+        "Embedded pointers are copied on every method call, which is slow"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Promotion widens the adapter's public surface to the whole inner type, and future methods of the inner type join it. Callers then use adapter.Get(url) and skip the logic in adapter.Fetch. Concurrency is unaffected (http.Client is safe for concurrent use), embedding a pointer does not copy it per call, and http.Client has no ServeHTTP method.",
+      "ref": "unit-1-shaping-types.md#2-gos-object-model-structs-methods-and-embedding"
+    },
+    {
+      "id": "B1-010",
+      "type": "single",
+      "tags": [
+        "go",
+        "interfaces",
+        "design"
+      ],
+      "difficulty": 1,
+      "prompt": "The checkout package needs to charge cards. In idiomatic Go, where should the Payer interface be declared?",
+      "choices": [
+        "In a shared 'interfaces' package that all packages import",
+        "In the vendor adapter package, next to the implementation, so every consumer can reuse it",
+        "In the checkout package, because that is the consumer and it knows exactly which methods it calls",
+        "In main, so that no package depends on any interface"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Go interfaces are satisfied implicitly, so the consumer can declare the smallest interface it needs without the producer knowing, and the consumer then does not import the producer. Declaring it beside the implementation couples every consumer to the full method set and the vendor SDK. A shared interfaces package becomes a junk drawer that everything imports. main wires values together but does not own the contract the checkout package depends on.",
+      "ref": "unit-1-shaping-types.md#3-interfaces-defined-by-the-consumer"
+    },
+    {
+      "id": "B1-011",
+      "type": "single",
+      "tags": [
+        "go",
+        "interfaces",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "package gateway defines a 14-method Gateway interface beside its only implementation, and gateway.New returns Gateway. package checkout imports gateway and calls exactly two of the methods. Adding a 15th method broke seven hand-written fakes in five packages. What is the best fix?",
+      "choices": [
+        "Split Gateway into 14 one-method interfaces in the gateway package",
+        "Generate mocks for Gateway so nobody writes fakes by hand",
+        "checkout declares a two-method interface for what it calls; gateway.New returns the concrete *Client; main passes the client in",
+        "Make Gateway an empty interface so any type satisfies it"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Moving the interface to the consumer and shrinking it to the methods actually used removes the import of the producer and means new vendor methods touch nobody who does not call them. Fourteen one-method interfaces in the producer package keep the coupling and give consumers nothing to choose from. Generated mocks hide the cost but not the coupling, and they break on refactors. An empty interface says nothing and loses type safety.",
+      "ref": "unit-1-shaping-types.md#3-interfaces-defined-by-the-consumer"
+    },
+    {
+      "id": "B1-012",
+      "type": "multi",
+      "tags": [
+        "go",
+        "interfaces",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL good reasons to introduce an interface:",
+      "choices": [
+        "We might swap the implementation some day",
+        "A test must run without a network or database and no cheaper seam, such as httptest, is available",
+        "The function is pure arithmetic and has exactly one implementation",
+        "A second implementation exists today (for example two payment vendors)"
+      ],
+      "answer": [
+        1,
+        3
+      ],
+      "explanation": "An interface pays for itself when something actually varies or when a test genuinely needs the seam. A pure function with one implementation should stay a function. 'We might swap it someday' is speculation: in Go the interface can be added at the consumer later at near-zero cost, because satisfaction is implicit.",
+      "ref": "unit-1-shaping-types.md#3-interfaces-defined-by-the-consumer"
+    },
+    {
+      "id": "B1-013",
+      "type": "single",
+      "tags": [
+        "go",
+        "interfaces",
+        "embedding"
+      ],
+      "difficulty": 2,
+      "prompt": "Which labelled line does NOT compile?\n\ntype Counter struct{ n int }\nfunc (c *Counter) Inc() { c.n++ }\ntype Incer interface{ Inc() }\n\nvar a Incer = Counter{}   // A\nc := Counter{}\nc.Inc()                   // B\nvar b Incer = &c          // C",
+      "choices": [
+        "All three compile",
+        "A: Counter does not implement Incer (method Inc has pointer receiver)",
+        "B: c.Inc() cannot take the address of c automatically",
+        "C: &c is not assignable to Incer"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The method set of Counter does not include pointer-receiver methods, so a Counter value does not satisfy Incer; the method set of *Counter does. B compiles because c is an addressable variable, so c.Inc() means (&c).Inc(). C compiles because &c is a *Counter. The automatic address-taking rule applies to method calls on addressable values, never to interface assignment.",
+      "ref": "unit-1-shaping-types.md#3-interfaces-defined-by-the-consumer"
+    },
+    {
+      "id": "B1-014",
+      "type": "single",
+      "tags": [
+        "go",
+        "interfaces",
+        "design"
+      ],
+      "difficulty": 1,
+      "prompt": "A function computes a checksum of data that may come from files, HTTP bodies and in-memory strings in tests. Which parameter type best follows 'accept interfaces'?",
+      "choices": [
+        "interface{}",
+        "*os.File",
+        "io.Reader",
+        "A concrete *bytes.Buffer"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "io.Reader asks for the least possible: one method, satisfied by files, sockets, bodies and strings.NewReader, and it streams instead of loading everything. *os.File would force tests to create files; interface{} accepts anything and so says nothing; *bytes.Buffer forces every caller to copy data into a buffer first.",
+      "ref": "unit-1-shaping-types.md#3-interfaces-defined-by-the-consumer"
+    },
+    {
+      "id": "B1-015",
+      "type": "single",
+      "tags": [
+        "go",
+        "constructors",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Tenant configuration is a struct built with literals at 14 call sites; three forget Timeout, which is passed to http.Client. During a vendor hang those paths hold connections for minutes. What is the best structural fix?",
+      "choices": [
+        "Make the config struct a global variable so it is set once",
+        "Build the client through a constructor that validates the configuration (or applies a documented default) and returns an error for an invalid one; keep fields unexported",
+        "Recover from the panic that the missing timeout causes",
+        "Add a comment above the struct saying Timeout is required"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A zero Timeout in http.Client silently means no timeout, so nothing panics and there is nothing to recover. The invariant must be enforced where values are created: one door (the constructor) that validates or defaults, and no side door (unexported fields). A comment is not enforced by the compiler or the tests. A global config makes every test and tenant share state.",
+      "ref": "unit-1-shaping-types.md#4-constructors-invariants-and-zero-values"
+    },
+    {
+      "id": "B1-016",
+      "type": "multi",
+      "tags": [
+        "go",
+        "constructors",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL of these zero values that can be used immediately without panicking:",
+      "choices": [
+        "var mu sync.Mutex; mu.Lock(); mu.Unlock()",
+        "var b bytes.Buffer; b.WriteString(\"hi\")",
+        "var s []int; s = append(s, 1)",
+        "var m map[string]int; m[\"a\"]++",
+        "var t time.Timer; t.Reset(time.Second)"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "bytes.Buffer, sync.Mutex and a nil slice with append are designed to work as zero values. Writing to a nil map panics ('assignment to entry in nil map'), and Reset on a Timer that was not created by NewTimer or AfterFunc panics ('Reset called on uninitialized Timer'). 'Make the zero value useful' is a proverb, not a guarantee.",
+      "ref": "unit-1-shaping-types.md#4-constructors-invariants-and-zero-values"
+    },
+    {
+      "id": "B1-017",
+      "type": "single",
+      "tags": [
+        "go",
+        "constructors",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "A constructor option is implemented as: o.taxRates = rates (storing the caller's map directly). Which failure does this invite?",
+      "choices": [
+        "The map is copied automatically on assignment, so there is no problem",
+        "The garbage collector frees the map while the service still uses it",
+        "A compile error, because maps cannot be stored in structs",
+        "A config reloader that mutates the map later changes prices under a running service, and concurrent access can crash it with fatal 'concurrent map read and map write'"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Maps (like slices and pointers) are references: assignment shares the same underlying data. The invariant 'the table is valid and stable' is then owned by whoever holds the original, and a concurrent map read/write is an unrecoverable fatal error. Copy on the way in. Maps can be struct fields; assignment never copies; and the garbage collector keeps anything still referenced.",
+      "ref": "unit-1-shaping-types.md#4-constructors-invariants-and-zero-values"
+    },
+    {
+      "id": "B1-018",
+      "type": "multi",
+      "tags": [
+        "go",
+        "constructors",
+        "design"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL true statements comparing functional options with a config struct:",
+      "choices": [
+        "A config struct can be decoded directly from YAML or JSON",
+        "Functional options make required parameters compile-time enforced if you pass them as options",
+        "Adding a new option breaks no existing caller",
+        "With a config struct whose zero value means 'use the default', you cannot express an explicit zero without a sentinel value"
+      ],
+      "answer": [
+        0,
+        2,
+        3
+      ],
+      "explanation": "New options are additive; a plain struct deserialises directly; and 'zero means default' hides legitimate zeros (retries = 0), so a sentinel or pointer fields are needed. Required parameters passed as options are NOT compile-time enforced, since any option may be omitted; required inputs belong in the signature as positional parameters.",
+      "ref": "unit-1-shaping-types.md#4-constructors-invariants-and-zero-values"
+    },
+    {
+      "id": "B1-019",
+      "type": "single",
+      "tags": [
+        "go",
+        "constructors",
+        "errors"
+      ],
+      "difficulty": 2,
+      "prompt": "When is it appropriate for a constructor-like function to panic?",
+      "choices": [
+        "Whenever the configuration file is invalid",
+        "Never, in any situation",
+        "In a Must-style helper for values fixed at compile time, such as regexp.MustCompile on a literal pattern",
+        "Whenever a request carries invalid input"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Must helpers turn a programmer error in a constant (a bad regex literal) into an immediate crash at startup. Configuration files and request data are runtime input and should produce errors the caller can handle, because a panic per bad request is an outage. 'Never' is too strict: the standard library itself uses the Must convention.",
+      "ref": "unit-1-shaping-types.md#4-constructors-invariants-and-zero-values"
+    },
+    {
+      "id": "B1-020",
+      "type": "single",
+      "tags": [
+        "go",
+        "constructors",
+        "design"
+      ],
+      "difficulty": 3,
+      "prompt": "Which design for a vendor client with two required inputs (URL, API key) and six optional ones best fits Go practice?",
+      "choices": [
+        "func New(url, apiKey string, opts ...Option) (*Client, error), validating inside New and each option",
+        "A package-level Client variable configured in init()",
+        "func New(url, apiKey string, timeout, retries int, tls bool, logger Logger, m Metrics, h string) *Client",
+        "func New(cfg Config) *Client with every field optional and no validation"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Required inputs positional so the compiler enforces them, optional behaviour as options (validated, extensible), and an error return instead of a half-built client. An unvalidated struct with all-optional fields reproduces the missing-timeout bug; eight positional parameters invite swapped ints; init()-time globals break tests and depend on file order.",
+      "ref": "unit-1-shaping-types.md#4-constructors-invariants-and-zero-values"
+    },
+    {
+      "id": "B1-021",
+      "type": "single",
+      "tags": [
+        "go",
+        "nil",
+        "errors"
+      ],
+      "difficulty": 3,
+      "prompt": "What does this program print?\n\ntype MyErr struct{}\nfunc (*MyErr) Error() string { return \"myerr\" }\nfunc find(fail bool) error {\n\tvar p *MyErr\n\tif fail { p = &MyErr{} }\n\treturn p\n}\nfmt.Println(find(false) == nil)",
+      "choices": [
+        "true",
+        "false",
+        "<nil>",
+        "It panics with a nil pointer dereference"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The returned error interface holds (type *MyErr, value nil). An interface is nil only when both its type and value are nil, so the comparison is false. It does not print true (the common wrong guess), and the program prints a bool, not '<nil>' (although %v of the error would print <nil>). Comparing to nil never calls a method, so there is no panic.",
+      "ref": "unit-1-shaping-types.md#5-pointer-or-value-and-the-typed-nil-trap"
+    },
+    {
+      "id": "B1-022",
+      "type": "single",
+      "tags": [
+        "go",
+        "nil",
+        "errors"
+      ],
+      "difficulty": 2,
+      "prompt": "Right after a deploy, every payment request fails with the message 'invalid: <nil>', valid or not. The validation helper's body is 'var e *ValidationError; if bad { e = &ValidationError{...} }; return e'. What is the root cause?",
+      "choices": [
+        "The helper is not safe for concurrent use",
+        "fmt cannot print nil pointers",
+        "ValidationError does not implement the error interface",
+        "The helper returns a nil *ValidationError through the error interface, a typed nil that compares non-nil"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A non-nil interface holding a nil pointer makes 'err != nil' true on every call, so all requests are rejected. The fix is to return the literal nil on the success path. If ValidationError did not implement error the code would not compile; the helper has no shared state; and fmt prints nil pointers (as <nil>), which is why the message looks so strange.",
+      "ref": "unit-1-shaping-types.md#5-pointer-or-value-and-the-typed-nil-trap"
+    },
+    {
+      "id": "B1-023",
+      "type": "single",
+      "tags": [
+        "go",
+        "ood",
+        "nil"
+      ],
+      "difficulty": 2,
+      "prompt": "What does this print?\n\ntype Counter struct{ n int }\nfunc (c *Counter) Inc() { c.n++ }\n\ncs := []Counter{{}, {}}\nfor _, c := range cs { c.Inc() }\nfmt.Println(cs)",
+      "choices": [
+        "[{0} {0}]",
+        "It does not compile",
+        "[{1} {1}]",
+        "[{2} {2}]"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "range copies each element into c, so Inc increments the copy and the slice is unchanged. It compiles because c is an addressable variable. The slice would become [{1} {1}] only if you indexed (cs[i].Inc()) or stored pointers. Go 1.22's per-iteration loop variable changes closure capture, not this copying.",
+      "ref": "unit-1-shaping-types.md#5-pointer-or-value-and-the-typed-nil-trap"
+    },
+    {
+      "id": "B1-024",
+      "type": "multi",
+      "tags": [
+        "go",
+        "ood",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL types that should use pointer receivers:",
+      "choices": [
+        "A large struct with identity that methods mutate",
+        "A small immutable Money value type",
+        "A struct that contains a sync.Mutex",
+        "A struct that contains an atomic.Int64 counter"
+      ],
+      "answer": [
+        0,
+        2,
+        3
+      ],
+      "explanation": "Anything containing a lock or an atomic must not be copied, so all its methods take pointers; types with identity and mutation do too. A small immutable value type such as Money (like time.Time) is better with value receivers, so values are freely copied, compared and used as map elements.",
+      "ref": "unit-1-shaping-types.md#5-pointer-or-value-and-the-typed-nil-trap"
+    },
+    {
+      "id": "B1-025",
+      "type": "single",
+      "tags": [
+        "go",
+        "concurrency",
+        "ood"
+      ],
+      "difficulty": 2,
+      "prompt": "A Counter with an embedded mutex has a value-receiver method Inc. One hundred goroutines call it; the final count is 0, the tests pass and 'go test -race' reports nothing. Which tool reports the bug?",
+      "choices": [
+        "go vet's copylocks check ('Inc passes lock by value')",
+        "The compiler",
+        "gofmt",
+        "go test -race"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Each call copies the Counter, mutex included, and increments its own copy, so there is no shared memory to race on and the race detector is silent. copylocks finds value receivers, parameters and assignments of lock-containing types. gofmt only formats, and the compiler accepts the code.",
+      "ref": "unit-1-shaping-types.md#5-pointer-or-value-and-the-typed-nil-trap"
+    },
+    {
+      "id": "B1-026",
+      "type": "numeric",
+      "tags": [
+        "go",
+        "interfaces",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Store is a five-method interface. You add a sixth method, Watch. The code base has one real implementation (MemStore) and three hand-written test fakes that are each passed to a function taking a Store. How many 'does not implement Store' compile errors do you get? (Answer as a count.)",
+      "value": 4,
+      "tolerance": 0.05,
+      "unit": "errors",
+      "explanation": "One for MemStore (through a compile-time assertion) plus one for each of the three fakes passed as a Store: four. Narrowing the consumer to a one-method interface removes three of them, because the fakes no longer have to be Stores. This is why consumer-side interfaces keep additive changes local.",
+      "ref": "unit-1-shaping-types.md#3-interfaces-defined-by-the-consumer"
+    },
+    {
+      "id": "B1-027",
+      "type": "numeric",
+      "tags": [
+        "go",
+        "refactoring",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Pricing rule: discount = (subtotal x bps + 5000) / 10000 using integer division (half up). The subtotal is 12,345 minor units and the coupon SAVE10 gives 1,000 bps (10%). What is the discount in minor units?",
+      "value": 1235,
+      "tolerance": 0.0005,
+      "unit": "cents",
+      "explanation": "12,345 x 1,000 = 12,345,000; adding 5,000 gives 12,350,000; integer division by 10,000 gives 1,235. The exact value is 1,234.5, and the half-up rule rounds it to 1,235. A truncating float conversion would give 1,234, which is the one-cent drift the parity test catches.",
+      "ref": "unit-1-shaping-types.md#1-the-god-object-and-why-it-hurts"
+    },
+    {
+      "id": "B1-028",
+      "type": "single",
+      "tags": [
+        "go",
+        "generics",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Will this compile in current Go (1.24)?\n\ntype Set[T comparable] struct{ m map[T]struct{} }\nfunc (s *Set[T]) Map[U comparable](f func(T) U) *Set[U] { return nil }",
+      "choices": [
+        "Yes, U is simply another type parameter of the method",
+        "No: comparable cannot be used as a constraint on a type parameter",
+        "Yes, but only if U is constrained by any instead of comparable",
+        "No: methods cannot declare their own type parameters; use a package-level generic function"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Go methods may use the receiver's type parameters but cannot introduce new ones ('method must have no type parameters'). The idiom is func MapSet[T, U comparable](s *Set[T], f func(T) U) *Set[U]. Changing the constraint does not help, and comparable is a valid constraint.",
+      "ref": "unit-1-shaping-types.md#6-generics-or-interfaces-stretch"
+    },
+    {
+      "id": "B1-029",
+      "type": "single",
+      "tags": [
+        "go",
+        "generics",
+        "interfaces"
+      ],
+      "difficulty": 2,
+      "prompt": "For which of these is an interface a better tool than a type parameter?",
+      "choices": [
+        "A sharded concurrent map keyed by any comparable type",
+        "A plug-in Payer where each implementation behaves differently",
+        "A Stack of any element type that never inspects its elements",
+        "Sorting a slice of any ordered type"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "When behaviour varies by implementation, an interface expresses it. A Stack, a sort and a sharded map only store, move or compare values and never need behaviour from the element, which is what type parameters are for.",
+      "ref": "unit-1-shaping-types.md#6-generics-or-interfaces-stretch"
+    },
+    {
+      "id": "B1-030",
+      "type": "single",
+      "tags": [
+        "go",
+        "errors",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Given:\n\nvar ErrNotFound = errors.New(\"not found\")\nfunc repo() error { return ErrNotFound }\nfunc svc() error  { return fmt.Errorf(\"load: %v\", repo()) }\n\nWhat does errors.Is(svc(), ErrNotFound) return, and why?",
+      "choices": [
+        "false: %v formats the cause as text, so the error chain is cut",
+        "true: errors.Is compares the message text",
+        "true: Errorf always wraps its arguments",
+        "false: errors.Is only works with typed errors"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Only %w wraps. With %v the result has no Unwrap method, so errors.Is cannot reach ErrNotFound. errors.Is never compares text. Errorf wraps only with %w. errors.Is works on sentinel values (and any error in the chain), not only typed errors.",
+      "ref": "unit-2-boundaries-errors.md#1-errors-as-values"
+    },
+    {
+      "id": "B1-031",
+      "type": "single",
+      "tags": [
+        "go",
+        "errors",
+        "testing"
+      ],
+      "difficulty": 2,
+      "prompt": "Idempotent retries are detected with strings.Contains(err.Error(), \"duplicate key\"). After the database host is rebuilt with a different server locale, duplicates start returning HTTP 500. What is the right lasting fix?",
+      "choices": [
+        "Catch the panic and retry",
+        "Translate the string in the Contains call into the new locale",
+        "Branch on the driver's error code (for example SQLSTATE 23505) through errors.As, not on message text",
+        "Log the error at every layer so on-call can see it"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Messages are not API: they are reworded and localised. Error codes and typed errors are stable. Adding a second language to the match just moves the failure to the next locale or driver upgrade; there is no panic involved; and extra logging does not change the decision logic.",
+      "ref": "unit-2-boundaries-errors.md#1-errors-as-values"
+    },
+    {
+      "id": "B1-032",
+      "type": "multi",
+      "tags": [
+        "go",
+        "errors",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL decisions that belong at the transport edge (handler or middleware) rather than in domain packages:",
+      "choices": [
+        "Deciding which error text may be shown to the client",
+        "Logging the final error once with the request ID",
+        "Adding operation context to an error with %w as it is returned up the stack",
+        "Mapping ErrOutOfStock to HTTP 409"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "The edge knows about HTTP, clients and requests: it maps domain errors to status codes, chooses what the client may see, and logs once. Adding context with %w is done by every layer as it passes the error up, so it is not edge-only.",
+      "ref": "unit-2-boundaries-errors.md#1-errors-as-values"
+    },
+    {
+      "id": "B1-033",
+      "type": "single",
+      "tags": [
+        "go",
+        "errors",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "One failed vendor call produces seven log lines across the adapter, service, handler and middleware, each with a different prefix. What principle was violated, and what is the fix?",
+      "choices": [
+        "Handle an error once: inner layers wrap and return, and only the edge logs and decides",
+        "Use panic instead of returning errors so only one log line is printed",
+        "Errors must be logged at the deepest layer only, and swallowed afterwards",
+        "Convert every error to a string at the first layer"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Log-and-return duplicates the signal and scatters context. Return with context from inner layers and log once at the edge with the full chain. Logging at the deepest layer and swallowing loses the caller's chance to decide; panics are for broken invariants, not control flow; and converting to strings destroys errors.Is/As.",
+      "ref": "unit-2-boundaries-errors.md#1-errors-as-values"
+    },
+    {
+      "id": "B1-034",
+      "type": "single",
+      "tags": [
+        "go",
+        "errors",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "dispatch.Dispatch fans an event out to three sinks, and none of them fails. What does it return if it uses errors.Join(errs...) on a slice holding three nil values?",
+      "choices": [
+        "nil",
+        "A non-nil error with an empty message",
+        "It panics",
+        "A non-nil error listing three nil errors"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "errors.Join discards nil errors and returns nil if no non-nil errors remain, so the success path stays a plain nil. It does not return an empty non-nil error, does not list nils, and does not panic.",
+      "ref": "unit-2-boundaries-errors.md#1-errors-as-values"
+    },
+    {
+      "id": "B1-035",
+      "type": "single",
+      "tags": [
+        "go",
+        "errors",
+        "interfaces"
+      ],
+      "difficulty": 3,
+      "prompt": "The io.Reader contract says a Read implementation must return io.EOF itself, not an error wrapping it. Why is that an acceptable exception to 'always wrap with %w'?",
+      "choices": [
+        "io.EOF is a typed error and must not be wrapped",
+        "The sentinel is part of a documented protocol, and callers are allowed to compare it with ==, which wrapping would break",
+        "Wrapping an error is not possible for sentinel errors",
+        "Wrapping makes Read allocate, which the standard library forbids"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The Reader contract tells callers they may test for EOF with ==, so wrapping would break existing code. Sentinels can be wrapped in general (errors.Is handles it), io.EOF is a plain sentinel value and not a typed error, and allocation is not the reason.",
+      "ref": "unit-2-boundaries-errors.md#1-errors-as-values"
+    },
+    {
+      "id": "B1-036",
+      "type": "single",
+      "tags": [
+        "go",
+        "errors",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "A custom error type wraps a cause but has no Unwrap method:\n\ntype opError struct{ op string; err error }\nfunc (e *opError) Error() string { return e.op + \": \" + e.err.Error() }\n\nerr := &opError{\"load\", fmt.Errorf(\"lookup: %w\", ErrNotFound)}\n\nWhat does errors.Is(err, ErrNotFound) return?",
+      "choices": [
+        "It panics because opError does not implement Unwrap",
+        "true: errors.Is searches the error's text",
+        "true: the inner Errorf used %w, which is enough",
+        "false: the chain stops at *opError because it has no Unwrap method"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "errors.Is walks the chain by calling Unwrap; *opError has none, so the walk ends at the first node and never sees the inner %w. The inner wrapping is irrelevant once the outer layer hides it. errors.Is does not search text, and a missing Unwrap is not an error, only a dead end.",
+      "ref": "unit-2-boundaries-errors.md#1-errors-as-values"
+    },
+    {
+      "id": "B1-037",
+      "type": "multi",
+      "tags": [
+        "go",
+        "errors",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL true statements about context errors and retry decisions:",
+      "choices": [
+        "context.Canceled implements Temporary() and returns true",
+        "context.DeadlineExceeded implements Temporary() bool and returns true",
+        "errors.Is(err, context.DeadlineExceeded) works through a %w-wrapped error",
+        "A dispatcher should still not retry once the caller's own context is done"
+      ],
+      "answer": [
+        1,
+        2,
+        3
+      ],
+      "explanation": "DeadlineExceeded has Timeout() and Temporary() methods that return true, which is why a naive 'retry if temporary' rule would retry it; retrying after the caller's deadline or cancellation is pure load; and errors.Is sees it through %w. context.Canceled does not implement Temporary.",
+      "ref": "unit-2-boundaries-errors.md#1-errors-as-values"
+    },
+    {
+      "id": "B1-038",
+      "type": "single",
+      "tags": [
+        "go",
+        "packages",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "package billing imports customers, and customers needs to read invoice totals from billing. The compiler reports 'import cycle not allowed'. customers needs only one method, TotalFor(ctx, customerID). What is the best fix?",
+      "choices": [
+        "customers declares a one-method interface for what it needs; billing satisfies it implicitly; main wires them",
+        "Register billing in a global map from an init() function that customers reads",
+        "Move both packages' shared types and helpers into a new package called common",
+        "Merge customers and billing into one package regardless of their size"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A consumer-side interface removes customers' import of billing and costs one small interface and a constructor parameter. A common package fixes the compiler error by making everything depend on a junk drawer. Global registration via init() hides the dependency and depends on initialisation order. Merging is right only if the two are really one concept that changes together.",
+      "ref": "unit-2-boundaries-errors.md#2-package-boundaries-and-dependency-direction"
+    },
+    {
+      "id": "B1-039",
+      "type": "single",
+      "tags": [
+        "go",
+        "packages",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "The module is github.com/acme/app. It has internal/ledger, cmd/api and pkg/sdk/internal/auth. Which import is allowed by the go tool?",
+      "choices": [
+        "cmd/api importing github.com/acme/app/internal/ledger",
+        "Another module github.com/acme/other importing github.com/acme/app/internal/ledger",
+        "cmd/api importing github.com/acme/app/pkg/sdk/internal/auth",
+        "Any package may import any internal package within the same repository"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "An import path containing 'internal' is allowed only from the tree rooted at the parent of that internal directory. For internal/ledger the parent is the module root, so cmd/api may import it. For pkg/sdk/internal/auth the parent is pkg/sdk, so cmd/api may not. Another module can never import internal packages, and the rule is enforced by the tool, not by convention.",
+      "ref": "unit-2-boundaries-errors.md#2-package-boundaries-and-dependency-direction"
+    },
+    {
+      "id": "B1-040",
+      "type": "multi",
+      "tags": [
+        "go",
+        "packages",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL properties of a healthy dependency direction in a Go service:",
+      "choices": [
+        "main is the only place that constructs concrete adapters and passes them into the domain",
+        "Adapter packages (SQL, vendor SDKs, SMTP) import the domain package to implement its interfaces",
+        "The domain package imports the vendor SDK so it can use the SDK's request types",
+        "The domain package imports only the standard library"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "Dependencies point at the core; main is the composition root. A domain package that imports the vendor SDK leaks vendor types into domain signatures and makes every SDK upgrade a domain change. You can check the first property mechanically with go list -f '{{join .Imports \"\\n\"}}' on the package.",
+      "ref": "unit-2-boundaries-errors.md#2-package-boundaries-and-dependency-direction"
+    },
+    {
+      "id": "B1-041",
+      "type": "single",
+      "tags": [
+        "go",
+        "packages",
+        "design"
+      ],
+      "difficulty": 1,
+      "prompt": "What is the main problem with a package named util (or common, or base)?",
+      "choices": [
+        "Its name says nothing about what it provides, so unrelated code accumulates, everything imports it, and any change rebuilds and retests everything",
+        "The go tool refuses to compile packages with those names",
+        "It cannot contain more than one file",
+        "Exported names in such packages cannot be documented"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Names should describe what a package provides (clock, money, retry). A junk-drawer package becomes a dependency of everything, so a four-line change triggers a full rebuild and test run. There is no tool restriction on those names, they document like any other package, and they can have many files.",
+      "ref": "unit-2-boundaries-errors.md#2-package-boundaries-and-dependency-direction"
+    },
+    {
+      "id": "B1-042",
+      "type": "single",
+      "tags": [
+        "go",
+        "packages",
+        "ood"
+      ],
+      "difficulty": 3,
+      "prompt": "A team organises code as handlers/, services/, repositories/ and models/. A repository needs to call a service and the build breaks with an import cycle. What does this most likely indicate?",
+      "choices": [
+        "Technical layers are the wrong axis for this code; organising by domain concept with consumer-side interfaces avoids most such cycles",
+        "Cycles are fine as long as init() order is correct",
+        "Go does not support layered architectures",
+        "The repository should import the service package with a dot import"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Layered trees invite cross-layer calls that eventually run both ways. Packages organised around domain concepts, with interfaces declared by the consumer, keep arrows pointing inward. Go supports layering fine, a dot import does not remove a cycle, and import cycles are a compile-time error regardless of init order.",
+      "ref": "unit-2-boundaries-errors.md#2-package-boundaries-and-dependency-direction"
+    },
+    {
+      "id": "B1-043",
+      "type": "single",
+      "tags": [
+        "go",
+        "solid",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Which SOLID principle can the Go compiler check only half of, and what do you use for the other half?",
+      "choices": [
+        "Single responsibility: the compiler counts methods per type",
+        "Dependency inversion: the compiler checks that packages import only interfaces",
+        "Interface segregation: the compiler rejects interfaces with more than three methods",
+        "Liskov substitution: the compiler checks signatures, so behavioural contracts need documentation and contract tests"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A type that has the right method names and types satisfies an interface even if it breaks the behavioural promises (nil means delivered, honour cancellation, do not retain arguments). Contract tests such as iotest.TestReader and fstest.TestFS exist for exactly this. The compiler does not count methods or responsibilities, does not forbid concrete imports, and has no limit on interface size.",
+      "ref": "unit-2-boundaries-errors.md#3-solid-translated-to-go"
+    },
+    {
+      "id": "B1-044",
+      "type": "single",
+      "tags": [
+        "go",
+        "solid",
+        "errors"
+      ],
+      "difficulty": 3,
+      "prompt": "The Sink contract says 'Deliver returns nil only if the event was delivered'. A teammate adds a decorator that calls the inner sink, ignores its error and always returns nil. Which statement is correct?",
+      "choices": [
+        "It compiles, but it violates the Liskov substitution principle: stats and retries now rely on a promise it does not keep",
+        "It does not compile because it changes the error behaviour",
+        "It is fine because the interface signature is unchanged",
+        "It is only a problem if the inner sink panics"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Signatures are identical, so it compiles, but the dispatcher trusts 'nil means delivered': stats, retries and the caller's view are now wrong. Substitutability is about behaviour. The compiler cannot see this; a contract test run against every sink and decorator can. A panic is a separate matter.",
+      "ref": "unit-2-boundaries-errors.md#3-solid-translated-to-go"
+    },
+    {
+      "id": "B1-045",
+      "type": "single",
+      "tags": [
+        "go",
+        "solid",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Which is the idiomatic Go way to satisfy open/closed when a new notification channel is requested?",
+      "choices": [
+        "Add another case to the switch statement inside the service",
+        "Add a boolean flag to the service for each new channel",
+        "Add a new type that satisfies the consumer's Notifier interface (or a decorator) and wire it in main, without editing the service",
+        "Create an abstract base struct and embed it in each channel"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The variation point is the interface; extension is new code behind it, and the service is untouched. A growing switch or boolean flags are modification. Embedding a 'base' struct imitates inheritance and does not give virtual dispatch in Go.",
+      "ref": "unit-2-boundaries-errors.md#3-solid-translated-to-go"
+    },
+    {
+      "id": "B1-046",
+      "type": "single",
+      "tags": [
+        "go",
+        "solid",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Which describes dependency inversion in idiomatic Go?",
+      "choices": [
+        "Every struct must have a matching IName interface and a NameImpl type",
+        "All dependencies are package-level variables replaced by tests",
+        "The policy package declares the small interface it needs; adapters satisfy it; main constructs adapters and passes them in through constructors",
+        "A dependency-injection container is mandatory for any service"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Inversion means the high-level package owns the abstraction, which in Go is a consumer-side interface, and wiring happens at the composition root. Interface/Impl pairs and containers are Java-isms that add ceremony (containers such as wire or fx are optional tools for very large wiring). Mutable globals make tests order-dependent and unsafe in parallel.",
+      "ref": "unit-2-boundaries-errors.md#3-solid-translated-to-go"
+    },
+    {
+      "id": "B1-047",
+      "type": "multi",
+      "tags": [
+        "go",
+        "solid",
+        "testing"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL that are effective ways to keep a plug-in interface's implementations substitutable:",
+      "choices": [
+        "Document behavioural rules in the interface comment (cancellation, ownership of arguments, error meaning)",
+        "Use a type switch in the dispatcher so special sinks get special handling",
+        "Provide a reusable contract test that takes a factory and runs it against every implementation and decorator",
+        "Rely on the compiler's signature check alone"
+      ],
+      "answer": [
+        0,
+        2
+      ],
+      "explanation": "Written contracts plus an executable contract test are how the standard library handles it (iotest, fstest.TestFS, nettest.TestConn). A type switch on concrete types breaks open/closed and substitutability, and signatures say nothing about behaviour.",
+      "ref": "unit-2-boundaries-errors.md#3-solid-translated-to-go"
+    },
+    {
+      "id": "B1-048",
+      "type": "single",
+      "tags": [
+        "go",
+        "testing",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "A retry function sleeps 100 ms, 200 ms and 400 ms between attempts using time.Sleep, and its tests take 12 s in total and sometimes flake. What is the best change?",
+      "choices": [
+        "Inject the sleeper and backoff as functions; tests supply a sleeper that records the requested delays and returns immediately",
+        "Increase the test timeout to avoid flakes",
+        "Mark the tests t.Parallel() so they overlap",
+        "Lower the delays in production so the tests finish faster"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Injecting time turns the delays into values the test can assert (100 ms, 200 ms, ...) with no real waiting. Changing production delays alters behaviour to suit tests. Parallel tests still sleep, and a larger timeout hides the slowness and the flake.",
+      "ref": "unit-2-boundaries-errors.md#4-designing-for-tests"
+    },
+    {
+      "id": "B1-049",
+      "type": "single",
+      "tags": [
+        "go",
+        "testing",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "A harmless refactoring (batching two repository calls into one) fails 190 tests. Which kind of test double is the most likely cause?",
+      "choices": [
+        "Dummies that are passed but never used",
+        "Fakes with in-memory state",
+        "Stubs returning canned values",
+        "Generated mocks that assert exact call order and counts"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Mocks with strict expectations encode how the code under test talks to its collaborator, so any change in interaction fails them. Fakes that assert on resulting state, simple stubs and dummies stay valid when the interaction changes but the outcome does not.",
+      "ref": "unit-2-boundaries-errors.md#4-designing-for-tests"
+    },
+    {
+      "id": "B1-050",
+      "type": "single",
+      "tags": [
+        "go",
+        "testing",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "go.mod says 'go 1.21'. This test is run:\n\nfor _, tc := range cases {   // cases: a, b, c\n\tt.Run(tc.name, func(t *testing.T) {\n\t\tt.Parallel()\n\t\tcheck(t, tc)\n\t})\n}\n\nWhat happens?",
+      "choices": [
+        "The test does not compile because tc is captured by a closure",
+        "Each subtest checks its own case, because t.Run copies tc",
+        "Only the first subtest runs",
+        "All three parallel subtests see the last case, because tc is a single shared variable under 1.21 semantics"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Before Go 1.22, the loop variable is shared by all iterations, and parallel subtests pause until the loop finishes, so every closure sees the final value (fix: tc := tc). With 'go 1.22' or later in go.mod each iteration has its own variable and the test is correct. t.Run does not copy tc, closures capturing loop variables compile fine, and all subtests run.",
+      "ref": "unit-2-boundaries-errors.md#4-designing-for-tests"
+    },
+    {
+      "id": "B1-051",
+      "type": "multi",
+      "tags": [
+        "go",
+        "testing",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL that make time-dependent code testable without real time passing:",
+      "choices": [
+        "A time.Sleep in the test long enough for the background work to finish",
+        "An injected sleeper that records the requested delay and returns immediately",
+        "Running the tests with the race detector enabled",
+        "An injected Clock (or func() time.Time) that the test fixes"
+      ],
+      "answer": [
+        1,
+        3
+      ],
+      "explanation": "Injecting the clock and the sleeper replaces real time with values the test controls. A sleep in the test is the slow, flaky alternative. The race detector finds data races, not timing nondeterminism, and does not make time deterministic.",
+      "ref": "unit-2-boundaries-errors.md#4-designing-for-tests"
+    },
+    {
+      "id": "B1-052",
+      "type": "single",
+      "tags": [
+        "go",
+        "testing",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "What is the main risk of golden-file tests?",
+      "choices": [
+        "Golden files cannot be stored in version control",
+        "The go tool executes every file under testdata",
+        "Running with an -update flag makes every change pass, including wrong ones, so the diff must be reviewed as carefully as code",
+        "They can only compare ASCII text"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Regenerating golden output without reading the diff blesses bugs. Golden files are ordinary files in version control, the go tool ignores testdata directories, and they can hold any bytes.",
+      "ref": "unit-2-boundaries-errors.md#4-designing-for-tests"
+    },
+    {
+      "id": "B1-053",
+      "type": "single",
+      "tags": [
+        "go",
+        "testing",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "How can a test prove that three sinks are delivered to concurrently without relying on timing?",
+      "choices": [
+        "Call runtime.Gosched() in each sink",
+        "Each sink signals arrival and then waits on a barrier that opens only when all three have arrived; a sequential dispatcher cannot pass it",
+        "Measure that the total elapsed time is less than the sum of the individual sleeps",
+        "Check runtime.NumGoroutine() once after Dispatch returns"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A barrier makes concurrency a logical property: if the sinks run one after another, the first waits for arrivals that never come, and the guard timeout fails the test, while a concurrent implementation passes immediately. Elapsed-time comparisons are flaky on loaded machines, Gosched does not force overlap, and a goroutine count after the call only checks for leaks.",
+      "ref": "unit-2-boundaries-errors.md#4-designing-for-tests"
+    },
+    {
+      "id": "B1-054",
+      "type": "single",
+      "tags": [
+        "design",
+        "lld",
+        "interfaces"
+      ],
+      "difficulty": 2,
+      "prompt": "Halfway through an LLD round the interviewer adds a requirement: 'monthly pass holders park free'. What is the best first response?",
+      "choices": [
+        "Start rewriting the core types so they model passes properly",
+        "Say the requirement is out of scope for the time box",
+        "Add a boolean to every type that might need it",
+        "Restate it, ask one clarifying question, identify which existing seam absorbs it, add code behind that seam with a test, and say what did not change"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The senior signal is a calm protocol: find the seam (here, the Pricer), add a decorator, test it, and name what stayed untouched. Rewriting the core shows the original model was wrong; refusing misses the point of the probe; scattering booleans is the shotgun surgery the seam exists to prevent.",
+      "ref": "unit-2-boundaries-errors.md#5-the-lld-interview-extension-without-a-rewrite"
+    },
+    {
+      "id": "B1-055",
+      "type": "single",
+      "tags": [
+        "design",
+        "lld",
+        "interfaces"
+      ],
+      "difficulty": 3,
+      "prompt": "In a 45-minute 'design a parking lot' round, which modelling is the best fit for a Go candidate?",
+      "choices": [
+        "One interface per noun so every piece can be mocked",
+        "A global singleton ParkingLotManager with public mutable maps",
+        "Spot kinds as an enum field, a small Lot that owns state behind one mutex, and a single Pricer interface because pricing is the stated variation",
+        "A Vehicle class hierarchy (Car, Bike, Truck), a ParkingSpotFactory and an AbstractParkingStrategy"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Variation by data is a field or enum; variation by behaviour that the prompt calls out (pricing) gets one interface; state gets one owner and one lock. Go has no inheritance, so hierarchies and factories add ceremony without benefit; an interface per noun and a global manager fail the 'no premature abstraction' and 'explicit ownership' criteria.",
+      "ref": "unit-2-boundaries-errors.md#5-the-lld-interview-extension-without-a-rewrite"
+    },
+    {
+      "id": "B1-056",
+      "type": "single",
+      "tags": [
+        "design",
+        "lld",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "Two entrances race for the last parking spot. Enter is written as:\n\nfunc (l *Lot) Enter(p string) (Ticket, error) {\n\tif !l.hasFree() { return Ticket{}, ErrFull } // takes l.mu internally\n\treturn l.take(p), nil                       // takes l.mu internally\n}\n\nWhat is wrong?",
+      "choices": [
+        "Nothing: each helper locks, so the lot is thread-safe",
+        "Enter must be launched in its own goroutine",
+        "The mutex should be a sync.RWMutex",
+        "Check-then-act across two separate critical sections: both callers can pass hasFree, and one then takes a spot that no longer exists"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Each helper is individually locked, but the decision and the action are separate critical sections, so the state can change in between. Check and take must happen under one lock acquisition. RWMutex does not fix the race and goroutines are not needed.",
+      "ref": "unit-2-boundaries-errors.md#5-the-lld-interview-extension-without-a-rewrite"
+    },
+    {
+      "id": "B1-057",
+      "type": "multi",
+      "tags": [
+        "design",
+        "lld",
+        "testing"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL that signal a 'meets' performance on a 45-minute LLD / machine-coding round:",
+      "choices": [
+        "A compiling core with at least one test by roughly the halfway point",
+        "A stated owner for every piece of shared state and a concurrent test run under -race",
+        "Writing all tests in the last five minutes if time allows",
+        "An interface for every noun in the prompt"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "Interviewers look for a working core early, explicit ownership of shared state and tests written as you go. An interface per noun is premature abstraction, and leaving tests to the end risks having none.",
+      "ref": "unit-2-boundaries-errors.md#5-the-lld-interview-extension-without-a-rewrite"
+    },
+    {
+      "id": "B1-058",
+      "type": "single",
+      "tags": [
+        "design",
+        "lld",
+        "interfaces"
+      ],
+      "difficulty": 2,
+      "prompt": "Checkout takes a single Notifier. Product wants e-mail, SMS and push, and SMS must not block the others. How do you add this without editing the checkout service?",
+      "choices": [
+        "Replace the Notifier interface with a struct of three concrete fields",
+        "Write a small composite type in the caller's package that implements Notifier and fans out to several notifiers, then pass it via the existing option",
+        "Subclass the service for each channel",
+        "Add a list of notifiers and a loop to the service"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A composite that satisfies the same one-method interface (the io.MultiWriter move) is new code behind an existing seam. Editing the service for each channel is the modification the seam avoids, replacing the interface with concrete fields couples the service to the three channels, and Go has no subclassing.",
+      "ref": "unit-2-boundaries-errors.md#5-the-lld-interview-extension-without-a-rewrite"
+    },
+    {
+      "id": "B1-059",
+      "type": "single",
+      "tags": [
+        "design",
+        "ood",
+        "interfaces"
+      ],
+      "difficulty": 2,
+      "prompt": "A PR adds a Clock interface, a SystemClock struct, a ClockFactory interface, a DefaultClockFactory and a config key ClockMode that nobody sets. All of it is used in one place. What is the best review comment?",
+      "choices": [
+        "Make all four types exported so other packages can use them",
+        "Keep Clock (tests need a fixed time) or use a func() time.Time option, and delete the factory types and the unused config key",
+        "Approve it because it is extensible",
+        "Add a second factory to demonstrate the abstraction works"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A real need (a fixed time in tests) justifies a Clock or a function value. A factory that returns one thing, and a config flag with one value in production, are cost without benefit: more to read, keep in sync and support. 'Extensible' without a stated axis of variation is speculation, and exporting more widens the API further.",
+      "ref": "unit-2-boundaries-errors.md#6-the-cost-of-premature-abstraction-stretch"
+    },
+    {
+      "id": "B1-060",
+      "type": "single",
+      "tags": [
+        "design",
+        "ood",
+        "interfaces"
+      ],
+      "difficulty": 2,
+      "prompt": "Why is waiting to introduce an interface cheaper in Go than in a language with explicit 'implements' clauses?",
+      "choices": [
+        "Interfaces are satisfied implicitly, so adding one later at the consumer requires no edits to existing implementations",
+        "The compiler inserts interfaces automatically when it detects a second implementation",
+        "Go interfaces have no runtime cost",
+        "Go forbids more than one implementation of an interface"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Structural typing means existing types already satisfy a new interface if they have the methods, so the late move is local to the consumer. Runtime cost is a different topic, many implementations are allowed, and the compiler never invents interfaces.",
+      "ref": "unit-2-boundaries-errors.md#6-the-cost-of-premature-abstraction-stretch"
+    },
+    {
+      "id": "B1-061",
+      "type": "single",
+      "tags": [
+        "design",
+        "ood",
+        "refactoring"
+      ],
+      "difficulty": 3,
+      "prompt": "Two vendor adapters share about 80% of their request-building code, and a third vendor 'might be different'. What does the module recommend?",
+      "choices": [
+        "Create a base type with a flag for every vendor's differences now",
+        "Generate the adapters from a template regardless of the third vendor",
+        "Copy for now, wait for the third implementation or a bug fixed twice, then extract the genuinely shared parts as small functions",
+        "Merge all vendors into one adapter with a switch on vendor name"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Duplication is cheap to read and delete; the wrong abstraction (a base with flags) is expensive because every caller depends on its shape. Extract small shared functions once the common part is visible. A switch inside one adapter makes every vendor change touch the same file, and code generation for a speculative third vendor is the same speculation in another form.",
+      "ref": "unit-2-boundaries-errors.md#6-the-cost-of-premature-abstraction-stretch"
+    }
+  ]
+}

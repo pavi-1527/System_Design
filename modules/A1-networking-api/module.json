@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "id": "A1",
+  "slug": "networking-api",
+  "title": "Networking, API design, DNS/LB/CDN",
+  "track": "A",
+  "status": "written",
+  "core": true,
+  "summary": "The request path (DNS, TLS, HTTP versions, pooling, L4/L7 load balancing, health checks, CDNs), API design (errors, pagination, versioning, REST/gRPC/GraphQL, webhooks), and idempotency + auth for money-moving APIs.",
+  "hours": {
+    "core": 18,
+    "stretch": 2,
+    "total": 20
+  },
+  "prerequisites": [
+    "A0"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/A1-networking-api",
+    "readme": "modules/A1-networking-api/README.md",
+    "quiz": "modules/A1-networking-api/quiz.json",
+    "design_exercise": "modules/A1-networking-api/design-exercise.md",
+    "teachback": "modules/A1-networking-api/teachback.md",
+    "lab": "labs/a1",
+    "solution": "solutions/a1"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "The request path",
+      "file": "modules/A1-networking-api/unit-1-request-path.md",
+      "hours": {
+        "core": 5.5,
+        "stretch": 0.5
+      },
+      "labs": [
+        "lb"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "API design",
+      "file": "modules/A1-networking-api/unit-2-api-design.md",
+      "hours": {
+        "core": 5.5,
+        "stretch": 0.5
+      },
+      "labs": [
+        "pagination"
+      ]
+    },
+    {
+      "n": 3,
+      "title": "Idempotency and auth",
+      "file": "modules/A1-networking-api/unit-3-idempotency-auth.md",
+      "hours": {
+        "core": 7,
+        "stretch": 1
+      },
+      "labs": [
+        "idempotency",
+        "token"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "lb",
+      "title": "Load balancer: pickers (RR, least-conn, P2C), passive ejection, draining, reverse proxy",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "pagination",
+      "title": "Keyset pagination with HMAC-signed cursors vs offset",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "idempotency",
+      "title": "Idempotency-Key middleware: atomic reservation, replay, leases",
+      "unit": 3,
+      "core": true
+    },
+    {
+      "package": "token",
+      "title": "HMAC-signed JWT-style tokens with kid rotation and strict alg checks",
+      "unit": 3,
+      "core": false
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Estimate the latency cost of the request path in round trips (TCP, TLS 1.2/1.3, QUIC, keep-alive vs new connections) and explain why DNS failover is slow.",
+      "core": true
+    },
+    {
+      "text": "Diagnose connection-reuse bugs in Go HTTP clients and size connection pools with Little's law.",
+      "core": true
+    },
+    {
+      "text": "Choose between L4 and L7 load balancing and between round robin, least-connections and power-of-two-choices, and explain when the answer flips.",
+      "core": true
+    },
+    {
+      "text": "Implement a load balancer with pluggable pickers, passive outlier ejection with probation, and connection draining.",
+      "core": true
+    },
+    {
+      "text": "Decide what a CDN may cache in an authenticated banking app and how to deploy behind it safely.",
+      "core": true
+    },
+    {
+      "text": "Design resource-oriented APIs with correct method semantics, status codes, an error model and evolution rules; choose between REST, gRPC and GraphQL.",
+      "core": true
+    },
+    {
+      "text": "Implement keyset pagination with HMAC-signed opaque cursors and explain why offset pagination duplicates and skips rows under concurrent writes.",
+      "core": true
+    },
+    {
+      "text": "Design long-running operations and webhooks that survive at-least-once, unordered delivery.",
+      "core": true
+    },
+    {
+      "text": "Implement idempotency-key middleware that executes once under concurrent duplicates, and defend its design choices.",
+      "core": true
+    },
+    {
+      "text": "Choose authentication and authorisation mechanisms (sessions vs JWT, OAuth code + PKCE, client credentials, OIDC, SAML, mTLS, API keys) and where tokens are validated.",
+      "core": true
+    },
+    {
+      "text": "Implement a JWT-compatible HMAC token verifier with kid rotation, leeway and strict algorithm checks.",
+      "core": false
+    }
+  ]
+}

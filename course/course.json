@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "title": "System Design Mastery Course (Go)",
+  "tracks": [
+    {"id": "A", "title": "HLD fundamentals"},
+    {"id": "B", "title": "LLD / machine coding in Go"},
+    {"id": "C", "title": "HLD case studies"},
+    {"id": "D", "title": "Mock interviews"},
+    {"id": "E", "title": "Build real systems"}
+  ],
+  "policy": {
+    "quiz_pass_threshold": 0.85,
+    "quiz_passes_required": 2,
+    "quiz_passes_distinct_days": true,
+    "default_quiz_draw": 15,
+    "rubric_levels": ["below", "approaching", "meets", "exceeds"],
+    "design_min_level": "meets",
+    "mock_min_level": "meets",
+    "mock_distinct_problems": true,
+    "review_intervals_days": [1, 3, 7, 14, 30, 60, 120],
+    "review_session_size": 20,
+    "review_refresh_threshold": 0.70,
+    "review_refresh_window": 10,
+    "review_refresh_min_items": 5,
+    "review_overdue_days": 45,
+    "recap_gap_days": 14,
+    "estimate_tolerance": 0.25,
+    "estimate_mastery_window": 20,
+    "estimate_mastery_rate": 0.80
+  },
+  "recommended_order": [
+    "A0", "B0", "A1", "A2", "B1", "A3", "B2", "C1", "A4", "B3", "A5", "C3", "C4",
+    "A6", "A7", "C2", "D1", "C5", "C6", "C7", "A8", "E1", "C8", "A9", "C9", "D2",
+    "C10", "C11", "C12", "D3", "E2", "E3", "C13", "C14", "C15", "C16", "D4"
+  ]
+}

@@ -1,0 +1,1202 @@
+{
+  "module": "C8",
+  "title": "Case study: ticket booking",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "C8-001",
+      "type": "single",
+      "tags": [
+        "design",
+        "requirements"
+      ],
+      "difficulty": 2,
+      "prompt": "You have time for one more clarifying question before designing a ticket-booking system. Which answer changes the design the most?",
+      "choices": [
+        "Whether seating is assigned or general admission, and what the biggest on-sale looks like (seats, people, how fast)",
+        "Whether the seat map should support pinch-to-zoom on mobile",
+        "Which front-end framework the web team prefers",
+        "How many artists the platform lists"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Assigned vs GA decides the data model (seat rows vs counters) and where contention lands; the on-sale size decides whether a waiting room, a CDN-served seat map and an adaptive admission rate exist at all. Zoom and the framework are presentation details. The number of artists changes catalogue size, which is small and irrelevant to contention.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-an-interviewer-expects"
+    },
+    {
+      "id": "C8-002",
+      "type": "multi",
+      "tags": [
+        "design",
+        "requirements",
+        "consistency"
+      ],
+      "difficulty": 1,
+      "prompt": "Select ALL the statements that are hard invariants of a ticketing system (correctness rules, not SLOs).",
+      "choices": [
+        "A seat is never sold to two customers",
+        "Money is never taken without either issuing the ticket or returning the money",
+        "The seat map is at most 2 seconds stale",
+        "A hold request completes within 500 ms at p99",
+        "Every user who joins the queue is eventually admitted"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "No oversell and no charge without a ticket or refund are the two invariants: violating them means refunds, chargebacks and liability. Staleness and latency are SLOs you trade against cost. Admitting everyone is impossible at 28 people per seat; the honest requirement is a fast, fair 'no'.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-an-interviewer-expects"
+    },
+    {
+      "id": "C8-003",
+      "type": "single",
+      "tags": [
+        "design",
+        "requirements",
+        "payments"
+      ],
+      "difficulty": 2,
+      "prompt": "A candidate's requirements list: browse events, hold seats for 10 minutes, pay, issue tickets, a waiting room for big sales. In the module's failure story ≈ 3,000 customers paid and got nothing. Which missing requirement explains it?",
+      "choices": [
+        "A rule for what happens when the payment completes after the hold has expired",
+        "A requirement that the seat map refresh every second",
+        "Support for more than one currency",
+        "A per-account limit on tickets"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The webhook arrived after the 5-minute hold expired and the seat was resold; nobody had specified the payment-pending state, the window, or the late-payment path. Map refresh affects how often users see stale seats, not charges. Currency support and account limits don't produce paid-but-no-ticket cases.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-an-interviewer-expects"
+    },
+    {
+      "id": "C8-004",
+      "type": "single",
+      "tags": [
+        "design",
+        "requirements",
+        "inventory"
+      ],
+      "difficulty": 2,
+      "prompt": "The interviewer changes 'assigned seats' to 'GA only: 18,000 standing tickets'. What is the most important design change?",
+      "choices": [
+        "Inventory becomes a counter per section, a single hot row that needs buckets or block allocation at on-sale rates",
+        "The waiting room is no longer needed because there is no seat map",
+        "Holds are no longer needed because GA tickets are interchangeable",
+        "Nothing changes; GA is just a seat map with one big section"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "GA turns many contended seat rows into one counter every purchase decrements, which caps at ≈ 500 updates per second on one row. The crowd is the same size, so the waiting room matters as much as ever. Holds remain (a hold of quantity 2) because payment still takes time. Treating GA as seats ignores that contention moved to one row.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-an-interviewer-expects"
+    },
+    {
+      "id": "C8-005",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "qps"
+      ],
+      "difficulty": 1,
+      "prompt": "About 500,000 people arrive at an on-sale page in the first 60 seconds. What is the arrival rate? Answer in arrivals per second.",
+      "value": 8333,
+      "tolerance": 0.15,
+      "unit": "arrivals/s",
+      "explanation": "500,000 / 60 s ≈ 8,300 per second. The decision: the inventory must never see this rate directly, so a waiting room absorbs it.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C8-006",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "Without a waiting room, each of 500,000 browsers refreshes one event's seat map every 2 seconds. How many seat-map reads per second does that event receive? Answer in requests per second.",
+      "value": 250000,
+      "tolerance": 0.15,
+      "unit": "req/s",
+      "explanation": "500,000 / 2 s = 250,000 reads per second of the same object. Decision: serve a published snapshot from a CDN; no database or replica set serves 250k/s of one query.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C8-007",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "bandwidth",
+        "cdn"
+      ],
+      "difficulty": 2,
+      "prompt": "Those 250,000 seat-map reads per second each return a ≈ 4.5 KB availability snapshot. What bandwidth is that? Answer in Gbps.",
+      "value": 9,
+      "tolerance": 0.25,
+      "unit": "Gbps",
+      "explanation": "250,000 × 4.5 KB ≈ 1.125 GB/s; × 8 bits ≈ 9 Gbps. Routine for a CDN for a few minutes, fatal for a database. Forgetting the ×8 (bytes vs bits) gives ≈ 1.1, an 8× error.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C8-008",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "memory"
+      ],
+      "difficulty": 1,
+      "prompt": "An availability snapshot stores 2 bits per seat (available, held, sold) for an 18,000-seat arena. How big is it, uncompressed? Answer in KB.",
+      "value": 4.5,
+      "tolerance": 0.2,
+      "unit": "KB",
+      "explanation": "18,000 × 2 bits = 36,000 bits = 4,500 bytes ≈ 4.5 KB. The static layout (geometry) is far larger and cached separately for months; only this small overlay changes each second.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C8-009",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "An on-sale has ≈ 7,200 orders available. Once admitted, a buyer takes ≈ 30 s to choose seats. What admission rate keeps the number of people choosing at once roughly equal to the orders available? Answer in admissions per second.",
+      "value": 240,
+      "tolerance": 0.2,
+      "unit": "admissions/s",
+      "explanation": "Little's law: people choosing = rate × 30 s. Set it to ≈ 7,200: rate ≈ 240 per second (the module rounds to ≈ 200). Far above, most hold attempts collide; far below, seats sit unsold. Then check the rate against the hold path and the payment provider.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C8-010",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "queues"
+      ],
+      "difficulty": 1,
+      "prompt": "The waiting room admits 200 users per second. How long does the 500,000th person in line wait? Answer in minutes.",
+      "value": 41.7,
+      "tolerance": 0.15,
+      "unit": "min",
+      "explanation": "500,000 / 200 per s = 2,500 s ≈ 42 minutes. The event sells out after ≈ 10,000–20,000 admissions, so this person will never be admitted; the room should tell them early instead of letting them wait 42 minutes.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C8-011",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "hot-key",
+        "locking"
+      ],
+      "difficulty": 2,
+      "prompt": "Every purchase in a GA section runs a conditional decrement on one counter row, holding its lock ≈ 2 ms per transaction. What is the maximum purchase rate for that section? Answer in updates per second.",
+      "value": 500,
+      "tolerance": 0.2,
+      "unit": "updates/s",
+      "explanation": "One row, one lock at a time: 1 / 0.002 s ≈ 500 per second. Above that the lock queue grows without bound. Fix with bucketed counters or block allocation.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C8-012",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "qps",
+        "queues"
+      ],
+      "difficulty": 1,
+      "prompt": "500,000 users in a waiting room each poll their position every 10 seconds. What is the poll rate? Answer in requests per second.",
+      "value": 50000,
+      "tolerance": 0.15,
+      "unit": "req/s",
+      "explanation": "500,000 / 10 s = 50,000 per second. Decision: position must be arithmetic in memory or at the edge (sequence number minus a published watermark), never a database query.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C8-013",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "Admission is 200 users per second and each admitted user makes ≈ 1.5 hold attempts (some conflict and retry). How many hold transactions per second does the hot event's partition see? Answer in transactions per second.",
+      "value": 300,
+      "tolerance": 0.2,
+      "unit": "tx/s",
+      "explanation": "200 × 1.5 = 300 hold transactions per second (plus ≈ 140 confirmations). A relational primary does ≈ 1k–10k small transactions per second, so one primary per hot event is enough, provided no single row is touched by every transaction.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C8-014",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "queues",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "An event has ≈ 7,200 orders available and ≈ 70% of admitted users end up buying. Roughly how many admissions does it take to sell out (ignoring conflicts and returns)? Answer in admissions.",
+      "value": 10286,
+      "tolerance": 0.15,
+      "unit": "admissions",
+      "explanation": "7,200 / 0.7 ≈ 10,300 admissions. With a safety factor for conflicts and expired holds being re-offered, a useful queue bound is ≈ 20,000–30,000 places; beyond that, say 'at capacity' now.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-015",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "latency",
+        "data-structures"
+      ],
+      "difficulty": 3,
+      "prompt": "The lab's Status walks the FIFO list to count a user's position. With 500,000 users waiting, an average call walks ≈ 250,000 elements, and each step is a cache-missing pointer chase of ≈ 100 ns. How long is one Status call? Answer in milliseconds.",
+      "value": 25,
+      "tolerance": 0.3,
+      "unit": "ms",
+      "explanation": "250,000 × 100 ns = 25 ms, under the room's single mutex. At 50,000 polls per second that's ≈ 1,250 s of work per second: impossible. Production computes position as sequence − watermark, which is O(1).",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-016",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "api-design"
+      ],
+      "difficulty": 2,
+      "prompt": "A user double-clicks 'Hold seats' and the browser also retries once on a timeout. What makes the three requests produce exactly one hold?",
+      "choices": [
+        "An Idempotency-Key header on POST /v1/holds, stored with the hold, so repeats return the original 201",
+        "Returning 409 for the second and third requests, since the seats are now held",
+        "Disabling the button in the browser after the first click",
+        "A unique constraint on (account_id, event_id) in the holds table"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The server-side idempotency key turns retries of one request into one hold and replays the same response. A 409 tells the user their own hold failed (and invites a retry with new seats). Disabling the button doesn't stop network retries. A unique (account, event) constraint would forbid legitimate second holds for different seats, and still return an error rather than the original result.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C8-017",
+      "type": "single",
+      "tags": [
+        "data-model",
+        "consistency",
+        "inventory"
+      ],
+      "difficulty": 2,
+      "prompt": "A confirmation bug ignores the seat's current status. Which single schema element turns that bug into an error instead of a seat sold twice?",
+      "choices": [
+        "tickets UNIQUE (event_id, seat_id)",
+        "An index on seats(status)",
+        "orders UNIQUE (account_id, event_id)",
+        "A foreign key from tickets.order_id to orders.order_id"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A unique constraint on (event, seat) for sold tickets makes a second sale of the same seat fail at insert, under any isolation level. An index on status speeds queries but enforces nothing. A unique (account, event) on orders would block repeat customers and doesn't stop two accounts buying one seat. A foreign key ensures the order exists, not that the seat is unsold.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C8-018",
+      "type": "single",
+      "tags": [
+        "isolation",
+        "transactions",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "The per-account limit (6 tickets per event) is enforced by counting the account's tickets and then inserting new ones. Two tabs each count 4 and each insert 2. Which anomaly is this, and what fixes it at READ COMMITTED?",
+      "choices": [
+        "Phantom write skew; add a per-(event, account) row that every hold updates conditionally (held + n <= 6)",
+        "A lost update; switch to PostgreSQL REPEATABLE READ",
+        "A dirty read; READ COMMITTED already prevents it, so it must be a bug elsewhere",
+        "A non-repeatable read; cache the count for the length of the request"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Two transactions read overlapping data and insert different rows that jointly break the rule: phantom write skew (A2's T3b). Snapshot isolation (PostgreSQL REPEATABLE READ) still allows it because the writes don't overlap. No uncommitted data is read, so it isn't a dirty read. Caching the count makes the stale read worse. A single limit row gives the two transactions something to conflict on.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C8-019",
+      "type": "single",
+      "tags": [
+        "data-model",
+        "partitioning"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does the design embed the event id in every hold id (for example e_77#000123)?",
+      "choices": [
+        "So checkout, release and webhooks can route to the event's partition without a global hold-id index",
+        "So users can't guess other people's hold ids",
+        "So holds sort chronologically",
+        "Because the payment provider requires it in its metadata"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Self-routing ids let any request carrying a hold id find its partition and lock domain directly; a global hold → event table would be another hot shared structure on the on-sale path. Guessability needs randomness, not an embedded event id. Chronological sorting comes from the sequence part, not the event. Payment providers don't require it.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C8-020",
+      "type": "multi",
+      "tags": [
+        "api-design",
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the values the server, not the client, must decide when a hold is created.",
+      "choices": [
+        "The price quote stored with the hold",
+        "The hold's expiry time",
+        "Whether the per-account limit allows the hold",
+        "Whether the admission pass is valid and belongs to this user",
+        "Which seats the customer wants"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "Price, expiry, limits and pass validity are server-side: a client can lie about any of them (the v1 story had a script sending price 1). The seats are the customer's choice, which the server then checks against the inventory.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C8-021",
+      "type": "single",
+      "tags": [
+        "design",
+        "queues",
+        "databases"
+      ],
+      "difficulty": 2,
+      "prompt": "A 'queue' for on-sales is a queue_entries table in the inventory database; each refresh runs SELECT count(*) WHERE joined_at < mine. At 500,000 users what happens, and what is the better design?",
+      "choices": [
+        "The queue table becomes the hottest table in the database; keep the room in memory (or at the edge) with a sequence number per join and a published watermark",
+        "It works if you add an index on joined_at",
+        "It works if you move the table to a read replica",
+        "The count is slow, so cache each user's position for 10 minutes"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "≈ 100,000 range counts per second over a growing table land on the database the room was meant to protect. An index makes each count cheaper but still O(position) and on the primary. A replica lags and still can't serve 100k counts per second. A position cached for 10 minutes is wrong almost immediately. Position = sequence − watermark is arithmetic.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-the-on-sale-path-the-booking-path-and-the-payment-path"
+    },
+    {
+      "id": "C8-022",
+      "type": "multi",
+      "tags": [
+        "design",
+        "consistency",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the components that do NOT prevent a seat being sold twice.",
+      "choices": [
+        "The waiting room",
+        "The CDN-served availability snapshot",
+        "A Redis 'hold' key that the database does not re-check at confirmation",
+        "A conditional UPDATE on the seat row with the affected-row count checked",
+        "A UNIQUE (event_id, seat_id) constraint on tickets"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "The waiting room limits how many people are inside, not which seat each gets; the snapshot is a hint up to a second stale; a Redis key can be lost on failover and re-granted. Only the conditional write at the inventory and the unique constraint actually enforce one owner per seat.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-the-on-sale-path-the-booking-path-and-the-payment-path"
+    },
+    {
+      "id": "C8-023",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "outbox",
+        "webhooks"
+      ],
+      "difficulty": 2,
+      "prompt": "The payment webhook handler confirms the order and sends the e-ticket email inline. The email provider is slow, the handler times out, the payment provider retries the webhook, and some customers get two orders. What is the fix?",
+      "choices": [
+        "Dedupe webhooks by the provider's event id before doing any work, confirm in one transaction, and hand the email to an outbox processed by an idempotent worker",
+        "Increase the handler timeout to 60 seconds",
+        "Ask the payment provider to disable retries",
+        "Send the email before confirming the order so the handler finishes faster"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Binding the provider event id first makes retries no-ops; the outbox moves slow work out of the handler so it returns fast. A longer timeout still loses to a slow enough provider and still has no dedupe. Disabling retries means lost webhooks become paid-but-no-ticket cases. Emailing before confirming tells people they have tickets you may not have sold.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-the-on-sale-path-the-booking-path-and-the-payment-path"
+    },
+    {
+      "id": "C8-024",
+      "type": "single",
+      "tags": [
+        "replication",
+        "failover",
+        "availability"
+      ],
+      "difficulty": 3,
+      "prompt": "The inventory primary fails over at 10:06 and the new primary is ≈ 1 s behind (asynchronous replication). Which statement is right?",
+      "choices": [
+        "Lost holds are tolerable (users re-select); lost confirmed sales are not, so confirmations need synchronous replication or reconciliation against the payment provider after failover",
+        "Nothing is lost because each transaction committed on the old primary",
+        "Both lost holds and lost sales are tolerable because the payment provider keeps the money",
+        "The waiting room prevents any writes during the last second, so nothing is lost"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "With async replication the last second of commits may vanish. A hold is a lease and can be lost; a sale is a durable promise. Commits on the old primary don't help if they never reached the replica. 'The provider keeps the money' is precisely a charge without a ticket. The waiting room doesn't pause writes.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-the-on-sale-path-the-booking-path-and-the-payment-path"
+    },
+    {
+      "id": "C8-025",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "isolation",
+        "transactions"
+      ],
+      "difficulty": 2,
+      "prompt": "Two transactions at PostgreSQL READ COMMITTED each SELECT seat A1, see 'available', then run UPDATE seats SET status='held', hold_id=<own id> WHERE seat_id='A1' and commit. What is the outcome?",
+      "choices": [
+        "Both commit; the second overwrites the first's hold_id and both clients believe they hold A1",
+        "The second UPDATE fails with a serialization error",
+        "The second transaction's SELECT blocks until the first commits",
+        "PostgreSQL detects the conflict and returns zero rows to the second UPDATE"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Check-then-act: the check and the write are separate statements, and READ COMMITTED gives each statement a new snapshot. The second UPDATE waits for the row lock, then overwrites (its WHERE doesn't mention status). Serialization errors happen under REPEATABLE READ or SERIALIZABLE. Plain SELECTs don't block on row locks. Zero rows would require the status check in the UPDATE's WHERE clause.",
+      "ref": "unit-2-deep-dives.md#5-holds-and-oversell-prevention"
+    },
+    {
+      "id": "C8-026",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "isolation"
+      ],
+      "difficulty": 2,
+      "prompt": "Hold is one statement: UPDATE seats SET status='held' ... WHERE seat_id IN (...) AND (status='available' OR hold_expires_at <= now()), then commit only if the affected-row count equals the seats requested. Why is this safe at READ COMMITTED?",
+      "choices": [
+        "A concurrent updater waits for the row lock, then PostgreSQL re-evaluates the WHERE on the newly committed row, so the loser updates fewer rows and rolls back",
+        "READ COMMITTED takes one snapshot for the whole transaction",
+        "A single statement can't run concurrently with another statement on the same table",
+        "It isn't safe; it needs SERIALIZABLE"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The check is inside the write, and PostgreSQL re-checks the predicate after waiting, so the second request sees the seat as held. READ COMMITTED takes a snapshot per statement, not per transaction. Statements on the same table run concurrently all the time. SERIALIZABLE isn't needed for an invariant on rows you write.",
+      "ref": "unit-2-deep-dives.md#5-holds-and-oversell-prevention"
+    },
+    {
+      "id": "C8-027",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "deadlock",
+        "locking"
+      ],
+      "difficulty": 2,
+      "prompt": "Request R1 locks seats [A1, A2] with SELECT ... FOR UPDATE in click order while R2 locks [A2, A1]. What happens in PostgreSQL, and what is the fix?",
+      "choices": [
+        "They can deadlock; PostgreSQL detects it after deadlock_timeout and aborts one; sort the seat ids (ORDER BY seat_id) so every request locks in the same order",
+        "They serialize safely because row locks are queued fairly",
+        "Both fail immediately with a unique violation",
+        "R2 silently skips A2 and holds only A1"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Opposite lock orders create a circular wait; PostgreSQL's deadlock detector (1 s by default) aborts one with SQLSTATE 40P01, costing a second and a retry. Fair queueing doesn't remove a cycle. There's no insert, so no unique violation. Skipping locked rows only happens with SKIP LOCKED, and silently holding part of a request would break all-or-nothing.",
+      "ref": "unit-2-deep-dives.md#5-holds-and-oversell-prevention"
+    },
+    {
+      "id": "C8-028",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Holds use an optimistic version column: read versions, then UPDATE ... WHERE version = $v per seat, rolling back on zero rows. When does this design lose?",
+      "choices": [
+        "During an on-sale, where most attempts conflict and retries stampede",
+        "On quiet days, because version columns double the write cost",
+        "Whenever two requests touch different seats",
+        "It can oversell under READ COMMITTED"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Optimistic concurrency wins when conflicts are rare and loses when they're the norm: each conflict is a full retry. On quiet days it's cheap. Disjoint requests don't conflict at all. It can't oversell, because a stale version updates zero rows.",
+      "ref": "unit-2-deep-dives.md#5-holds-and-oversell-prevention"
+    },
+    {
+      "id": "C8-029",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "atomicity"
+      ],
+      "difficulty": 2,
+      "prompt": "Holds are a loop of Redis SET hold:<seat> <hold_id> NX EX 600, one per seat. A 4-seat request gets two keys, then fails on the third. What goes wrong, and what is the fix?",
+      "choices": [
+        "Two seats stay held by nobody until the keys expire; make the hold one atomic step (a Lua script that checks every key, then sets them all)",
+        "Nothing; NX guarantees all-or-nothing across keys",
+        "The third SET blocks until the other holder's key expires",
+        "Redis rolls back the first two keys automatically when the third fails"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A loop is not atomic: the first two SETs succeeded and nothing undoes them, stranding seats. NX is per key. SET NX returns immediately, it doesn't block. Redis has no automatic rollback for a sequence of commands; a Lua script or a transaction with a check is needed.",
+      "ref": "unit-2-deep-dives.md#5-holds-and-oversell-prevention"
+    },
+    {
+      "id": "C8-030",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "replication",
+        "failover"
+      ],
+      "difficulty": 3,
+      "prompt": "Seat holds live in Redis. A failover loses the last second of writes, 37 held seats become free and are held by other people, and confirmation writes UPDATE seats SET status='sold' with no condition. What is the right fix?",
+      "choices": [
+        "Keep the database as the authority: confirm with a conditional write (or insert into tickets with UNIQUE (event, seat)), so a lost Redis hold produces a failed confirmation and a refund, never a second sale",
+        "Use Redis WAIT so no write is ever lost",
+        "Increase the Redis hold TTL so fewer holds expire during a failover",
+        "Run two Redis primaries and write to both"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Asynchronous replication can lose acknowledged writes, so the durable store must decide sales. WAIT narrows the window but doesn't close it. TTL length is unrelated to failover loss. Two primaries create two sources of truth, which is worse.",
+      "ref": "unit-2-deep-dives.md#5-holds-and-oversell-prevention"
+    },
+    {
+      "id": "C8-031",
+      "type": "multi",
+      "tags": [
+        "isolation",
+        "transactions"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL the statements that are true.",
+      "choices": [
+        "A conditional UPDATE ... WHERE status = 'available' with a row-count check prevents oversell at PostgreSQL READ COMMITTED",
+        "Read-then-write on one seat row at PostgreSQL REPEATABLE READ makes the second committer fail, so it is safe with retries",
+        "Read-then-write at MySQL/InnoDB REPEATABLE READ can still lose an update",
+        "SERIALIZABLE prevents the count-then-insert per-account-limit write skew, at the cost of retries",
+        "Snapshot isolation prevents write skew because each transaction sees a consistent snapshot"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "The first four are A2's results applied to seats. The last is the classic misconception: snapshot isolation allows write skew because the two transactions write different rows, so no write-write conflict is detected.",
+      "ref": "unit-2-deep-dives.md#5-holds-and-oversell-prevention"
+    },
+    {
+      "id": "C8-032",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "inventory",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "The GA floor (5,000 tickets) gets ≈ 1,200 purchase attempts per second, each a correct one-row conditional decrement holding the lock ≈ 2 ms. What do you observe?",
+      "choices": [
+        "Correct counts but at most ≈ 500 purchases per second; the lock queue and latency grow until connections run out",
+        "Oversell, because conditional decrements are not atomic",
+        "Exactly 1,200 purchases per second, since each statement is short",
+        "Deadlocks, because every transaction locks the same row"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "One row serialises updates: ≈ 1 / 2 ms ≈ 500 per second, so a backlog of ≈ 700 per second builds. The conditional decrement is atomic and correct. Short statements don't escape a single lock. Deadlock needs a cycle of two or more locks; one lock just queues.",
+      "ref": "unit-2-deep-dives.md#5-holds-and-oversell-prevention"
+    },
+    {
+      "id": "C8-033",
+      "type": "single",
+      "tags": [
+        "inventory",
+        "hot-key"
+      ],
+      "difficulty": 2,
+      "prompt": "The GA section uses 10 bucketed counters. Near the end, 7 tickets remain spread as 1, 0, 2, 0, 1, 0, 3, 0, 0, 0, and a request for 4 fails in every bucket. What is the fix?",
+      "choices": [
+        "Merge the remainders into one bucket when stock is low (or let a request draw from several buckets in one sorted transaction)",
+        "Tell the customer the event is sold out",
+        "Retry the request until a bucket has 4",
+        "Switch the section to assigned seating"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Buckets trade end-game fragmentation for throughput; merging (or a multi-bucket transaction with a fixed lock order) restores the ability to sell the last units. Declaring sold out with 7 left loses sales. Retrying loops forever. Changing the product to assigned seats isn't an engineering fix.",
+      "ref": "unit-2-deep-dives.md#5-holds-and-oversell-prevention"
+    },
+    {
+      "id": "C8-034",
+      "type": "single",
+      "tags": [
+        "leases",
+        "fencing",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "The hold sweeper runs under a lease. It is paused for 15 s and wakes to release a hold that a payment just confirmed. What makes this harmless?",
+      "choices": [
+        "The sweeper's write is conditional on the state it expects (status = 'held' AND hold_expires_at <= now() for that hold), so a confirmed hold doesn't match and nothing changes",
+        "The lease guarantees the sweeper cannot run after it expires",
+        "Sweepers always re-read the clock before writing",
+        "The confirmation takes a lock that the sweeper must wait for"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The conditional write is a fencing check at the resource: the stale actor is refused by the data, not by its own belief. A lease can't stop a paused holder from acting after expiry. Re-reading the clock before writing is still check-then-act. Lock waits don't help once the confirmation has committed and released its lock.",
+      "ref": "unit-2-deep-dives.md#5-holds-and-oversell-prevention"
+    },
+    {
+      "id": "C8-035",
+      "type": "single",
+      "tags": [
+        "leases",
+        "fencing",
+        "sharding"
+      ],
+      "difficulty": 3,
+      "prompt": "For an extremely hot event you route every request to one in-memory owner process (the B3 design). What must you add for failover to be safe?",
+      "choices": [
+        "A lease to move ownership, and a fencing token (owner epoch) checked by the durable store on every write the owner makes",
+        "A second owner process that applies every request too",
+        "A shorter lease TTL, so a paused owner loses ownership sooner",
+        "Nothing; an in-memory lock already prevents double sales"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A paused old owner will wake and write, so the store must reject writes carrying an old epoch. Two active owners is the double-sale problem. A shorter TTL narrows the window but can't close it, because the holder can't observe its own pause. The in-memory lock only protects one process.",
+      "ref": "unit-2-deep-dives.md#5-holds-and-oversell-prevention"
+    },
+    {
+      "id": "C8-036",
+      "type": "single",
+      "tags": [
+        "payments",
+        "ttl",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Holds last 8 minutes. A customer reaches checkout at 7:30, a 3-D Secure challenge takes 3 minutes, and the success webhook arrives after the hold expired and the seat was resold. What is the best fix?",
+      "choices": [
+        "A short selection hold, extended once into a payment-pending state with its own window when checkout starts",
+        "Make every hold 30 minutes",
+        "Confirm the order whenever payment succeeds, even if the hold expired",
+        "Keep 8 minutes, release on time, and refund every late payment"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Two deadlines solve both problems: abandoned carts free seats quickly, and people who start paying get time to finish. A 30-minute hold parks ≈ 30% of inventory in dead carts during the peak. Unconditional confirmation oversells. Release-and-refund works but turns an avoidable race into refunds at volume.",
+      "ref": "unit-2-deep-dives.md#6-payment-in-flight-hold-expiry-idempotent-confirmation-reconciliation"
+    },
+    {
+      "id": "C8-037",
+      "type": "single",
+      "tags": [
+        "payments",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "At a payment-pending hold's deadline the sweeper wants to release the seats, and at the same instant the success webhook arrives. Which sequence makes the outcome independent of interleaving?",
+      "choices": [
+        "The sweeper cancels the payment first; if the cancel succeeds it releases the seats conditionally, and if it fails because the payment succeeded it confirms; the webhook confirms only from payment_pending",
+        "The sweeper releases the seats first, then cancels the payment",
+        "Whichever of the two arrives first wins; the other is ignored",
+        "The webhook handler waits for the sweeper to finish its run"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The provider's state machine (an intent is cancelled or succeeds, never both) is the referee, and conditional writes on the hold's state make both code paths agree. Release-then-cancel lets the seats be resold while the payment can still succeed. 'First wins' without a referee can leave money taken and seats released. Waiting for a batch job couples the handler to the sweeper's schedule and still doesn't settle the payment.",
+      "ref": "unit-2-deep-dives.md#6-payment-in-flight-hold-expiry-idempotent-confirmation-reconciliation"
+    },
+    {
+      "id": "C8-038",
+      "type": "single",
+      "tags": [
+        "payments",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does the design authorise the card at checkout and capture only after the seats are confirmed?",
+      "choices": [
+        "If the seats are lost, the authorisation is voided: nothing moved, no refund to process, and lower fees than a refund",
+        "Captures are faster than authorisations",
+        "Payment providers require it for event tickets",
+        "It prevents the webhook from arriving twice"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Authorise-then-capture turns a lost seat into a void, the same pattern as a bank's authorisation hold. Speed isn't the reason. It isn't a universal provider rule. Webhook duplication is handled by deduplication, not by the capture mode.",
+      "ref": "unit-2-deep-dives.md#6-payment-in-flight-hold-expiry-idempotent-confirmation-reconciliation"
+    },
+    {
+      "id": "C8-039",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "webhooks",
+        "payments"
+      ],
+      "difficulty": 2,
+      "prompt": "The webhook for payment pi_88 arrives three times (two concurrently, one 6 hours later), and a buggy upstream also sends pi_88 with a different order id. What should the system end with?",
+      "choices": [
+        "One order, one set of tickets, one charge and one email; the mismatched order id is rejected (payment intent id is UNIQUE on orders) and alerted on",
+        "Three orders, de-duplicated later by the reconciliation job",
+        "One order for the first delivery and a second order for the different order id",
+        "An error for the 6-hour-late delivery, since the hold expired long ago"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Insert the provider event id first (duplicates hit the primary key and return 200), and a confirmed order never expires, so the late replay returns success. Creating duplicates and cleaning up later charges customers twice in the meantime. A payment intent maps to exactly one order. Returning an error for a replay turns a success into an apparent failure and triggers more retries.",
+      "ref": "unit-2-deep-dives.md#6-payment-in-flight-hold-expiry-idempotent-confirmation-reconciliation"
+    },
+    {
+      "id": "C8-040",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "webhooks"
+      ],
+      "difficulty": 2,
+      "prompt": "Why are payment webhooks deduplicated on the provider's event id rather than on the order id?",
+      "choices": [
+        "One order legitimately produces several events (authorised, captured, refunded); deduping on the order id would swallow the later ones",
+        "Order ids are not unique",
+        "The provider's event id is shorter",
+        "Order ids are assigned by the client"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The event id identifies one delivery of one fact; the order id identifies a business object with many facts over time. Order ids are unique (they're our primary key) and server-assigned. Length is irrelevant.",
+      "ref": "unit-2-deep-dives.md#6-payment-in-flight-hold-expiry-idempotent-confirmation-reconciliation"
+    },
+    {
+      "id": "C8-041",
+      "type": "single",
+      "tags": [
+        "webhooks",
+        "security",
+        "audit"
+      ],
+      "difficulty": 2,
+      "prompt": "The payment provider rotates its webhook signing secret at 10:05; your handler learns the new secret at 10:05:30 and drops events that fail verification. Weeks later, 23 captured payments have no order. What should have been in place?",
+      "choices": [
+        "Accept both secrets during a rotation window, return a retryable status on verification failure, alert on the failure rate, and reconcile provider payments against orders hourly during on-sales",
+        "Disable signature verification during on-sales",
+        "Confirm orders from the browser redirect when the webhook fails",
+        "Store webhooks in a cache until the new secret arrives"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Overlapping keys avoid the gap, a retryable status lets the provider redeliver, and reconciliation catches whatever slips through. Disabling verification lets anyone forge confirmations. The redirect can be forged or lost. A cache of unverified webhooks without a retry or reconciliation plan still loses them on eviction.",
+      "ref": "unit-2-deep-dives.md#6-payment-in-flight-hold-expiry-idempotent-confirmation-reconciliation"
+    },
+    {
+      "id": "C8-042",
+      "type": "multi",
+      "tags": [
+        "payments",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "A payment succeeds for a hold that is no longer payment_pending (it was released). Select ALL the correct actions.",
+      "choices": [
+        "Try to re-claim the same seats with the normal conditional write and confirm if they are free",
+        "Otherwise void the authorisation (or refund), mark the order accordingly and tell the customer",
+        "Count it in a confirm-after-expiry metric with an alert",
+        "Mark the seats sold anyway, since the customer paid",
+        "Take the seats from whoever holds them now, since this payment came first"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "The late-payment path re-claims if possible, otherwise returns the money, and measures how often it happens. Selling anyway, or taking seats from their current holder, is an oversell.",
+      "ref": "unit-2-deep-dives.md#6-payment-in-flight-hold-expiry-idempotent-confirmation-reconciliation"
+    },
+    {
+      "id": "C8-043",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "backpressure"
+      ],
+      "difficulty": 2,
+      "prompt": "A waiting room's token bucket refills at 200 per second but has no cap. Nobody waits overnight, then 500,000 people join at 10:00. What does the first Tick do?",
+      "choices": [
+        "Admits the entire queue at once, because millions of tokens were banked overnight",
+        "Admits 200 users, the configured rate",
+        "Admits nobody, because tokens only accrue while users wait",
+        "Panics on integer overflow"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Without a cap the bucket saves up capacity, and the first tick spends it all: the stampede the room exists to prevent. A cap at Burst ≈ Rate bounds the burst to about a second's worth. Tokens do accrue while idle (the lab's test checks they carry over up to Burst). The lab keeps tokens in a float64, and the real problem is the missing cap, not overflow.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-044",
+      "type": "single",
+      "tags": [
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "Why must Verify compare the pass's MAC with hmac.Equal rather than == on the hex strings?",
+      "choices": [
+        "== can return as soon as a byte differs, so response time leaks how much of a forged MAC is correct, letting an attacker forge a pass byte by byte",
+        "== doesn't work on strings in Go",
+        "hmac.Equal also checks the expiry",
+        "hmac.Equal is faster"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "hmac.Equal is constant-time, closing a timing side channel; no test fails if you use ==, which is why it's a rule. == works on strings. hmac.Equal only compares bytes; expiry is a separate check. Constant-time comparison is not faster.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-045",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "queues"
+      ],
+      "difficulty": 1,
+      "prompt": "A user waiting at position 2 taps 'Join' again. What must the room return?",
+      "choices": [
+        "Their existing ticket at position 2, without taking a second slot",
+        "A new ticket at the back of the queue",
+        "ErrQueueFull, since they are already in it",
+        "An error telling them to stop tapping"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Join is idempotent: a double tap must neither move the user nor take a second slot (TestJoin_IsIdempotentWhileWaiting). A second slot lets one person admit themselves twice. ErrQueueFull is for a full queue. An error for a retry punishes the normal behaviour of impatient users and flaky networks.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-046",
+      "type": "single",
+      "tags": [
+        "ttl",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "In a scratch test, PassTTL is 1 minute and the clock advances 2 minutes between admission and checkout. What happens, and what should the TTL cover?",
+      "choices": [
+        "Verify returns ErrPassExpired, the user is forgotten and must rejoin at the back; the TTL must exceed choosing time plus the payment window",
+        "Verify still succeeds because the user was admitted",
+        "The room extends the pass automatically",
+        "Verify returns ErrBadPass because the pass was tampered with"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "An expired pass is forgotten everywhere (TestExpiry_ExpiredUserIsForgottenAndRejoinsAtTheBack). Admission doesn't make a pass immortal. The lab has no auto-extension. ErrBadPass is for malformed, tampered or foreign passes; a genuine late pass is ErrPassExpired. Sizing: ≈ 30 s choosing + ≈ 15 min payment window, so ≈ 20 minutes.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-047",
+      "type": "single",
+      "tags": [
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "The room admits at 100 per second. Tick runs 5 ms after the previous Tick. Why must the token level be a float64 rather than an integer?",
+      "choices": [
+        "5 ms at 100/s earns half a token; an integer would drop it on every tick and admit far fewer than 100 per second",
+        "Integers can't be compared with Burst",
+        "float64 makes the bucket safe for concurrent use",
+        "Go's time package returns durations as floats"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Fractional accrual must carry over between ticks (TestTick_AdmitsAtRateInFIFOOrder checks a 0.5 s tick admits 50). Integers compare fine. Concurrency safety comes from the mutex, not the type. time.Duration is an int64 count of nanoseconds.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-048",
+      "type": "multi",
+      "tags": [
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the passes for which Verify must return ErrBadPass (rather than a user id or ErrPassExpired).",
+      "choices": [
+        "Another user's id with alice's MAC",
+        "Alice's pass with a later expiry substituted",
+        "Alice's pass with one MAC byte flipped",
+        "Alice's pass verified by a room configured with a different secret",
+        "Alice's genuine pass, checked after its expiry"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "Any change to the signed fields, a corrupted MAC or a foreign secret makes the recomputed MAC differ: ErrBadPass. A genuine, correctly signed pass past its expiry is ErrPassExpired, checked only after the MAC matches.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-049",
+      "type": "single",
+      "tags": [
+        "queues",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "At 500,000 waiting users and 50,000 polls per second, how should production compute a user's position?",
+      "choices": [
+        "Position ≈ the user's join sequence number minus a published 'now serving' watermark, computed in memory or at the edge",
+        "ZRANK on a Redis sorted set of all waiting users for every poll",
+        "Walk the FIFO list as the lab does, with a faster CPU",
+        "SELECT count(*) of earlier joins in the database"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Subtraction is O(1) and can be served from a cached watermark. A sorted-set rank is O(log n) per call on one shared key, a hot key at 50k/s. Walking the list is ≈ 25 ms per call at this size. A database count is the failure story.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-050",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "rate-limiting"
+      ],
+      "difficulty": 3,
+      "prompt": "You delete the room's mutex. In TestConcurrent_EveryUserAdmittedExactlyOnce, four goroutines call Tick at the same moment each second. What do you expect, and why does it matter?",
+      "choices": [
+        "Data races, and more than 200 admissions in a second or users admitted twice, because tickers read the same token level and both spend it: the oversell, one layer up",
+        "Exactly 200 admissions per second, since each Tick reads the same clock",
+        "A deadlock, because four tickers wait on each other",
+        "Fewer admissions, because tickers cancel each other's tokens"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Without the lock, two tickers can both see 200 tokens and both admit 200, or pop the same user. Reading the same clock doesn't serialise the read-modify-write of the bucket. With no locks there's nothing to deadlock on. Lost updates make the bucket over-spend, not under-spend.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-051",
+      "type": "single",
+      "tags": [
+        "replication",
+        "caching",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Should read replicas serve seat availability during an on-sale?",
+      "choices": [
+        "Never for claims; acceptable for the snapshotter if replica lag is small and monitored, since the snapshot is only a hint",
+        "Yes, for everything: replicas take load off the primary",
+        "No, replicas are never acceptable anywhere in this system",
+        "Yes for claims, as long as the replica is in the same availability zone"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A claim must see the latest committed state, which a lagging replica can't guarantee. The once-a-second snapshot query can come from a replica because the 409 at hold time is the truth. Replicas are fine for order history and reports. Zone placement doesn't remove replication lag.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-052",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Behind the waiting room, the hot event's partition is slow although each seat row sees few contenders. A profile shows every order also runs UPDATE events SET tickets_sold = tickets_sold + n. What is the fix?",
+      "choices": [
+        "Stop updating an event-level counter per order; derive the count from the snapshot or seat states (or bucket it)",
+        "Add an index on events.tickets_sold",
+        "Move the events table to Redis",
+        "Raise the admission rate so orders finish sooner"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A row touched by every transaction serialises the whole event at ≈ 500/s; removing or bucketing it restores parallelism. An index doesn't change lock contention on one row. Moving it to Redis adds a second source of truth for a number you can derive. Raising admission makes the contention worse.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-053",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "capacity",
+        "backpressure"
+      ],
+      "difficulty": 3,
+      "prompt": "A room admits 2,000 users per second (what the web tier handled in a load test). Buyers take ≈ 30 s to choose, and there are ≈ 7,200 orders. 87% of hold attempts return 409. What is wrong, and what should set the rate?",
+      "choices": [
+        "≈ 60,000 people are choosing for ≈ 7,200 orders; the rate should come from the inventory (Little's law, ≈ 240/s) and be adjusted on conflict rate, hold and payment latency, and remaining stock",
+        "The rate is fine; 409s are normal and users should retry faster",
+        "The database is too slow; add read replicas",
+        "The pass TTL is too short"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "2,000 × 30 s = 60,000 people competing for 7,200 orders, so most attempts collide, and retries add load. Faster retries amplify it. Replicas don't serve claims. The pass TTL is unrelated to conflict rates.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-054",
+      "type": "single",
+      "tags": [
+        "queues",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Why should the waiting room be bounded, and by what?",
+      "choices": [
+        "By usefulness: roughly the admissions needed to sell out (orders ÷ conversion) times a safety factor; beyond that, tell people now rather than let them wait for nothing",
+        "By memory, because 1 M users at ≈ 100 B each won't fit",
+        "It shouldn't be bounded; everyone deserves a place in line",
+        "By the CDN's request limit"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "1 M users is only ≈ 100 MB, so memory isn't the limit; the real question is whether a person could plausibly be admitted. An unbounded queue makes promises it can't keep. The CDN doesn't bound queue size.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-055",
+      "type": "single",
+      "tags": [
+        "fairness",
+        "abuse"
+      ],
+      "difficulty": 2,
+      "prompt": "Scripts from thousands of accounts start hitting the queue at 09:59:59.9 and take most of the first 10,000 places in a FIFO that opens at 10:00:00. Which control directly removes the advantage of arriving in the first milliseconds?",
+      "choices": [
+        "A randomised pre-queue: everyone who arrives before opening gets a random position at 10:00, with FIFO for later arrivals",
+        "A larger token bucket burst",
+        "A longer pass TTL",
+        "Serving the event page from a CDN"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Randomising early arrivals turns the first second into a lottery among people who showed up on time. A larger burst admits more at once but in the same order. Pass TTL affects how long admitted users stay. CDN serving affects load, not ordering.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-056",
+      "type": "single",
+      "tags": [
+        "fairness",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Demand is ≈ 100 people per seat. Which approach changes the product rather than the queue, and why might you choose it?",
+      "choices": [
+        "A registration lottery before the sale: demand is known in advance and invitations go out in waves, so the on-sale is no longer a stampede",
+        "A faster database primary",
+        "A longer selection hold",
+        "Pure FIFO with a bigger queue bound"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "At 100:1 a queue is mostly a slow way to say no; a lottery spreads load, defeats session-count advantages, and lets you tell people their odds early. A faster primary doesn't change who gets in. A longer hold locks up inventory. A bigger FIFO bound promises more people a wait for nothing.",
+      "ref": "unit-2-deep-dives.md#7-the-flash-sale-waiting-room-the-hot-event-and-seat-map-reads"
+    },
+    {
+      "id": "C8-057",
+      "type": "single",
+      "tags": [
+        "design",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A candidate says: 'For the on-sale we'll autoscale the booking API to 200 pods.' What is the best response?",
+      "choices": [
+        "Throughput is set by the inventory and the payment provider, not the web tier; more pods add conflicting writers. Admit users at the rate the inventory sells.",
+        "Good, as long as the pods are spread across zones",
+        "Good, but use 400 pods to be safe",
+        "Autoscaling is too slow; pre-scale to 200 pods an hour before"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The bottleneck is a few thousand contended rows; more concurrent writers raise lock waits and conflicts, not sales. Zone spread, more pods or pre-scaling all miss that the constraint isn't compute.",
+      "ref": "unit-2-deep-dives.md#common-mistakes"
+    },
+    {
+      "id": "C8-058",
+      "type": "single",
+      "tags": [
+        "transactions",
+        "payments",
+        "latency"
+      ],
+      "difficulty": 2,
+      "prompt": "v1's POST /book called the payment provider inside the transaction that held the seat row locks. The provider's p99 went to 6 s. What happened?",
+      "choices": [
+        "The seats stayed locked for 6 s per request, everyone wanting those seats queued behind them, and the connection pool emptied",
+        "Nothing, because row locks are released while waiting on I/O",
+        "The payment provider timed out the database transaction",
+        "Only the slow requests failed; others were unaffected"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A transaction holds its locks until commit, so a slow external call becomes lock hold time and pool exhaustion. Databases don't release row locks during your application's I/O. The provider has no control over your transaction. Contention spreads the slowness to every request for those seats.",
+      "ref": "unit-2-deep-dives.md#common-mistakes"
+    }
+  ]
+}

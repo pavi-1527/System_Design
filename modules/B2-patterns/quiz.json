@@ -1,0 +1,992 @@
+{
+  "module": "B2",
+  "title": "Patterns that matter",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "B2-001",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "strategy",
+        "go"
+      ],
+      "difficulty": 1,
+      "prompt": "A fee engine needs one operation per fee type (compute the fee from a transaction). Fee types are chosen by a kind string, are pure functions of the transaction, and a new one is added every quarter. Which design is the most idiomatic Go?",
+      "choices": [
+        "A func type (FeeFunc) stored in a map keyed by kind; each fee type is a function or closure registered with the engine",
+        "An abstract base struct with an embedded Fee() method that each fee type overrides",
+        "An interface with one method, one struct per fee type, and a FeeStrategyFactoryProvider to build them",
+        "One calculateFee function with a case per kind, edited for each new fee type"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A func type fits: one operation, no behaviour beyond a closure, and any function or method value qualifies, so tests pass a literal. Go has no overriding, so an embedded 'abstract base' cannot dispatch to the outer type's method and is the wrong tool. A one-method interface plus a factory provider adds three declarations for what a func type gives you (it only pays off when a rule needs several behaviours or identity). A growing switch is the failure story: every new type edits shared code and mirror copies of the switch.",
+      "ref": "unit-1-patterns.md#1-strategy-a-rule-is-a-value"
+    },
+    {
+      "id": "B2-002",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "strategy",
+        "go"
+      ],
+      "difficulty": 2,
+      "prompt": "What does this print?\n\ntype schedule struct{ bps int64 }\nfunc (s schedule) fee(a int64) int64 { return a * s.bps / 10000 }\n\ns := schedule{bps: 100}\nf := s.fee\ns.bps = 200\nfmt.Println(f(10000))",
+      "choices": [
+        "100",
+        "200",
+        "0",
+        "It does not compile: a method value cannot be used before the variable is final"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A method value with a value receiver evaluates (copies) the receiver when the value is created, so f holds schedule{bps: 100} and prints 100. 200 would require binding a pointer ((&s).fee) or re-creating the method value after the change. 0 comes from integer division only if bps were tiny, which it is not (10000*100/10000 = 100). Method values are ordinary expressions; there is no compile-time restriction.",
+      "ref": "unit-1-patterns.md#1-strategy-a-rule-is-a-value"
+    },
+    {
+      "id": "B2-003",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "strategy",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "A fee Engine guards its map with an RWMutex, and Fee() does RLock; defer RUnlock; look up and CALL the strategy. The 'international wire' strategy calls engine.Fee for 'domestic wire' and adds a surcharge. In production, once a day an operator registers a new strategy. What is the failure mode?",
+      "choices": [
+        "An intermittent deadlock: if the writer arrives between the outer and the inner RLock, the inner RLock waits for the writer, which waits for the outer RLock",
+        "It always deadlocks on the first international wire, because RWMutex read locks are not shareable",
+        "Nothing: RLock is re-entrant, so nested reads are safe",
+        "A data race on the map, which the race detector reports"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Go's RWMutex stops admitting new readers once a writer is waiting, so a nested RLock can block behind that writer, which is itself blocked by the outer RLock: a deadlock that needs unlucky timing, which is why it appears in production, not in tests. It does not always deadlock: with no writer waiting, many readers share the lock. RLock is not re-entrant in this sense (the documentation warns against recursive read locking). There is no data race, because every map access is locked; the bug is lock ordering. The fix is to copy the function out under the lock and call it after unlocking.",
+      "ref": "unit-1-patterns.md#1-strategy-a-rule-is-a-value"
+    },
+    {
+      "id": "B2-004",
+      "type": "numeric",
+      "tags": [
+        "patterns",
+        "strategy",
+        "money"
+      ],
+      "difficulty": 2,
+      "prompt": "A wire fee strategy is Percent(25 bps, floor 1500, cap 4500), in cents. What fee, in cents, does it charge on a wire of 10,000,000 cents (100,000.00)? (1 bp = 0.01%.)",
+      "value": 4500,
+      "tolerance": 0.01,
+      "unit": "cents",
+      "explanation": "25 bps of 10,000,000 = 10,000,000 x 25 / 10,000 = 25,000 cents. That exceeds the cap of 4,500, so the fee is clamped to 4,500. (The floor of 1,500 only applies when the percentage is lower, e.g. on 100,000 cents the 250 cents is raised to 1,500.)",
+      "ref": "unit-1-patterns.md#1-strategy-a-rule-is-a-value"
+    },
+    {
+      "id": "B2-005",
+      "type": "multi",
+      "tags": [
+        "patterns",
+        "strategy",
+        "testing"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL statements that are true of a MARGINAL tiered fee schedule (each band of the amount charged at its own rate, like income tax):",
+      "choices": [
+        "The fee never decreases as the amount increases",
+        "Charging $1,000.01 can cost less than charging $1,000.00 if the rate drops at the tier boundary",
+        "Summing exact per-band products and rounding once at the end can differ by a minor unit from rounding each band separately",
+        "A property test such as 'fee is non-decreasing in amount' finds a cliff bug that a few hand-picked examples may miss"
+      ],
+      "answer": [
+        0,
+        2,
+        3
+      ],
+      "explanation": "Marginal tiers only add cost as the amount grows, so the fee is monotonic (true). The cliff in the second statement belongs to the 'whole amount at the landing tier's rate' implementation, not the marginal one (false). Rounding per band versus once can differ (e.g. two bands each 0.45 cents round to 0, while their sum 0.9 rounds to 1), so the kata rounds once (true). Properties catch boundary bugs that examples at 50,000 or 600,000 miss, because the cliff exists only at the boundaries (true).",
+      "ref": "unit-1-patterns.md#1-strategy-a-rule-is-a-value"
+    },
+    {
+      "id": "B2-006",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "strategy",
+        "design"
+      ],
+      "difficulty": 3,
+      "prompt": "Ops hot-swaps the wire fee strategy at 10:00:05. A member was quoted $15.00 at 10:00:00 and confirms the transfer at 10:00:10, and is charged $25.00. Which change fixes the root cause?",
+      "choices": [
+        "Stamp the strategy version on the quote and compute the charge with that version, keeping versions immutable for audit",
+        "Take a global lock around every fee calculation so swaps cannot interleave",
+        "Forbid hot-swaps and require a redeploy for every fee change",
+        "Round fees to the nearest dollar so small differences disappear"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The problem is that quote and charge are computed against different mutable state. Versioned, immutable schedules referenced from the quote make the charge reproducible and auditable. A global lock serialises calculations but the schedule still changes between the two calls. A redeploy-only rule removes the operational flexibility and still leaves in-flight quotes straddling the deploy. Rounding hides the symptom for small differences and is wrong for large ones.",
+      "ref": "unit-1-patterns.md#1-strategy-a-rule-is-a-value"
+    },
+    {
+      "id": "B2-007",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "observer",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "What happens when this runs in a server (other goroutines are alive)?\n\nfunc (b *Bus) Publish(e string) {\n\tb.mu.Lock()\n\tdefer b.mu.Unlock()\n\tfor _, fn := range b.subs { fn(e) }\n}\n// one subscriber's fn calls b.Subscribe(...)",
+      "choices": [
+        "The publishing goroutine blocks forever: Subscribe waits for the mutex Publish still holds, and sync.Mutex is not re-entrant",
+        "The runtime panics with 'recursive lock'",
+        "Subscribe succeeds, because the same goroutine already owns the lock",
+        "The deadlock detector aborts the program with 'all goroutines are asleep'"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Go's sync.Mutex is not re-entrant and has no owner concept, so the second Lock from the same goroutine blocks forever. There is no 'recursive lock' panic (that exists in some other languages). The same goroutine owning the lock does not help, for the same reason. The global deadlock detector only fires when every goroutine is blocked; a server's other goroutines keep it quiet, so the symptom is a silent hang.",
+      "ref": "unit-1-patterns.md#2-observer-telling-others-without-knowing-them"
+    },
+    {
+      "id": "B2-008",
+      "type": "numeric",
+      "tags": [
+        "patterns",
+        "observer",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "At month-end a batch settles 50,000 transfers. A subscriber's callback sends an email synchronously and takes about 200 ms. Callbacks run on the publisher's goroutine, one transfer at a time. How many hours of the batch are spent inside that callback?",
+      "value": 2.8,
+      "tolerance": 0.1,
+      "unit": "hours",
+      "explanation": "50,000 x 0.2 s = 10,000 s, and 10,000 / 3,600 is about 2.8 hours. With the same work on a worker fed by a channel the publisher is not blocked and the batch itself takes minutes. The rule: sync callbacks only for fast, non-blocking work.",
+      "ref": "unit-1-patterns.md#2-observer-telling-others-without-knowing-them"
+    },
+    {
+      "id": "B2-009",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "observer",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Audit requires that every settled transfer produces an audit record, even across crashes and while the audit subscriber is down for an hour. Which delivery design meets that?",
+      "choices": [
+        "Write the audit record in the same database transaction as the state change (outbox) and have a relay publish it at-least-once",
+        "A buffered channel per subscriber that drops the newest event when full, with a dropped counter",
+        "Synchronous in-process callbacks with panic recovery",
+        "An unbounded in-memory queue per subscriber"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Only a durable record written atomically with the state change survives a crash between 'state changed' and 'subscriber notified'; the relay then delivers at-least-once with a stable event id. A drop-newest channel loses events by design (fine for UI toasts, not audit). Callbacks with recovery contain panics but not crashes or downtime. An unbounded queue loses everything on restart and grows until it OOMs.",
+      "ref": "unit-1-patterns.md#2-observer-telling-others-without-knowing-them"
+    },
+    {
+      "id": "B2-010",
+      "type": "multi",
+      "tags": [
+        "patterns",
+        "observer",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "A subscriber callback panics inside Bus.Publish. Select ALL behaviours a robust bus should provide:",
+      "choices": [
+        "The remaining subscribers for the event still run",
+        "Publish reports the panic to the caller (for example as a joined error)",
+        "The panic propagates out of Publish and crashes the publisher so the bug is noticed",
+        "The panic is swallowed with no trace so publishers are never disturbed"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "One bad observer must not starve its neighbours or take down the publisher, and it must not vanish silently: recover per subscriber, keep going, and return or log the error with the event key. Letting the panic escape kills the publisher (in the story, a batch worker with 31,000 transfers settled but not audited). Swallowing without a trace hides the bug forever.",
+      "ref": "unit-1-patterns.md#2-observer-telling-others-without-knowing-them"
+    },
+    {
+      "id": "B2-011",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "observer",
+        "concurrency",
+        "go"
+      ],
+      "difficulty": 3,
+      "prompt": "A channel subscription's deliver() does:\n\nselect {\ncase s.ch <- e:\ndefault:\n\ts.dropped++\n}\n\nand Cancel() does close(s.ch), with no mutex shared between the two. Publishers run concurrently with Cancel. What is the bug?",
+      "choices": [
+        "Sending on a closed channel panics even inside a select with a default case, so a concurrent Cancel can crash a publisher",
+        "The default case makes the send safe, so the only issue is an unsynchronised dropped counter",
+        "close(s.ch) blocks until the buffer is empty, so Cancel can deadlock",
+        "Receivers get a nil value forever after Cancel"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A select with a default avoids blocking, not panicking: a send case on a closed channel panics when evaluated. Delivery and close must be serialised (a mutex plus a closed flag) so a send never races the close. The dropped counter is also racy, but it is not the crash. close never blocks (it returns immediately, buffered values remain readable). After close, receivers get the zero value with ok == false once the buffer drains, not a blocking nil.",
+      "ref": "unit-1-patterns.md#2-observer-telling-others-without-knowing-them"
+    },
+    {
+      "id": "B2-012",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "observer",
+        "go"
+      ],
+      "difficulty": 2,
+      "prompt": "Subscribe returns an unsubscribe func that removes subs[i] using the index i captured when the subscription was made. A caller invokes the same unsubscribe func twice. What goes wrong?",
+      "choices": [
+        "The second call removes a different subscriber, because the slice has shifted since i was captured",
+        "The second call panics with an index out of range in every case",
+        "Nothing: removing an already removed subscriber is always a no-op",
+        "The first call is ignored and the second call does the removal"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "After the first removal the elements after index i shift left, so index i now names the next subscriber and the second call silently unsubscribes someone else. Identify subscriptions by a unique id and make unsubscribe idempotent. The panic is possible only when i is past the end, not in every case. 'Always a no-op' is the property you must build, not one that index-based removal has. The calls are not reordered.",
+      "ref": "unit-1-patterns.md#2-observer-telling-others-without-knowing-them"
+    },
+    {
+      "id": "B2-013",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "state",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "A vendor re-delivers its 'settled' callback for a transfer that is already settled (at-least-once delivery). What should the state machine do?",
+      "choices": [
+        "Reject it as a duplicate: no state change, no history entry, acknowledge the vendor, count it, but do not page anyone",
+        "Return an illegal-transition error and page on-call, since settled to settled is not an edge",
+        "Apply it again so the ledger shows the latest vendor timestamp",
+        "Move the transfer back to authorised and re-run the settle logic"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Duplicates are expected under at-least-once delivery, so they are acknowledged and counted, not alarmed on. Treating them as illegal floods on-call and teaches people to ignore the alert that should mean a real bug. Applying again double-posts to the ledger. Moving back to authorised invents an edge that does not exist and corrupts the audit trail.",
+      "ref": "unit-1-patterns.md#3-state-legal-moves-as-data"
+    },
+    {
+      "id": "B2-014",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "state",
+        "go"
+      ],
+      "difficulty": 2,
+      "prompt": "Lifecycle: initiated -authorise-> authorised -settle-> settled -reverse-> reversed; fail is legal from initiated and authorised; failed and reversed are terminal. A transfer is initiated. Events are applied in order: Authorise, Settle, Fail, Reverse (24 h window still open). What is the outcome?",
+      "choices": [
+        "Fail returns an illegal-transition error and changes nothing; Reverse succeeds; final state is reversed",
+        "Fail succeeds and the transfer ends up failed; Reverse is rejected because failed is terminal",
+        "Everything succeeds in order and the final state is reversed",
+        "Settle is rejected because it has not been authorised, so nothing after it applies"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Fail is only legal from initiated and authorised; after Settle the transfer is settled, so Fail is not an edge, and it is not a duplicate (the last event was Settle), so it is an illegal transition with no state change. Reverse is legal from settled and succeeds. 'Fail succeeds' ignores that money has moved (the right way out of settled is a reversal). 'Everything succeeds' skips the illegal move. Authorise did happen first, so Settle is accepted.",
+      "ref": "unit-1-patterns.md#3-state-legal-moves-as-data"
+    },
+    {
+      "id": "B2-015",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "state",
+        "idempotency"
+      ],
+      "difficulty": 3,
+      "prompt": "Two pods receive the same vendor 'settled' callback at the same instant. Each runs: read row; if status == 'authorised' { set status = 'settled'; post to ledger }. The ledger gets two postings. Which fix is correct across pods?",
+      "choices": [
+        "UPDATE transfers SET status='settled' WHERE id=$1 AND status='authorised', then post to the ledger only if one row was affected",
+        "Wrap the if-statement in a sync.Mutex in each process",
+        "Re-read the row after posting to the ledger and compensate if the status changed",
+        "Sleep a random few milliseconds before checking, so the pods rarely collide"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The bug is check-then-act across processes. A conditional update makes the check and the write one atomic statement and tells you who won (RowsAffected); only the winner posts. A mutex protects one process, not two pods. Compensating afterwards leaves a window of double-posted money. Random sleeps shrink the window but never close it.",
+      "ref": "unit-1-patterns.md#3-state-legal-moves-as-data"
+    },
+    {
+      "id": "B2-016",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "state",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Reversal of a settled transfer is allowed only within 24 hours. In a transition table, how should this rule be modelled?",
+      "choices": [
+        "As a guard on the existing settled-to-reversed edge that returns a distinct error (reversal window closed), using an injected clock",
+        "By deleting the edge after 24 hours with a background job",
+        "As a separate state 'reversible' and 'not reversible' with a timer that moves between them",
+        "By checking time.Now() inside the HTTP handler before calling Apply"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The edge is legal; whether it is allowed now depends on time, so a guard keeps the table stable, produces a different error class from an illegal transition (tell the member 'too late' versus page someone), and is testable with an injected clock (boundary at exactly 24 h). Deleting edges at runtime makes the table mutable and unauditable. A timer-driven 'reversible' state doubles the state space for a rule that is a predicate. Checking the clock in the handler scatters the rule outside the single source of truth.",
+      "ref": "unit-1-patterns.md#3-state-legal-moves-as-data"
+    },
+    {
+      "id": "B2-017",
+      "type": "multi",
+      "tags": [
+        "patterns",
+        "state",
+        "testing"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL checks that can be run mechanically over a transition table (without knowing the business rules):",
+      "choices": [
+        "Every state is reachable from the initial state",
+        "Every non-terminal state has at least one outgoing event",
+        "Terminal states have no outgoing edges",
+        "The 24-hour reversal window is the right business value"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Reachability, 'no dead ends that are not declared terminal', and 'terminals have no exits' are graph properties of the table and catch typos and missing edges. Whether 24 hours is the right window is a business decision no graph check can know; it needs a requirement and a test that states it.",
+      "ref": "unit-1-patterns.md#3-state-legal-moves-as-data"
+    },
+    {
+      "id": "B2-018",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "state",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Vendor callbacks arrive in arbitrary order and the transfer state is persisted in a database column and reloaded on every request. Which state-machine form fits best?",
+      "choices": [
+        "An enum plus a transition table with guards, applied by one Apply method",
+        "State-as-types, where each state is a type exposing only its legal methods",
+        "A class hierarchy with one subclass per state and virtual methods",
+        "A boolean field per state"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "External, unordered events and a persisted column favour data: a table evaluates any (state, event) pair, rejects the illegal ones in one place and maps directly to a stored string. State-as-types gives compile-time safety only while one process owns the flow; reloading from storage needs a switch that rebuilds the typed value, and out-of-order external events cannot be ruled out at compile time. Go has no virtual-method hierarchy to build on. A boolean per state allows impossible combinations (settled and failed both true).",
+      "ref": "unit-1-patterns.md#3-state-legal-moves-as-data"
+    },
+    {
+      "id": "B2-019",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "factory",
+        "go"
+      ],
+      "difficulty": 2,
+      "prompt": "What happens when this program starts?\n\nvar registry = map[string]func() string{}\nfunc mustGet(n string) func() string {\n\tf, ok := registry[n]\n\tif !ok { panic(\"unknown provider \" + n) }\n\treturn f\n}\nvar defaultProvider = mustGet(\"acme\")\nfunc init() { registry[\"acme\"] = func() string { return \"acme\" } }\nfunc main() { fmt.Println(defaultProvider()) }",
+      "choices": [
+        "It panics with 'unknown provider acme' before main runs, because package-level variables are initialised before init() functions",
+        "It prints acme: init() runs first",
+        "It prints acme: the compiler reorders the initialisation by dependency on registry",
+        "It fails to compile because defaultProvider depends on init()"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Go initialises all package-level variables (in dependency order) and only then runs the init() functions. defaultProvider's initialiser calls mustGet, which depends on registry but not on init(), so it runs when the registry is still empty. Dependency analysis follows variable references, not the side effects of init(). Compilation succeeds; this is a runtime surprise, which is why registries should be filled explicitly or looked up lazily.",
+      "ref": "unit-1-patterns.md#4-factory-and-registry-choosing-a-provider-by-name"
+    },
+    {
+      "id": "B2-020",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "factory",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Three vendor packages register themselves in init(). main imports only the acme package, but a tenant's configuration says 'pixelcorp'. When is the problem discovered, by default?",
+      "choices": [
+        "At runtime, when that tenant's provider is first built; the compiler cannot see it",
+        "At compile time, because the registry reference is unresolved",
+        "At link time, because the pixelcorp symbol is missing",
+        "Never: the registry falls back to the first registered provider"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A package that nobody imports is never linked in, its init() never runs, and the name is simply absent from the registry; the lookup fails when the code first asks for it. The same thing happens with sql.Open and a missing driver import. Nothing at compile or link time references the name. A silent fallback would be the fail-open bug. Validate every tenant's configuration at startup so the deploy fails instead of month-end.",
+      "ref": "unit-1-patterns.md#4-factory-and-registry-choosing-a-provider-by-name"
+    },
+    {
+      "id": "B2-021",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "factory",
+        "design"
+      ],
+      "difficulty": 3,
+      "prompt": "The statement job picks an image vendor from tenant config with: switch cfg.Vendor { case \"acme\": ...; case \"pixelcorp\": ...; default: use acme }. A tenant's config contains the typo 'pixelcrop'. What is the most important property to change in the replacement design?",
+      "choices": [
+        "An unknown name must fail closed with an error that names it and lists the known providers, preferably at startup",
+        "Add a case for 'pixelcrop' so the typo works",
+        "Make the default the cheapest vendor to limit the cost of mistakes",
+        "Lower-case and trim all names so typos are less likely"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The danger is the silent default: the platform paid and sent data to a vendor the tenant had no contract with, for weeks. Failing closed with a message like unknown provider \"pixelcrop\" (known: acme, pixelcorp) turns a silent error into a ten-second fix, and validating at startup moves it before any traffic. Adding a case for the typo bakes in the mistake. A cheaper default is still a default. Normalising helps case typos but not letter swaps, and still fails open on anything else.",
+      "ref": "unit-1-patterns.md#4-factory-and-registry-choosing-a-provider-by-name"
+    },
+    {
+      "id": "B2-022",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "factory",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "A Registry.New holds RLock for its whole body, including the call to the constructor. A 'failover' constructor builds its two children by calling registry.New. Another goroutine calls Register while a failover is being constructed. What happens?",
+      "choices": [
+        "Deadlock: the writer waits for the outer RLock, and the nested New's RLock waits behind the queued writer",
+        "Nothing: the nested RLock shares the lock with the outer one",
+        "Register panics because the registry is being read",
+        "The failover provider is built with stale children but no deadlock occurs"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Once a writer is queued, new readers wait behind it; the nested New is a new reader, the writer waits for the outer reader, and the outer reader waits for the nested New: a cycle. Reads sharing a lock only holds when no writer is waiting. Register does not panic; it blocks. The fix is to look up the constructor under the lock and run it after unlocking (and to give it a copy of the config).",
+      "ref": "unit-1-patterns.md#4-factory-and-registry-choosing-a-provider-by-name"
+    },
+    {
+      "id": "B2-023",
+      "type": "multi",
+      "tags": [
+        "patterns",
+        "factory",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL good reasons for Registry.Register to return an error on a duplicate name instead of replacing the earlier constructor:",
+      "choices": [
+        "A provider name is an identity that selects a vendor and credentials; silent replacement could reroute tenants",
+        "With init() registration, 'last one wins' would make behaviour depend on package initialisation order",
+        "database/sql.Register treats a duplicate name as a programming error and panics",
+        "Go maps cannot hold two values for a key, so replacement is impossible"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "The first two are design reasons: identity semantics and the hidden order dependence of last-wins. The third is the standard library's precedent (Register panics on a duplicate name or a nil driver). The fourth is false: assigning to an existing map key replaces its value, which is exactly what Engine.Register in the strategy kata does, deliberately, because fee schedules are values to update.",
+      "ref": "unit-1-patterns.md#4-factory-and-registry-choosing-a-provider-by-name"
+    },
+    {
+      "id": "B2-024",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "factory",
+        "testing"
+      ],
+      "difficulty": 2,
+      "prompt": "Forty tenants are configured, and three have bad provider settings. At startup the platform builds every tenant's provider. Which behaviour is best?",
+      "choices": [
+        "Build all, and fail the start-up with one error that names every misconfigured tenant",
+        "Fail on the first bad tenant so the log stays short",
+        "Skip bad tenants and start; they will error on first use",
+        "Replace bad tenants' providers with a default"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Reporting every failure at once lets one deploy fix all of them, and failing the start makes misconfiguration a deploy-time event. Failing on the first means three deploy cycles. Starting with broken tenants converts a config error into member-facing errors at an unpredictable time. A default provider is the fail-open bug again.",
+      "ref": "unit-1-patterns.md#4-factory-and-registry-choosing-a-provider-by-name"
+    },
+    {
+      "id": "B2-025",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "adapter",
+        "money",
+        "go"
+      ],
+      "difficulty": 2,
+      "prompt": "What does this print?\n\nprice := 19.99\nfmt.Println(int64(price * 100))",
+      "choices": [
+        "1998",
+        "1999",
+        "2000",
+        "19"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "19.99 has no exact binary representation (it is about 19.989999999999998), so price*100 is about 1998.9999999999998 and the conversion to int64 truncates to 1998. Writing the constant expression 19.99*100 directly would be evaluated exactly at compile time, which hides the bug in tests; variables expose it. Money must be integer minor units; this is why the adapter kata renders decimals with integer arithmetic.",
+      "ref": "unit-1-patterns.md#5-adapter-keeping-vendor-shapes-out-of-your-domain"
+    },
+    {
+      "id": "B2-026",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "adapter",
+        "resilience",
+        "errors"
+      ],
+      "difficulty": 3,
+      "prompt": "An adapter converts every error from a vendor client into ErrUnavailable. A circuit breaker counts ErrUnavailable as a failure. About 8% of member requests are abandoned (their context is cancelled) while the vendor is healthy. What happens?",
+      "choices": [
+        "The breaker opens although the vendor is fine, rejecting all members until the cooldown ends; the adapter must return context errors as context errors",
+        "Nothing: abandoned requests are rare enough that the breaker ignores them",
+        "The vendor is blamed correctly: any aborted call is a vendor problem",
+        "The breaker never opens because cancelled calls never return an error"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "With 8% of calls 'failing', a few consecutive abandons reach the threshold and the circuit opens against a healthy vendor. Cancellation by the caller says nothing about the vendor: the adapter should return it as context.Canceled / DeadlineExceeded (not ErrUnavailable), and the breaker should treat calls whose own context ended as neither success nor failure. The calls do return errors (the context error), so the last option is false.",
+      "ref": "unit-1-patterns.md#5-adapter-keeping-vendor-shapes-out-of-your-domain"
+    },
+    {
+      "id": "B2-027",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "adapter",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "A card vendor adds a new response code '09' (in progress). The adapter ends its switch with 'default: return Approved'. What is wrong, and what is the right mapping for a code the adapter does not recognise?",
+      "choices": [
+        "Pending payments are shown as approved; unknown codes must map to an explicit unknown-response error (fail closed) and raise an alert",
+        "Nothing is wrong: approved is the most common outcome, so it is the best default",
+        "Map unknown codes to Declined, which is always the safe side",
+        "Panic so the service restarts and picks up a fix"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "An unknown answer is 'I don't know', and the system must say so: approving releases goods against unconfirmed money (143 payments in the story), declining can leave a member charged by a vendor that actually captured the funds. ErrUnknownResponse plus an alert and reconciliation using the idempotency key is honest. A panic turns a vendor change into an outage.",
+      "ref": "unit-1-patterns.md#5-adapter-keeping-vendor-shapes-out-of-your-domain"
+    },
+    {
+      "id": "B2-028",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "adapter",
+        "errors",
+        "go"
+      ],
+      "difficulty": 2,
+      "prompt": "An adapter returns fmt.Errorf(\"vendor A: %w: %w\", ErrRateLimited, vendorErr) where vendorErr is a *VendorAError. Which statements hold for the returned error err (Go 1.20+)?",
+      "choices": [
+        "errors.Is(err, ErrRateLimited) is true and errors.As(err, &ve) with ve of type *VendorAError also succeeds",
+        "errors.Is(err, ErrRateLimited) is true, but errors.As cannot reach the vendor error",
+        "Only the first %w is wrapped; the second is formatted like %v",
+        "It does not compile: fmt.Errorf accepts one %w"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Since Go 1.20, fmt.Errorf accepts multiple %w verbs and the result unwraps to all of them, so callers branch on the sentinel and logs can extract the vendor's own error. Using %v for the second operand (the common older pattern) would lose errors.As. Multiple %w compiles and go vet accepts it.",
+      "ref": "unit-1-patterns.md#5-adapter-keeping-vendor-shapes-out-of-your-domain"
+    },
+    {
+      "id": "B2-029",
+      "type": "multi",
+      "tags": [
+        "patterns",
+        "adapter",
+        "design"
+      ],
+      "difficulty": 3,
+      "prompt": "A domain port Charger has Charge(ctx, ChargeRequest) (ChargeResult, error). Select ALL concerns that belong INSIDE a vendor adapter and must not leak into the domain:",
+      "choices": [
+        "Rendering minor units as the vendor's decimal string and lower-case currency",
+        "Mapping vendor response codes and HTTP statuses to the port's statuses and error classes",
+        "The vendor SDK's request, reply and error types",
+        "The domain's Approved / Declined / Pending status values"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Wire formats, code tables and SDK types are the vendor's shape and belong behind the boundary, where a vendor change or a second vendor touches one package. The Approved / Declined / Pending values are the port's own vocabulary (what the adapter translates TO), owned by the consumer.",
+      "ref": "unit-1-patterns.md#5-adapter-keeping-vendor-shapes-out-of-your-domain"
+    },
+    {
+      "id": "B2-030",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "adapter",
+        "testing"
+      ],
+      "difficulty": 2,
+      "prompt": "You have two vendor adapters behind one port and are about to add a third. What gives the most confidence at the lowest cost?",
+      "choices": [
+        "One scenario table (approved, declined, pending, rate-limited, 5xx, 4xx, transport error, unknown code, cancelled ctx) run against every adapter with fake vendor clients",
+        "Only integration tests against each vendor's sandbox",
+        "Copy the second adapter's tests and edit the names",
+        "Manual testing in staging before each release"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A shared contract suite turns 'integrate vendor C' into a checklist, runs in milliseconds, and covers failures a sandbox cannot produce on demand; sandbox tests are a small, non-gating supplement. Sandbox-only tests are slow and flaky. Copy-editing tests lets the adapters drift apart. Manual testing does not scale and misses rare error paths.",
+      "ref": "unit-1-patterns.md#5-adapter-keeping-vendor-shapes-out-of-your-domain"
+    },
+    {
+      "id": "B2-031",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "adapter",
+        "decorator",
+        "design"
+      ],
+      "difficulty": 1,
+      "prompt": "What is the key difference between an adapter and a decorator?",
+      "choices": [
+        "An adapter changes the interface (a foreign API becomes your port); a decorator keeps the same interface and adds behaviour",
+        "An adapter adds behaviour; a decorator translates data formats",
+        "They are the same pattern; the names differ by language",
+        "An adapter is always a struct, a decorator is always a function"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Adapters translate between shapes; decorators wrap a value of the same interface to add retries, logging or timeouts. If the interface in and out is identical you wrote a decorator. They are different patterns, and either can be written as a struct or a function in Go.",
+      "ref": "unit-1-patterns.md#5-adapter-keeping-vendor-shapes-out-of-your-domain"
+    },
+    {
+      "id": "B2-032",
+      "type": "numeric",
+      "tags": [
+        "patterns",
+        "decorator",
+        "resilience"
+      ],
+      "difficulty": 2,
+      "prompt": "A vendor always fails. A retry decorator makes up to 4 attempts, and a circuit breaker opens after 5 consecutive failures. The BREAKER is OUTSIDE the retry: Chain(vendor, breaker, retry). How many times is the vendor called before the first call is rejected with 'circuit open'?",
+      "value": 20,
+      "tolerance": 0.05,
+      "unit": "calls",
+      "explanation": "The breaker sees one logical call per Do, and each logical call hides 4 failed vendor attempts but counts as a single failure. It needs 5 logical failures to open: 5 x 4 = 20 vendor calls. (With the retry outside the breaker, the breaker counts attempts and opens after 5 vendor calls.)",
+      "ref": "unit-1-patterns.md#6-decorator-stacking-behaviour-around-a-call"
+    },
+    {
+      "id": "B2-033",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "decorator",
+        "resilience"
+      ],
+      "difficulty": 2,
+      "prompt": "Same setup, vendor always failing: 4 retry attempts and a breaker with threshold 5, but now the RETRY is outside the breaker: Chain(vendor, retry, breaker). How many vendor calls before the circuit opens and the caller sees 'circuit open'?",
+      "choices": [
+        "5: the breaker sees each attempt, opens after the fifth failure, and the retry loop stops on 'circuit open'",
+        "20: the breaker needs five logical failures",
+        "4: one logical call exhausts the retry and opens the circuit",
+        "9: it opens after two logical calls"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "With retry outside, every attempt passes through the breaker: the first logical call makes 4 attempts (4 failures), the second call's first attempt is the fifth failure and opens the circuit, and the next attempt gets ErrOpen, which retry never retries. So 5 vendor calls. 20 is the breaker-outside answer. 4 and 9 do not match the threshold of 5 consecutive failures.",
+      "ref": "unit-1-patterns.md#6-decorator-stacking-behaviour-around-a-call"
+    },
+    {
+      "id": "B2-034",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "decorator",
+        "go"
+      ],
+      "difficulty": 1,
+      "prompt": "With Chain(c, a, b, d) where the FIRST decorator is the outermost, in which order do the decorators see a request, and then the response?",
+      "choices": [
+        "Request: a, b, d, then the client; response: d, b, a",
+        "Request: d, b, a, then the client; response: a, b, d",
+        "Request: a, b, d; response: a, b, d",
+        "The order is undefined because decorators are independent"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The outermost decorator sees the request first and the response last, like nested function calls or onion layers. The second option is the order of application if you loop from the front, which makes the last decorator outermost. Decorators are not independent: order is behaviour (logging outside retry logs once per logical call; inside it logs every attempt).",
+      "ref": "unit-1-patterns.md#6-decorator-stacking-behaviour-around-a-call"
+    },
+    {
+      "id": "B2-035",
+      "type": "numeric",
+      "tags": [
+        "patterns",
+        "decorator",
+        "resilience"
+      ],
+      "difficulty": 3,
+      "prompt": "A gateway retries each failed call 3 times in total (3 attempts), the service behind it also makes 3 attempts per call, and the vendor SDK makes 3 attempts per call. The vendor is down. How many calls reach the vendor for one user request?",
+      "value": 27,
+      "tolerance": 0.05,
+      "unit": "calls",
+      "explanation": "Retries multiply across layers: 3 x 3 x 3 = 27 vendor calls per user request, i.e. a 27x load amplification exactly when the vendor is struggling. Retry in one layer only (usually the one closest to the vendor call that knows idempotency) and use a retry budget.",
+      "ref": "unit-1-patterns.md#6-decorator-stacking-behaviour-around-a-call"
+    },
+    {
+      "id": "B2-036",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "decorator",
+        "go",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "A retry decorator waits between attempts with select { case <-ctx.Done(): ...; case <-time.After(backoff): }. The module's go.mod says go 1.22, requests are often cancelled, and backoff is 30 minutes. What is the issue?",
+      "choices": [
+        "With the go 1.22 timer semantics, each time.After timer stays allocated until it fires (30 minutes) even if cancelled; use time.NewTimer and Stop",
+        "time.After blocks the goroutine forever once ctx is done",
+        "time.After panics if the channel is never read",
+        "There is no issue: the garbage collector reclaims unreferenced timers in every Go version"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Before Go 1.23 (and still for modules whose go line selects the old behaviour) an unfired timer is not garbage collected, so abandoned waits accumulate until they fire; NewTimer plus defer Stop releases it immediately. The select does return on ctx.Done, so nothing blocks forever, and nothing panics. Newer toolchains reclaim unreferenced timers only when the module's go version opts in to the new semantics.",
+      "ref": "unit-1-patterns.md#6-decorator-stacking-behaviour-around-a-call"
+    },
+    {
+      "id": "B2-037",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "decorator",
+        "resilience"
+      ],
+      "difficulty": 2,
+      "prompt": "In the half-open state, a circuit breaker lets exactly one probe through. Why one, and not 'a few'?",
+      "choices": [
+        "A sick vendor is easily knocked over again; one probe tests recovery without a stampede, and everyone else keeps getting a fast rejection",
+        "Because Go cannot run two goroutines through the same function",
+        "Because a probe must succeed twice to close the circuit",
+        "To make the breaker simpler to implement; correctness is unaffected"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The purpose of the cooldown is to give the vendor room; letting many callers through at the first moment recreates the load that hurt it. A single probe decides: success closes, failure reopens for a full cooldown. Nothing prevents concurrency in Go. A probe needs one success, not two. The concurrency test in the kata fires 32 goroutines and requires exactly one to reach the vendor, so it is a correctness property.",
+      "ref": "unit-1-patterns.md#6-decorator-stacking-behaviour-around-a-call"
+    },
+    {
+      "id": "B2-038",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "decorator",
+        "idempotency"
+      ],
+      "difficulty": 3,
+      "prompt": "Retries wrap a payment call. Where should the idempotency key come from, and where should it be applied?",
+      "choices": [
+        "Generated once per logical operation and sent on every attempt, applied below the retry so each retry reuses it",
+        "Generated fresh on each attempt so attempts are distinguishable in the vendor's logs",
+        "Not needed if the retry waits long enough between attempts",
+        "Applied above the retry and checked after all attempts finish"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "If the first attempt actually succeeded but the response was lost, a retry with the SAME key is deduplicated by the vendor; a fresh key per attempt pays twice. Waiting longer does not tell you whether the first attempt took effect. Checking after all attempts is too late to prevent the second charge. If the vendor cannot dedupe, disable automatic retries for that call.",
+      "ref": "unit-1-patterns.md#6-decorator-stacking-behaviour-around-a-call"
+    },
+    {
+      "id": "B2-039",
+      "type": "multi",
+      "tags": [
+        "patterns",
+        "decorator",
+        "errors"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL errors a retry decorator should NOT retry:",
+      "choices": [
+        "A 'circuit open' rejection from a breaker inside it",
+        "A context.Canceled that came from the caller's own context",
+        "A 400-class rejection of a malformed request (ErrRejected)",
+        "A 503 from the vendor (ErrUnavailable) with attempts remaining"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "An open circuit is an instruction to stop calling; retrying it defeats load shedding. A caller that has given up wants no more work done. A malformed request will fail identically every time. A 503 is the textbook transient error: retry with backoff while attempts and deadline remain (a per-attempt timeout error is also retryable while the caller's own context is alive).",
+      "ref": "unit-1-patterns.md#6-decorator-stacking-behaviour-around-a-call"
+    },
+    {
+      "id": "B2-040",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "design",
+        "ood"
+      ],
+      "difficulty": 2,
+      "prompt": "A notification service sends email and SMS. The two channels are fixed by contract, and there are two callers. A teammate proposes a strategy interface, a factory, an init()-based registry and an observer, each with one implementation. What is the best response?",
+      "choices": [
+        "Keep a plain Send with two cases or functions (plus a consumer-side interface only if tests need a fake) and name the events that would justify each abstraction",
+        "Approve it: extensibility is always worth it",
+        "Reject everything and forbid interfaces in the codebase",
+        "Approve the registry only, since registries are standard in Go"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Abstractions earn their place with evidence of variation: a third channel (interface/strategy), config-selected providers (registry), a second independent consumer of 'sent' (observer), plug-ins from outside your main (init registration). Until then, the plain version is cheaper to read and to change. 'Always worth it' ignores the permanent reading cost of guessed abstractions; banning interfaces is the opposite dogma, since a test seam is a legitimate reason; a registry with two fixed members is the same speculation.",
+      "ref": "unit-1-patterns.md#7-when-a-pattern-is-over-engineering"
+    },
+    {
+      "id": "B2-041",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "design",
+        "ood"
+      ],
+      "difficulty": 2,
+      "prompt": "In a 45-minute LLD interview you are asked to design a vending machine. What opening scores best?",
+      "choices": [
+        "Clarify requirements, list entities and the main flow, identify the one or two axes most likely to change, code the simplest design with a test, then name a pattern when the code asks for it",
+        "Draw a diagram with a factory, a strategy, an observer and a state for every machine state, to show breadth",
+        "Start coding the full class hierarchy immediately to save time",
+        "Ask the interviewer which patterns they want to see"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Interviewers score whether the design works and survives the mid-way requirement change, not vocabulary. Requirements, flow, axes of change, a minimal tested design, and patterns named as a consequence is the sequence the LLD rubric rewards. A pattern diagram first is recitation with no requirement behind it; a full hierarchy first risks nothing running at minute 45; asking for patterns misses that choosing is your job.",
+      "ref": "unit-1-patterns.md#7-when-a-pattern-is-over-engineering"
+    },
+    {
+      "id": "B2-042",
+      "type": "multi",
+      "tags": [
+        "patterns",
+        "design",
+        "ood"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL of these that are smells of an over-engineered design:",
+      "choices": [
+        "An interface with one implementation and no test ever fakes it",
+        "A factory that builds exactly one product type",
+        "An observer with a single subscriber that will never change",
+        "A consumer-side interface for a clock so a test can control time"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "The first three add indirection without a variation or a test seam to pay for it. The clock interface is a legitimate early abstraction: it exists because a test needs a seam (and a fake clock makes time rules deterministic), which is one of the evidence categories that justifies an interface.",
+      "ref": "unit-1-patterns.md#7-when-a-pattern-is-over-engineering"
+    },
+    {
+      "id": "B2-043",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "design",
+        "ood"
+      ],
+      "difficulty": 3,
+      "prompt": "In a machine-coding round, the interviewer adds a requirement at minute 30 and your design needs edits in six files, although you used many patterns. What is the most likely diagnosis?",
+      "choices": [
+        "The abstractions were cut along guessed lines before the requirement existed, so the real axis of change cuts across them",
+        "You did not use enough patterns",
+        "Six files is normal for any change in a professional codebase",
+        "The interviewer's requirement was unfair"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Patterns placed on a guessed axis of change buy nothing when the real change arrives on a different axis; the minimal version, with fewer seams, typically needs fewer edits (the parking-lot story: 15 lines versus six files). More patterns would compound the problem. Six files for one new product category signals poor separation, not normality. Mid-way changes are an expected part of the format and are exactly what the rubric measures.",
+      "ref": "unit-1-patterns.md#7-when-a-pattern-is-over-engineering"
+    },
+    {
+      "id": "B2-044",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "design",
+        "go"
+      ],
+      "difficulty": 2,
+      "prompt": "Which statement best captures when to flip a strategy from a func type to an interface in Go?",
+      "choices": [
+        "When a variant needs several related behaviours (for example Fee, Describe, Validate) or an identity, a single func no longer carries it",
+        "Whenever a team wants more flexibility",
+        "Never: interfaces are not used for strategies in Go",
+        "Whenever the strategy has a closure"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A func type is right for one operation; once rules gain several behaviours that belong together, or need identity (Stringer, comparison), an interface is the honest shape. 'More flexibility' is not a trigger. Interfaces are used for strategies in Go (sort.Interface), just not as the default for single operations. Closures are exactly what func-typed strategies are made of.",
+      "ref": "unit-1-patterns.md#1-strategy-a-rule-is-a-value"
+    },
+    {
+      "id": "B2-045",
+      "type": "single",
+      "tags": [
+        "patterns",
+        "factory",
+        "go"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does the standard library need blank imports such as import _ \"image/png\" or a database driver package, and what is the better choice in an application that controls its own main?",
+      "choices": [
+        "Registration happens in init() of the imported package, so the import is needed for its side effect; an application can instead register explicitly from main with a registry value",
+        "Blank imports make the compiler inline the package for speed",
+        "They are required by the Go module system to download a dependency",
+        "They disable the package's init() function so it can be called manually"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Libraries such as database/sql and image use init()-time registration so a package can add itself to a global registry without the caller naming it; the blank import exists solely to run that init. An application can pass a registry value and call Register in main, which makes the full set visible, testable and free of init-order rules. A blank import has nothing to do with inlining, downloading, or disabling init().",
+      "ref": "unit-1-patterns.md#4-factory-and-registry-choosing-a-provider-by-name"
+    }
+  ]
+}

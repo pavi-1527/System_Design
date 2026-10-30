@@ -1,0 +1,829 @@
+{
+  "module": "C3",
+  "title": "Case study: unique ID generator",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "C3-001",
+      "type": "single",
+      "tags": [
+        "requirements",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "An interviewer says 'design a unique ID generator for our platform' and nothing else. Which clarifying question changes the MOST about the architecture?",
+      "choices": [
+        "Whether ids must sort by creation time, and how strictly (none, roughly, per producer, globally)",
+        "Which programming language the generator library is written in",
+        "Whether ids should be printed in hexadecimal or decimal in logs",
+        "Whether the generator should expose Prometheus metrics"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The ordering strength picks the scheme: no ordering allows random ids or leased ranges, 'roughly' allows time in the high bits, and a single global order needs a sequencer on every id. The language, the log format and the metrics library change nothing structural; they are implementation details you settle later.",
+      "ref": "unit-1-unique-id-generator.md#1-requirements-and-the-questions-that-change-the-design-000006"
+    },
+    {
+      "id": "C3-002",
+      "type": "single",
+      "tags": [
+        "requirements",
+        "ordering",
+        "trade-offs"
+      ],
+      "difficulty": 3,
+      "prompt": "The audit team asks that payment ids be 'strictly increasing across the whole platform, in the order payments were accepted'. The platform mints ≈ 200k ids/s in three regions. What is the senior response?",
+      "choices": [
+        "Agree, and route every id through one sequencer in the primary region",
+        "Keep k-sorted ids for identity and give the audit a per-ledger sequence number assigned inside the transaction that accepts each payment",
+        "Agree, because Snowflake ids are already strictly increasing across machines",
+        "Agree, and use UUIDv7, which is strictly ordered across machines"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A global total order needs a single sequencer on every id: a round trip from every region, a throughput ceiling and the availability of one box. What the audit actually needs is the order of acceptance, which the ledger already serialises, so a sequence assigned in the posting transaction gives it exactly where it is cheap. Snowflake and UUIDv7 ids are only k-sorted across machines (within clock skew), so neither is 'strictly increasing in acceptance order'.",
+      "ref": "unit-1-unique-id-generator.md#1-requirements-and-the-questions-that-change-the-design-000006"
+    },
+    {
+      "id": "C3-003",
+      "type": "multi",
+      "tags": [
+        "requirements",
+        "api"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL requirements whose answers rule out plain UUIDv4 for this platform's ids.",
+      "choices": [
+        "Ids must fit existing signed 64-bit BIGINT columns",
+        "Lists must page 'newest first' using the id as the cursor",
+        "Ids must be unique across three regions",
+        "Generation must not depend on a remote call per id"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "UUIDv4 is 128 bits, so it cannot fit a BIGINT, and its 122 random bits carry no time order, so an id cursor cannot mean 'newer than'. It is unique across regions with no coordination (122 random bits make collisions negligible) and it never needs a remote call, so those two requirements are reasons to like UUIDs, not to rule them out.",
+      "ref": "unit-1-unique-id-generator.md#1-requirements-and-the-questions-that-change-the-design-000006"
+    },
+    {
+      "id": "C3-004",
+      "type": "single",
+      "tags": [
+        "requirements",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "A product owner says invoice numbers must have no gaps, by regulation. What does that change?",
+      "choices": [
+        "Nothing: a Snowflake generator never skips numbers",
+        "It is a different problem: a per-series counter assigned inside the same transaction as the invoice, serialised by design; the id generator is the wrong tool",
+        "Use UUIDv7 and sort by its timestamp to remove gaps",
+        "Use leased ranges of 1,000 so that gaps are bounded"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Every distributed id scheme has gaps: unused sequence values in a tick, ranges lost on crash, ids minted for rolled-back writes. Gapless numbering is achievable only by assigning the number in the same transaction that commits the document, one series at a time. Snowflake skips most values, UUIDv7 is not a number series at all, and leased ranges lose up to a range per crash, which is a gap.",
+      "ref": "unit-1-unique-id-generator.md#1-requirements-and-the-questions-that-change-the-design-000006"
+    },
+    {
+      "id": "C3-005",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "A time + node + sequence layout uses 41 bits of milliseconds since a custom epoch. Roughly how many years does the time field last?",
+      "value": 69.7,
+      "tolerance": 0.05,
+      "explanation": "2^41 ms ≈ 2.2 × 10^12 ms ≈ 2.2 × 10^9 s; divided by ≈ 3.15 × 10^7 s per year ≈ 69.7 years. With 40 bits it would be ≈ 34.8 years, with 42 ≈ 139.",
+      "ref": "unit-1-unique-id-generator.md#2-estimation-bits-are-the-budget-006010",
+      "unit": "years"
+    },
+    {
+      "id": "C3-006",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "A team uses 41 bits of milliseconds counted from the Unix epoch (1970-01-01). In which year does the time field run out?",
+      "value": 2039,
+      "tolerance": 0.0006,
+      "explanation": "2^41 ms ≈ 69.7 years; 1970 + 69.7 ≈ 2039.7, i.e. September 2039. A custom epoch at launch (2026) moves the end to ≈ 2095: the epoch is free decades.",
+      "ref": "unit-1-unique-id-generator.md#2-estimation-bits-are-the-budget-006010",
+      "unit": "year"
+    },
+    {
+      "id": "C3-007",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "The platform runs ≈ 1,500 generating processes during a rolling deploy and wants ≈ 25% headroom for crashed processes whose leases haven't expired. What is the smallest number of node bits that works?",
+      "value": 11,
+      "tolerance": 0.05,
+      "explanation": "1,500 × 1.25 ≈ 1,875 node ids. 10 bits give 1,024 (too few even for the live processes), 11 bits give 2,048 (enough), 12 would waste a bit that the sequence or time field could use.",
+      "ref": "unit-1-unique-id-generator.md#2-estimation-bits-are-the-budget-006010",
+      "unit": "node bits"
+    },
+    {
+      "id": "C3-008",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "A 41/11/11 layout (41 time bits at 1 ms, 11 node bits, 11 sequence bits). What is the maximum rate one node can mint, in ids per second?",
+      "value": 2048000,
+      "tolerance": 0.05,
+      "explanation": "11 sequence bits = 2,048 ids per 1 ms tick = 2,048,000 ids/s per node. Fleet-wide it is 2^22 per ms ≈ 4.2 × 10^9 ids/s. Compare with the hottest pod's need of ≈ 2k/s: overflow only matters for backfills.",
+      "ref": "unit-1-unique-id-generator.md#2-estimation-bits-are-the-budget-006010",
+      "unit": "ids/s"
+    },
+    {
+      "id": "C3-009",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "A backfill asks one node for 1,000,000 ids. The layout has 11 sequence bits and 1 ms ticks, and the generator waits for the next tick on overflow. Roughly how long does the backfill take?",
+      "value": 490,
+      "tolerance": 0.1,
+      "explanation": "1,000,000 / 2,048 ids per tick ≈ 488 ticks ≈ 490 ms. With a bounded run-ahead the waiting can be borrowed from the next few milliseconds; with several node ids in parallel it shrinks proportionally.",
+      "ref": "unit-1-unique-id-generator.md#2-estimation-bits-are-the-budget-006010",
+      "unit": "ms"
+    },
+    {
+      "id": "C3-010",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "id-generation",
+        "trade-offs"
+      ],
+      "difficulty": 2,
+      "prompt": "You move one bit from the sequence field to the node field (41/10/12 → 41/11/11). What happens?",
+      "choices": [
+        "Fleet-wide capacity doubles",
+        "The node count doubles and per-node capacity halves; fleet-wide capacity and lifetime are unchanged",
+        "The lifetime halves",
+        "Ids stop being k-sorted"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Fleet capacity per tick is 2^(node bits + sequence bits), which stays 2^22. Only the split changes: 2,048 nodes at 2,048 per ms instead of 1,024 at 4,096. Lifetime depends only on the time bits and the tick, and ordering depends on time being in the high bits, which it still is.",
+      "ref": "unit-1-unique-id-generator.md#2-estimation-bits-are-the-budget-006010"
+    },
+    {
+      "id": "C3-011",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "A platform mints ≈ 50,000 ids/s on average, all year. Each id is stored in one index column. How many terabytes of key bytes per year does that column cost with 8-byte ids (ignore page overhead)?",
+      "value": 12.6,
+      "tolerance": 0.15,
+      "explanation": "50,000 × 3.15 × 10^7 s ≈ 1.6 × 10^12 ids a year; × 8 B ≈ 1.26 × 10^13 B ≈ 12.6 TB. With 16-byte UUIDs it would be ≈ 25 TB, per index or foreign-key column holding the id: the reason a 64-bit layout is worth the bit budget at this scale.",
+      "ref": "unit-1-unique-id-generator.md#2-estimation-bits-are-the-budget-006010",
+      "unit": "TB"
+    },
+    {
+      "id": "C3-012",
+      "type": "single",
+      "tags": [
+        "api",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "A browser dashboard receives order ids such as 1834475639263240193 as JSON numbers. Two different orders open the same detail page. Why?",
+      "choices": [
+        "The ids collided in the generator",
+        "JavaScript parses JSON numbers into doubles, which are exact only up to 2^53, so large ids are rounded",
+        "The browser cached the first page",
+        "The ids are signed and overflowed"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A double has a 53-bit significand; near 2^60 representable numbers are 256 apart, so 1834475639263240193 arrives as 1834475639263240200 and neighbouring ids round to the same value. The generator did not collide (the server has the exact ids), the cache is irrelevant, and the top bit is 0 so nothing overflowed. Send ids as decimal strings.",
+      "ref": "unit-1-unique-id-generator.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C3-013",
+      "type": "single",
+      "tags": [
+        "api",
+        "availability"
+      ],
+      "difficulty": 2,
+      "prompt": "The platform team proposes a GET /v1/id service called once per id, with ≈ 200k ids/s at peak and three ids per order. What is the strongest objection?",
+      "choices": [
+        "HTTP cannot carry 64-bit numbers",
+        "It adds a network round trip and an availability dependency to every write, for work an in-process library does in ≈ 100 ns",
+        "A service cannot use a mutex",
+        "The service would need 128-bit ids"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "In-process minting is a lock and a clock read (≈ 100 ns); a call is ≈ 0.1–0.5 ms in a datacentre and makes the generator's availability part of every create. HTTP carries ids fine as strings, services can lock, and nothing about a service needs 128 bits. A batch service (1,000 ids per call) is the right shape for clients that can't embed the library.",
+      "ref": "unit-1-unique-id-generator.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C3-014",
+      "type": "multi",
+      "tags": [
+        "data-model",
+        "leases"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL fields the node-lease record needs for the design in this unit.",
+      "choices": [
+        "A fencing token that increases with every grant",
+        "The lease's expiry on the registry's clock",
+        "A high-water mark: the highest tick any holder of this node id may have used",
+        "The last id the holder minted, updated on every Next()"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "The token lets the registry reject renewals and releases from a stale holder; the expiry decides when the node can be re-granted; the high-water mark becomes the next holder's floor. Writing the last id on every Next() would put a registry write on the hot path, which is exactly what the design avoids: the holder records its *limit* at grant and renewal, and the tick it actually used on release.",
+      "ref": "unit-1-unique-id-generator.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C3-015",
+      "type": "single",
+      "tags": [
+        "api",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "A host's clock is 2 s behind the last tick its generator used. What should Next() return?",
+      "choices": [
+        "The previous id plus one",
+        "An id built from the stale clock reading, since it will be unique in most cases",
+        "An error (ErrClockBackwards); the caller fails that create and the node goes not-ready until its clock catches up",
+        "A random 64-bit number"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The generator must never guess: 'previous id plus one' collides with the next node id's space or the sequence, a stale-clock id re-mints ids already handed out, and a random 64-bit number has no uniqueness argument at all. Returning an error fails one node visibly while the rest of the fleet keeps minting.",
+      "ref": "unit-1-unique-id-generator.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C3-016",
+      "type": "single",
+      "tags": [
+        "id-generation",
+        "trade-offs"
+      ],
+      "difficulty": 2,
+      "prompt": "Requirements: 64-bit ids, roughly sortable by time, no remote call per id, minting must continue during a cross-region partition. Which scheme fits?",
+      "choices": [
+        "UUIDv7",
+        "One PostgreSQL sequence in the primary region",
+        "Time + node + sequence ids minted in-process, with node ids leased per region",
+        "Leased counter ranges with a keyed permutation"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Time + node + sequence fits all four: 64 bits, k-sorted, no call per id, and per-region node-id registries never cross the WAN. UUIDv7 is 128 bits. A single sequence needs a remote call per id and stops during a partition. Leased ranges fit 64 bits and need no per-id call, but ranges are handed out in lease order, so ids don't sort by time.",
+      "ref": "unit-1-unique-id-generator.md#4-high-level-design-the-candidates-one-decision-at-a-time-016025"
+    },
+    {
+      "id": "C3-017",
+      "type": "single",
+      "tags": [
+        "id-generation",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "Two MySQL primaries hand out ids with auto_increment_increment = 2 and offsets 1 and 2. A third primary is added. What has to happen?",
+      "choices": [
+        "Nothing: the third server uses offset 3",
+        "Every server's increment must change to 3 (and offsets be re-planned) without ever re-issuing a value already used",
+        "The third server can share offset 1 with the first",
+        "The servers switch to UUIDs automatically"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "With increment 2, offset 3 would produce 3, 5, 7…, colliding with the odd server. Adding a server means re-striding all of them to increment 3 at a cut-over point above every value already issued. Sharing an offset is a guaranteed collision, and nothing switches to UUIDs by itself. This re-striding is one reason interleaved sequences don't scale out.",
+      "ref": "unit-1-unique-id-generator.md#4-high-level-design-the-candidates-one-decision-at-a-time-016025"
+    },
+    {
+      "id": "C3-018",
+      "type": "single",
+      "tags": [
+        "id-generation",
+        "trade-offs"
+      ],
+      "difficulty": 2,
+      "prompt": "The consumers are found to accept 128-bit keys after all. Which change does the unit recommend?",
+      "choices": [
+        "Keep Snowflake ids; 128 bits are wasteful",
+        "Switch to UUIDv7 and delete the node-id registry",
+        "Switch to UUIDv4 for better index locality",
+        "Use two Snowflake ids side by side"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "UUIDv7 keeps time order and index locality, and its 74 random bits per millisecond make collisions negligible without any node ids, so the riskiest part of the Snowflake design (node-id leases) disappears. UUIDv4 has the worst index locality (random leaf per insert). Keeping Snowflake is defensible only if key size matters; two ids side by side is nonsense.",
+      "ref": "unit-1-unique-id-generator.md#4-high-level-design-the-candidates-one-decision-at-a-time-016025"
+    },
+    {
+      "id": "C3-019",
+      "type": "single",
+      "tags": [
+        "id-generation",
+        "ordering"
+      ],
+      "difficulty": 2,
+      "prompt": "Each API server leases ranges of 1,000 ids from a counter (C1's scheme). Server A leased [41,000, 42,000) an hour ago; server B leased [42,000, 43,000) a minute ago. Both are still minting. What does id 41,950 versus 42,010 tell you?",
+      "choices": [
+        "41,950 was created first",
+        "Nothing about which was created first: ranges are handed out in lease order, not time order",
+        "42,010 was created first",
+        "That the two servers' clocks disagree"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Leased ranges are unique but not time-ordered across servers: A may mint 41,950 after B minted 42,010. That is why ranges suit short codes (C1) and fail 'sortable by time'. Clocks are not involved in range leasing at all.",
+      "ref": "unit-1-unique-id-generator.md#4-high-level-design-the-candidates-one-decision-at-a-time-016025"
+    },
+    {
+      "id": "C3-020",
+      "type": "multi",
+      "tags": [
+        "id-generation",
+        "availability"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL schemes that put a coordination step (a remote call or a write on a shared primary) on EVERY id.",
+      "choices": [
+        "A database auto-increment column on one primary",
+        "Ticket servers called once per id",
+        "Time + node + sequence ids minted in-process",
+        "UUIDv7"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "An auto-increment is a serialised write on the primary per id, and a ticket server called per id is a round trip per id (handing out blocks would turn it into leased ranges). In-process Snowflake-style minting touches only memory and the clock (coordination is one lease write per process per TTL/3), and UUIDv7 needs no coordination at all.",
+      "ref": "unit-1-unique-id-generator.md#4-high-level-design-the-candidates-one-decision-at-a-time-016025"
+    },
+    {
+      "id": "C3-021",
+      "type": "single",
+      "tags": [
+        "id-generation",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "A node receives its 2,049th request within one millisecond (2,048 ids per tick). Which response is INCORRECT?",
+      "choices": [
+        "Wait until the next millisecond, then mint with sequence 0",
+        "Mint from the next millisecond immediately, within a bounded run-ahead",
+        "Return an error to the caller",
+        "Wrap the sequence to 0 within the same millisecond"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Wrapping re-issues (tick, 0), an id already handed out. Waiting costs up to one tick of latency, borrowing ahead costs timestamp accuracy within a bound, and an error costs a failed call; none of the three can produce a duplicate.",
+      "ref": "unit-1-unique-id-generator.md#5-deep-dive-1-the-sequence-the-lock-and-what-ordered-means-025031"
+    },
+    {
+      "id": "C3-022",
+      "type": "single",
+      "tags": [
+        "ordering",
+        "clocks"
+      ],
+      "difficulty": 3,
+      "prompt": "Ids a < b were minted on two different nodes whose clocks are within 5 ms of each other, 2 ms apart in real time. What can you conclude?",
+      "choices": [
+        "a was minted first",
+        "b was minted first",
+        "Nothing about their order: they are within the skew window",
+        "The nodes have the same node id"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Time + node + sequence ids are k-sorted: only ids further apart than the skew plus one tick are guaranteed to compare in time order. 2 ms is inside the 5 ms window, so either could be older. Nothing suggests a shared node id; ids from the same node id would compare by sequence instead.",
+      "ref": "unit-1-unique-id-generator.md#5-deep-dive-1-the-sequence-the-lock-and-what-ordered-means-025031"
+    },
+    {
+      "id": "C3-023",
+      "type": "single",
+      "tags": [
+        "sharding",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "An analytics consumer shards events across 64 partitions with id % 64. Partition 0 gets ≈ 97% of the traffic. Why, and what is the fix?",
+      "choices": [
+        "The node ids are skewed; assign them randomly",
+        "The low bits are the sequence, which is almost always 0 on a lightly loaded node; shard on hash(id) % 64 instead",
+        "The clock is skewed; fix NTP",
+        "64 is too many partitions; use 10"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "With the sequence in the low 11 bits, id % 64 equals seq % 64, and a node minting a few ids per millisecond nearly always uses seq 0. Hashing the id first spreads the load. Node ids and clock skew live in higher bits and don't affect id % 64; % 10 is barely better (only the even shards get traffic in the lab's break-it).",
+      "ref": "unit-1-unique-id-generator.md#5-deep-dive-1-the-sequence-the-lock-and-what-ordered-means-025031"
+    },
+    {
+      "id": "C3-024",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "id-generation"
+      ],
+      "difficulty": 3,
+      "prompt": "A generator releases its mutex while sleeping for the next tick, re-acquires it, and then mints (want, 0) using the tick it computed BEFORE sleeping. What goes wrong under concurrency?",
+      "choices": [
+        "Nothing: the mutex is held when minting",
+        "Several callers that waited for the same next tick all mint (want, 0): duplicates",
+        "The generator deadlocks",
+        "Ids become 128 bits"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "While the lock was released, other callers also decided 'next tick, sequence 0'; acting on a decision made before the sleep means each of them mints the same id. Releasing the lock during the sleep is fine on its own if the decision is re-made from the current state afterwards (go round the loop again). There is no deadlock, and the id width is unrelated.",
+      "ref": "unit-1-unique-id-generator.md#5-deep-dive-1-the-sequence-the-lock-and-what-ordered-means-025031"
+    },
+    {
+      "id": "C3-025",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "NTP steps a busy node's clock back by 5 ms. The generator's rule is 'if now != last: new tick, seq = 0'. What happens?",
+      "choices": [
+        "Nothing: 5 ms is below the tick",
+        "It re-mints ids from the last 5 ms of ticks, about (rate × 5 ms) duplicates",
+        "It refuses to mint until the clock catches up",
+        "It waits 5 ms and continues"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "'now != last' treats an earlier tick as a new one and restarts its sequence at 0, re-issuing ids already used in that tick. The lab's naive generator produced 100 duplicates for a 10 ms step at 10 ids/ms. Refusing or waiting is what a correct generator does ('now > last' only, with a regression policy); 5 ms is five ticks, not below one.",
+      "ref": "unit-1-unique-id-generator.md#6-deep-dive-2-when-the-clock-lies-031037"
+    },
+    {
+      "id": "C3-026",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "trade-offs"
+      ],
+      "difficulty": 2,
+      "prompt": "Your generator waits out regressions up to MaxBackwards = 20 ms. A VM migration steps the clock back 1.2 s. What should happen?",
+      "choices": [
+        "Sleep 1.2 s while holding the lock",
+        "Return ErrClockBackwards at once, go not-ready and alert; resume when the clock passes the last tick used",
+        "Continue from the stale clock reading",
+        "Restart the process to reset the generator"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Beyond the bound, refuse: one node is unavailable, the fleet carries on, and an operator learns about the clock fault. Sleeping 1.2 s with the lock held stalls every caller and hides the problem; continuing re-mints 1.2 s of ids; restarting loses the in-memory last tick, which makes things worse unless a floor from the lease prevents re-minting.",
+      "ref": "unit-1-unique-id-generator.md#6-deep-dive-2-when-the-clock-lies-031037"
+    },
+    {
+      "id": "C3-027",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "leases"
+      ],
+      "difficulty": 3,
+      "prompt": "A process restarts and its clock is 3 s behind where the previous process on the same node id left off. The generator's in-memory 'last' is gone. What prevents re-minting the old ids in this unit's design?",
+      "choices": [
+        "Go's monotonic clock reading",
+        "The lease's floor: the registry's high-water mark for that node id, below which the new generator may not mint",
+        "NTP will slew the clock forward",
+        "The sequence starts at a random value after a restart"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The floor is out-of-process memory of the highest tick any holder may have used; the new generator waits (small gap) or refuses (large gap) until its clock passes it. Go's monotonic reading starts afresh in each process, so it knows nothing about the previous one. NTP may fix the clock eventually, but ids minted before then collide. A random starting sequence only makes collisions less likely, not impossible.",
+      "ref": "unit-1-unique-id-generator.md#6-deep-dive-2-when-the-clock-lies-031037"
+    },
+    {
+      "id": "C3-028",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "trade-offs"
+      ],
+      "difficulty": 3,
+      "prompt": "A generator reads time as 'wall clock at process start + monotonic time since start'. What does this buy and cost?",
+      "choices": [
+        "It is immune to backwards steps within the process, but drifts from real time by whatever NTP corrects after start, and does nothing for restarts",
+        "It removes every clock hazard, including restarts",
+        "It makes ids strictly ordered across nodes",
+        "It doubles the generator's throughput"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The monotonic reading never goes backwards inside one process, so steps can't make the generator revisit a tick; but it ignores every correction after start, so a long-lived process drifts from the fleet, and a restart starts a new anchor with no memory of the old one. It has no effect on cross-node ordering or on throughput.",
+      "ref": "unit-1-unique-id-generator.md#6-deep-dive-2-when-the-clock-lies-031037"
+    },
+    {
+      "id": "C3-029",
+      "type": "multi",
+      "tags": [
+        "clocks",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL events that can make a generator using the wall clock revisit a tick it already used (absent a regression policy).",
+      "choices": [
+        "NTP stepping the clock back 50 ms",
+        "A positive leap second applied as a step",
+        "NTP slewing a fast clock slower over several minutes",
+        "Two nodes whose clocks differ by 10 ms"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "Backwards steps (including a stepped leap second, where the same Unix second happens twice) make 'now' smaller than 'last'. Slewing keeps the clock moving forward, only more slowly, and skew between two nodes never makes one node revisit its own ticks: it only affects cross-node ordering.",
+      "ref": "unit-1-unique-id-generator.md#6-deep-dive-2-when-the-clock-lies-031037"
+    },
+    {
+      "id": "C3-030",
+      "type": "numeric",
+      "tags": [
+        "clocks",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A naive generator on a node minting 10 ids per millisecond has 3 s of history when its clock steps back by 50 ms. Roughly how many duplicate ids does it mint as the clock re-covers those 50 ms?",
+      "value": 500,
+      "tolerance": 0.15,
+      "explanation": "Duplicates ≈ rate × step = 10 per ms × 50 ms = 500 (the lab's BreakIt_ClockStepBack prints exactly 500). The damage scales with the rate: a quiet service survives the same step that corrupts a busy one, which is why the bug hides in staging.",
+      "ref": "unit-1-unique-id-generator.md#6-deep-dive-2-when-the-clock-lies-031037",
+      "unit": "ids"
+    },
+    {
+      "id": "C3-031",
+      "type": "single",
+      "tags": [
+        "leases",
+        "fencing"
+      ],
+      "difficulty": 3,
+      "prompt": "Process A holds node 37 with a 10 s lease, last renewed by a request it SENT at t = 0. When must A stop minting, at the latest?",
+      "choices": [
+        "At t = 10 s by its own clock, measured from when the renewal response arrived",
+        "At t = 10 s − margin by its own clock, measured from when the renewal was sent; the margin covers skew with the registry",
+        "Only when the registry tells it the lease was lost",
+        "Never: the registry won't grant node 37 to anyone else while A is alive"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The registry's expiry starts no earlier than the send time, so A's deadline must be measured from the send, minus a margin for skew. Measuring from the response is late by the round trip. Waiting for the registry to say 'lost' fails exactly in the paused-holder case (minting is local; A doesn't ask before minting), and the registry can't know A is alive: an expired lease is re-granted.",
+      "ref": "unit-1-unique-id-generator.md#7-deep-dive-3-node-ids-leases-and-what-breaks-at-10-037045"
+    },
+    {
+      "id": "C3-032",
+      "type": "single",
+      "tags": [
+        "leases",
+        "fencing"
+      ],
+      "difficulty": 2,
+      "prompt": "What does the registry's fencing token (strictly increasing per grant) protect against in this design?",
+      "choices": [
+        "A paused old holder minting ids after its lease expired",
+        "A stale holder renewing or releasing a lease that has since been granted to someone else",
+        "A clock stepping backwards",
+        "Sequence overflow"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Renew and Release succeed only with the node's current token, so an old holder can't extend or free a newer holder's lease. The token can't stop the old holder from minting, because nobody checks a token when an id is minted locally: that is the holder-side deadline's job. Clocks and the sequence are handled elsewhere.",
+      "ref": "unit-1-unique-id-generator.md#7-deep-dive-3-node-ids-leases-and-what-breaks-at-10-037045"
+    },
+    {
+      "id": "C3-033",
+      "type": "numeric",
+      "tags": [
+        "leases",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "2,048 node ids, 1,500 live processes, graceful releases on shutdown, lease TTL 20 minutes. Roughly how many crash restarts per minute (whose leases stay held until expiry) can the space absorb before node ids run out?",
+      "value": 27,
+      "tolerance": 0.25,
+      "explanation": "Spare ids ≈ 2,048 − 1,500 = 548. Each unreleased crash holds an id for up to 20 min, so the sustainable rate is ≈ 548 / 20 ≈ 27 per minute (the unit rounds to ≈ 25 with headroom). A crash loop above that exhausts the space: release on graceful shutdown, back off restarts, alert at 75% leased.",
+      "ref": "unit-1-unique-id-generator.md#7-deep-dive-3-node-ids-leases-and-what-breaks-at-10-037045",
+      "unit": "crashes/min"
+    },
+    {
+      "id": "C3-034",
+      "type": "single",
+      "tags": [
+        "leases",
+        "availability"
+      ],
+      "difficulty": 2,
+      "prompt": "Node-id leases have a 60 s TTL and the registry is down for 10 minutes. What happens?",
+      "choices": [
+        "Nothing: the registry is only used at startup",
+        "Running processes stop minting ≈ 1 minute in, when their lease deadlines pass, so creates fail platform-wide",
+        "Processes keep minting with their old node ids indefinitely",
+        "Processes switch to random node ids"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "With leases, the registry must answer a renewal once per TTL; after one TTL without a renewal every holder's deadline passes and it must stop. That is why the unit sizes the TTL in minutes (≈ 10–20 min). Continuing past the deadline is the paused-holder duplicate, and random node ids collide.",
+      "ref": "unit-1-unique-id-generator.md#7-deep-dive-3-node-ids-leases-and-what-breaks-at-10-037045"
+    },
+    {
+      "id": "C3-035",
+      "type": "single",
+      "tags": [
+        "leases",
+        "clocks"
+      ],
+      "difficulty": 3,
+      "prompt": "Holder A releases node 12 cleanly at tick 1,000,000 (its lease limit was tick 1,009,000). B acquires node 12 at once. What floor should B get, and why?",
+      "choices": [
+        "1,009,000, A's limit, because A might still be minting",
+        "1,000,000, the tick A actually used, because a release is a fact about the past: A has stopped",
+        "0, because the lease was released",
+        "B's own current tick"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "On release A has stopped minting, so the registry records the tick it actually used, and B starts right after it instead of waiting 9 s for A's limit. After a crash there is no release, so the floor stays at A's limit (a promise about the future). A floor of 0 or B's current tick would let B re-mint A's ticks if B's clock is behind.",
+      "ref": "unit-1-unique-id-generator.md#7-deep-dive-3-node-ids-leases-and-what-breaks-at-10-037045"
+    },
+    {
+      "id": "C3-036",
+      "type": "single",
+      "tags": [
+        "id-generation",
+        "leases"
+      ],
+      "difficulty": 2,
+      "prompt": "Two correct generators were accidentally given the same node id (a copied config). Each mints ≈ 1 id/s. The lab measured ≈ 565 duplicates per million ids. Why does this bug survive testing?",
+      "choices": [
+        "Because duplicates need both to mint in the same millisecond, which at low rates happens rarely: about one id in 1,800, invisible in tests and constant in production",
+        "Because the race detector hides it",
+        "Because the generators wait on overflow",
+        "Because duplicate ids are always rejected by the database"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A duplicate needs both processes in the same tick with the same sequence; at λ = 0.001 per ms each that is ≈ λ/2 ≈ 500 per million ids. Unit tests mint a few hundred ids and see none. The race detector finds data races within one process, not this; overflow is irrelevant at 1 id/s; and many stores (KV puts, upserts, caches) silently overwrite rather than reject.",
+      "ref": "unit-1-unique-id-generator.md#7-deep-dive-3-node-ids-leases-and-what-breaks-at-10-037045"
+    },
+    {
+      "id": "C3-037",
+      "type": "single",
+      "tags": [
+        "id-generation",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "In the lab, a test uses a fake clock whose Sleep returns without advancing time. What must a correct generator do when it needs the next tick?",
+      "choices": [
+        "Spin until the clock moves",
+        "Give up after a bounded total sleep and return ErrClockStalled",
+        "Wrap the sequence",
+        "Panic"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A clock that never moves (a frozen VM, a broken fake) must produce an error, not a hang: the generator bounds its total requested sleep per call (MaxBackwards + MaxAhead + 2 ticks in the lab). Spinning hangs the caller, wrapping creates duplicates, and a panic in a library takes down the whole process.",
+      "ref": "unit-1-unique-id-generator.md#5-deep-dive-1-the-sequence-the-lock-and-what-ordered-means-025031"
+    },
+    {
+      "id": "C3-038",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "A transfer API mints a new id on each request and uses it as the dedupe key. A client times out and retries the same transfer. What happens?",
+      "choices": [
+        "The retry is deduplicated by the id",
+        "The retry gets a new id, so it is a second transfer; the dedupe key must come from the caller, created once before the first attempt",
+        "The generator detects the retry and returns the same id",
+        "The database rejects the second insert"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A server-generated id is new on every attempt, so it dedupes nothing. Idempotency belongs to the caller's intent: an idempotency key (or the file id + line, or the vendor's reference) created once and sent on every retry. The generator has no idea two requests are the same transfer, and the database sees two different primary keys.",
+      "ref": "unit-1-unique-id-generator.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C3-039",
+      "type": "single",
+      "tags": [
+        "indexes",
+        "sharding",
+        "storage"
+      ],
+      "difficulty": 3,
+      "prompt": "The orders table moves to a distributed SQL database that range-partitions by primary key. The primary key is a time-ordered 64-bit id. What happens to writes?",
+      "choices": [
+        "They spread evenly because ids are unique",
+        "They all land on the newest range, so the cluster's write throughput is one range's; hash or bit-reverse the leading key",
+        "They slow down because time-ordered keys fragment the B-tree",
+        "Nothing changes compared with a single-node B-tree"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "In a range-partitioned store every new key is larger than all existing ones, so all inserts hit the last range, and splitting it just moves the hot spot. On a single-node B-tree the same property is the benefit (right-edge inserts, full pages, small hot set), not fragmentation. Uniqueness says nothing about distribution. Fixes: hash(id) or a bit-reversed id leading the key, or a business key first.",
+      "ref": "unit-1-unique-id-generator.md#7-deep-dive-3-node-ids-leases-and-what-breaks-at-10-037045"
+    },
+    {
+      "id": "C3-040",
+      "type": "single",
+      "tags": [
+        "ordering",
+        "multi-region"
+      ],
+      "difficulty": 3,
+      "prompt": "Three regions mint ids independently (node-id space split per region), with clocks within 20 ms of each other. A merged feed is shown ORDER BY id. A reply to a message, minted 5 ms later in another region, sorts BEFORE the message. Is that a bug in the generator?",
+      "choices": [
+        "Yes: ids must be strictly ordered across regions",
+        "No: ids are k-sorted only to within the skew; if replies must sort after messages, the reply must carry the message's id or be minted with a tick above it",
+        "Yes: the regions must share one registry",
+        "No, because the feed should be sorted by node id"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Cross-region ids are ordered by each region's clock, so events within ≈ 20 ms can appear in either order: that is the stated promise, not a bug. Causal order needs the dependency to be carried explicitly (HLC-style: tick ≥ message tick + 1). A shared registry would not order ids, and sorting by node id is meaningless.",
+      "ref": "unit-1-unique-id-generator.md#7-deep-dive-3-node-ids-leases-and-what-breaks-at-10-037045"
+    },
+    {
+      "id": "C3-041",
+      "type": "single",
+      "tags": [
+        "indexes",
+        "storage",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "A 400 GB table with a random UUIDv4 primary key has slow inserts. Switching new rows to time-ordered ids helps because…",
+      "choices": [
+        "time-ordered ids are shorter than UUIDs in every case",
+        "inserts go to the right edge of the B-tree, so a small set of leaves stays in memory instead of a random leaf being read and split per insert",
+        "time-ordered ids avoid the need for an index",
+        "random ids cause duplicate-key errors"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Once a random-key index exceeds memory, most inserts read a random leaf from disk and split pages across the tree; right-edge inserts keep the hot set tiny and pages full. UUIDv7 is time-ordered and still 128 bits, so 'shorter' is not the reason; the index is still needed; and 122 random bits don't produce duplicates in practice.",
+      "ref": "unit-1-unique-id-generator.md#7-deep-dive-3-node-ids-leases-and-what-breaks-at-10-037045"
+    }
+  ]
+}

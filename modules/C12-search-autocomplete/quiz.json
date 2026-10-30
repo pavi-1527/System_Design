@@ -1,0 +1,786 @@
+{
+  "module": "C12",
+  "title": "Case study: search autocomplete",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "C12-001",
+      "type": "single",
+      "tags": ["requirements", "design", "caching"],
+      "difficulty": 2,
+      "prompt": "You have one clarifying question left before you start designing autocomplete for a consumer app. Which answer changes the design the most?",
+      "choices": [
+        "Whether suggestions are personalised to each user or the same list for everyone",
+        "Whether the dropdown shows an icon next to each suggestion",
+        "Whether suggestions render in the platform's system font",
+        "Which programming language the serving fleet is written in"
+      ],
+      "answer": [0],
+      "explanation": "Global suggestions are a function of (locale, prefix): one immutable snapshot, cacheable in the browser and at the CDN. Personal suggestions take the CDN and any shared cache off the read path and add per-user data to every keystroke, which is why the senior answer is a client-side merge that keeps the global path cacheable. An icon adds a few bytes per response, not a different architecture. Fonts and the implementation language change nothing in the design.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions"
+    },
+    {
+      "id": "C12-002",
+      "type": "multi",
+      "tags": ["requirements", "slo"],
+      "difficulty": 1,
+      "prompt": "Select ALL the lines that belong on an autocomplete requirements card as well-stated non-functional requirements.",
+      "choices": [
+        "Server p99 ≤ 20 ms; perceived p99 ≤ 100 ms end to end",
+        "A manually removed suggestion disappears everywhere within ≈ 10 minutes",
+        "A newly popular query appears in suggestions within ≈ 1 hour",
+        "Suggestions should feel fast and stay fresh",
+        "The index is a trie held in memory on every node"
+      ],
+      "answer": [0, 1, 2],
+      "explanation": "An NFR is a property with a number you can test: latency targets, a takedown propagation SLO and a popularity freshness bound all qualify, and each drives a later decision (where to serve from, the override path, batch vs streaming). \"Fast and fresh\" has no number, so nobody can tell whether a design meets it. \"A trie in memory\" is a design decision, not a requirement; putting it on the card skips the reasoning the interviewer wants to hear.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions"
+    },
+    {
+      "id": "C12-003",
+      "type": "single",
+      "tags": ["safety", "privacy", "requirements"],
+      "difficulty": 2,
+      "prompt": "One user typed a private person's name followed by an accusation eleven times. Nobody else ever typed it. Your build drops queries with a raw count below 10, so it is now suggested to everyone who types the name. Which rule actually prevents this class of incident?",
+      "choices": [
+        "A minimum-support threshold on distinct users (or sessions), backed by a per-query cardinality sketch in the aggregation",
+        "Raise the raw-count threshold from 10 to 20",
+        "Add the person's name to the blocklist",
+        "Shorten the decay half-life so old queries fade faster"
+      ],
+      "answer": [0],
+      "explanation": "The signal that a query is safe to show is that several different people searched it, so the threshold must be on distinct users, which needs a set or a HyperLogLog per query rather than a counter. A higher raw threshold just moves the bar: the same person can type it 21 times. A blocklist is reactive and can't anticipate every private name; it's for terms that are never acceptable. Decay changes ranking over time; a query typed eleven times today is fresh and still qualifies.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions"
+    },
+    {
+      "id": "C12-004",
+      "type": "single",
+      "tags": ["requirements", "freshness", "design"],
+      "difficulty": 2,
+      "prompt": "A teammate proposes using the suggest endpoint's own request log as the popularity signal: every lookup for `piz`, `pizz` and `pizza` adds one to that string's count. What is wrong with this?",
+      "choices": [
+        "Lookups inflate every prefix of a popular query and count one intent many times; aggregate submitted searches and let the index derive prefix popularity from them",
+        "Nothing; more events always give a better ranking",
+        "The request log is too small to be statistically meaningful",
+        "Lookups can't be logged at keystroke rate, so the data would be incomplete"
+      ],
+      "answer": [0],
+      "explanation": "Counting keystrokes makes `piz` and `pizz` look like popular queries in their own right, and counts one search ≈ 15–20 times. The real signal is the submitted search; the index already gives every prefix the popularity of the queries below it. The request log is larger, not smaller, than the search log (that's the problem). Logging at ≈ 350k/s is feasible with a log; feasibility isn't the objection, correctness is. Clicks on suggestions are a legitimate second signal.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions"
+    },
+    {
+      "id": "C12-005",
+      "type": "single",
+      "tags": ["availability", "requirements", "reliability"],
+      "difficulty": 1,
+      "prompt": "The suggest fleet is completely down for 20 minutes. What should a user of the search box see?",
+      "choices": [
+        "A normal search box with no dropdown: the client treats errors and short timeouts as no suggestions and never blocks typing or submitting",
+        "An error banner asking them to try searching again later",
+        "The search box disabled until suggest recovers, so results stay consistent",
+        "A spinner in the dropdown until a suggest request succeeds"
+      ],
+      "answer": [0],
+      "explanation": "Suggest is an enhancement; search must work without it (fail open). The client uses a short timeout (≈ 200 ms) and shows nothing on error, and the CDN can keep serving stale lists for hot prefixes via stale-if-error. An error banner and a disabled box turn an enhancement outage into a search outage. A spinner waiting for success blocks the UI on a dependency that is down and keeps clients retrying.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions"
+    },
+    {
+      "id": "C12-006",
+      "type": "numeric",
+      "tags": ["estimation", "qps"],
+      "difficulty": 2,
+      "prompt": "500 M searches per day, ≈ 20 keystrokes per search, each keystroke a lookup, peak factor 3×. What is the peak lookup rate as sent by clients, before any debounce or client cache? Answer in lookups per second.",
+      "value": 350000,
+      "tolerance": 0.25,
+      "unit": "lookups/s",
+      "explanation": "500 M ÷ 86,400 ≈ 5.8k searches/s; × 20 ≈ 116k lookups/s average; × 3 ≈ 350k/s peak. With a debounce and a session prefix cache that halve it, ≈ 175k/s reach the edge, which is what the origin is sized for. Forgetting the keystroke multiplier gives ≈ 17k/s, a 20× under-estimate.",
+      "ref": "unit-1-guided-design.md#2-estimation-walkthrough"
+    },
+    {
+      "id": "C12-007",
+      "type": "single",
+      "tags": ["estimation", "qps"],
+      "difficulty": 1,
+      "prompt": "A team estimates \"20 M searches a day ≈ 230 per second, two servers with plenty of headroom\" for autocomplete. At launch both servers are at 100% CPU in the evening. What is the most likely mistake?",
+      "choices": [
+        "They counted searches, not keystrokes: ≈ 15–20 lookups per search and a peak factor make it ≈ 10k lookups/s at peak",
+        "They divided by 86,400 instead of 10^5",
+        "They forgot the TLS handshake cost of each request",
+        "They sized for the peak instead of the average"
+      ],
+      "answer": [0],
+      "explanation": "Autocomplete serves one lookup per keystroke: 20 M × 15 ≈ 300 M lookups/day ≈ 3.5k/s average, ≈ 10k/s at a 3× peak, 40× more than 230/s. 86,400 vs 10^5 is a 16% difference, not 40×. TLS costs round trips on new connections, and HTTP/2 reuses one connection for the keystroke burst. Sizing for peak is correct practice; they sized for neither.",
+      "ref": "unit-1-guided-design.md#2-estimation-walkthrough"
+    },
+    {
+      "id": "C12-008",
+      "type": "numeric",
+      "tags": ["estimation", "memory", "trie"],
+      "difficulty": 2,
+      "prompt": "20 M distinct queries survive filtering. You assume ≈ 5 new prefix nodes per query after prefix sharing, and a compact node (sorted child array, five 4-byte query ids, a count) costs ≈ 80 bytes. How much memory does the node structure need, excluding the query strings? Answer in GB.",
+      "value": 8,
+      "tolerance": 0.25,
+      "unit": "GB",
+      "explanation": "20 M × 5 ≈ 100 M nodes; × 80 B ≈ 8 × 10^9 B ≈ 8 GB, plus ≈ 0.5 GB for the 20 M strings at ≈ 24 B each. With ≈ 2× for the swap, ≈ 16–20 GB per node: it fits a 64 GB box, so you replicate the whole index. A naive Go trie at ≈ 300 B per node would be ≈ 30 GB.",
+      "ref": "unit-1-guided-design.md#2-estimation-walkthrough"
+    },
+    {
+      "id": "C12-009",
+      "type": "single",
+      "tags": ["estimation", "memory", "operations"],
+      "difficulty": 2,
+      "prompt": "The index is ≈ 7 GB and the replicas have 8 GB of RAM. It runs fine until the first hourly rebuild, when the kernel kills the process on every replica within the same minute. What happened?",
+      "choices": [
+        "The new index was loaded next to the old one (≈ 2× memory), and every replica rebuilt on the same schedule, so all of them hit the limit at once",
+        "The trie has a memory leak that only shows after an hour of traffic",
+        "Go's garbage collector never frees memory, so the heap grows until it is killed",
+        "The snapshot file was corrupted in transit and decompressed to an unbounded size"
+      ],
+      "answer": [0],
+      "explanation": "A swap needs old and new in memory until the switch, so RAM must be ≈ 2× the index (memory alarms at ≈ 60%), and swaps must be staggered so one replica dying is capacity loss, not an outage. A leak wouldn't kill every replica in the same minute, aligned with the rebuild. Go's collector does free unreachable objects; the old index is released after the swap. A corrupt snapshot fails a checksum, and it would not hit every replica at the same instant unless they were synchronised, which is the real bug.",
+      "ref": "unit-1-guided-design.md#2-estimation-walkthrough"
+    },
+    {
+      "id": "C12-010",
+      "type": "single",
+      "tags": ["estimation", "partitioning", "replication"],
+      "difficulty": 2,
+      "prompt": "Which estimate decides whether the suggest service replicates the whole index on every node or partitions it across nodes?",
+      "choices": [
+        "Index memory against one node's RAM, with ≈ 2× headroom for the snapshot swap",
+        "Peak lookups per second",
+        "Daily raw search-log volume",
+        "Peak egress in Gbps"
+      ],
+      "answer": [0],
+      "explanation": "Traffic is handled by adding replicas whether or not the index is partitioned, so QPS sets the fleet size, not the layout. What forces partitioning is an index that no longer fits, with the 2× swap headroom, in the RAM you're willing to buy (≈ 10 GB index → ≈ 20 GB needed → fits). Log volume sizes the pipeline; egress sizes the network bill and argues for client caching and the CDN.",
+      "ref": "unit-1-guided-design.md#2-estimation-walkthrough"
+    },
+    {
+      "id": "C12-011",
+      "type": "numeric",
+      "tags": ["estimation", "bandwidth"],
+      "difficulty": 2,
+      "prompt": "350k lookups/s at peak, ≈ 300-byte responses. What is the peak egress? Answer in Gbps.",
+      "value": 0.84,
+      "tolerance": 0.25,
+      "unit": "Gbps",
+      "explanation": "350,000 × 300 B ≈ 105 MB/s; × 8 bits ≈ 840 Mbps ≈ 0.84 Gbps. Forgetting the × 8 gives 0.105, an 8× error. The monthly bill (≈ 90 TB at average load) is the same order as the servers, which is why the client cache and short responses matter.",
+      "ref": "unit-1-guided-design.md#2-estimation-walkthrough"
+    },
+    {
+      "id": "C12-012",
+      "type": "numeric",
+      "tags": ["estimation", "capacity"],
+      "difficulty": 2,
+      "prompt": "175k lookups/s reach the origin at peak. A load test shows ≈ 20k req/s per node (in-memory lookup, no downstream calls), and you plan for 60% utilisation. How many nodes do you need before adding N+2 for zone failures? Answer as a number of servers.",
+      "value": 15,
+      "tolerance": 0.25,
+      "unit": "servers",
+      "explanation": "175,000 ÷ (20,000 × 0.6) ≈ 14.6, round up to 15, then N+2 across three zones ≈ 17 per region. The per-node figure is above the usual 1k–10k req/s rule of thumb because there are no downstream calls; it must come from a load test, not a guess.",
+      "ref": "unit-1-guided-design.md#2-estimation-walkthrough"
+    },
+    {
+      "id": "C12-013",
+      "type": "single",
+      "tags": ["caching", "latency", "design"],
+      "difficulty": 2,
+      "prompt": "A reviewer suggests putting the index in a shared Redis cluster instead of every replica holding a ≈ 10 GB copy. What is the strongest argument against it?",
+      "choices": [
+        "It adds a network hop (≈ 0.5–1 ms) and a dependency to each of ≈ 175k lookups/s, and a single-threaded Redis node (≈ 100k+ ops/s) then has to be sharded, when the index fits in each replica's RAM",
+        "Redis has no data structure that can hold a ranked list",
+        "Redis always loses all its data on restart",
+        "Redis cannot do any kind of prefix range query"
+      ],
+      "answer": [0],
+      "explanation": "A local copy makes a lookup ≈ 100 ns with nothing to fail; a remote store turns it into a network call and a capacity problem of its own. Redis earns its place when the data doesn't fit per node or is shared by many services. The other claims are false: sorted sets hold ranked lists, Redis has persistence options, and ZRANGEBYLEX does lexicographic prefix ranges.",
+      "ref": "unit-1-guided-design.md#2-estimation-walkthrough"
+    },
+    {
+      "id": "C12-014",
+      "type": "multi",
+      "tags": ["estimation", "partitioning", "scalability"],
+      "difficulty": 3,
+      "prompt": "Select ALL that are true when comparing 10× traffic with 10× distinct queries for the autocomplete design (baseline: ≈ 350k lookups/s peak, ≈ 10 GB compact index).",
+      "choices": [
+        "10× traffic grows the replica fleet roughly linearly and leaves the whole-index-per-node decision unchanged",
+        "10× queries pushes the compact index to ≈ 60–100 GB, ≈ 2× that with swap headroom, and flips the design to partitioning, by locale first",
+        "10× traffic forces you to partition the index by prefix range",
+        "10× queries is solved by adding more replicas of the whole index"
+      ],
+      "answer": [0, 1],
+      "explanation": "Traffic scales the fleet; corpus size changes the architecture. At 10× traffic you need ≈ 170 replicas per region and the CDN and client cache become mandatory, but every replica can still hold the whole index. At 10× queries the index no longer fits with headroom, so you partition (locale, then prefix range or hash). Partitioning doesn't add read capacity that replicas couldn't, so 10× traffic alone doesn't force it; more replicas don't help an index that doesn't fit on any one of them.",
+      "ref": "unit-1-guided-design.md#2-estimation-walkthrough"
+    },
+    {
+      "id": "C12-015",
+      "type": "single",
+      "tags": ["caching", "capacity", "reliability"],
+      "difficulty": 2,
+      "prompt": "The CDN answers most one- and two-character prefixes, so the origin sees ≈ 100k lookups/s and the team sizes it for exactly that instead of the ≈ 175k/s that reach the edge. Which failure does this invite?",
+      "choices": [
+        "A CDN purge, configuration mistake or cache-key change sends the full ≈ 175k/s to an origin sized for 100k/s",
+        "The CDN serves suggestions that are up to max-age seconds old",
+        "Clients stop debouncing because the CDN is fast",
+        "Snapshot distribution saturates the origin's network"
+      ],
+      "answer": [0],
+      "explanation": "The CDN is a latency and egress saving, not capacity you can count on: the day it misses everything, the origin gets the pre-CDN load at once. Size the origin for that. Staleness up to max-age is a deliberate, acceptable property of the design, not a failure caused by sizing. Client debounce is independent of the CDN. Snapshot distribution is ≈ 14 MB/s inside a region, unrelated.",
+      "ref": "unit-1-guided-design.md#2-estimation-walkthrough"
+    },
+    {
+      "id": "C12-016",
+      "type": "single",
+      "tags": ["latency", "networking", "design"],
+      "difficulty": 2,
+      "prompt": "Perceived p99 target: 100 ms. Server work is ≈ 1 ms. The only suggest deployment is in one region; users on another continent pay ≈ 20 ms to the nearest edge plus ≈ 70 ms edge-to-origin RTT, and the dropdown feels laggy. What is the right move?",
+      "choices": [
+        "Serve from every region users are in and let the edge answer the hottest prefixes: the budget is spent on distance, not compute",
+        "Optimise the lookup from ≈ 100 ns to ≈ 50 ns",
+        "Raise the debounce from ≈ 120 ms to ≈ 300 ms so fewer requests are sent",
+        "Open a new connection per keystroke so requests don't queue behind each other on HTTP/2"
+      ],
+      "answer": [0],
+      "explanation": "With ≈ 1 ms of server time, the network is the whole budget, so the fix is where you serve from. Immutable snapshots make multi-region serving cheap: copy the file. Halving a 100 ns lookup saves nothing visible. A longer debounce delays every suggestion and doesn't shorten the round trip. A new connection per keystroke adds TCP and TLS round trips; HTTP/2 multiplexing over one kept-alive connection is the right transport.",
+      "ref": "unit-1-guided-design.md#2-estimation-walkthrough"
+    },
+    {
+      "id": "C12-017",
+      "type": "numeric",
+      "tags": ["estimation", "bandwidth", "cost"],
+      "difficulty": 2,
+      "prompt": "Average load is ≈ 116k lookups/s with ≈ 300-byte responses. Roughly how much egress is that per 30-day month? Answer in TB.",
+      "value": 90,
+      "tolerance": 0.25,
+      "unit": "TB",
+      "explanation": "116,000 × 300 B ≈ 35 MB/s; × 86,400 ≈ 3 TB/day; × 30 ≈ 90 TB/month. At ≈ $0.05–0.09/GB that's ≈ $4.5–8k/month, the same order as ≈ 17 servers, so the client cache (which halves both) and response trimming are cost decisions, not polish.",
+      "ref": "unit-1-guided-design.md#2-estimation-walkthrough"
+    },
+    {
+      "id": "C12-018",
+      "type": "single",
+      "tags": ["api-design", "caching", "http"],
+      "difficulty": 2,
+      "prompt": "Version 2 of the suggest API is `POST /api/suggest` with body `{\"prefix\": \"Piz\", \"userId\": \"u_42\"}`. In infrastructure terms, what did this choice cost?",
+      "choices": [
+        "Every cache between user and service stops storing responses: POST isn't cacheable by default, and the user id makes every response nominally personal",
+        "POST bodies are limited in size, so long prefixes are truncated",
+        "Parsing a JSON body is measurably slower than parsing a query string",
+        "Nothing; CDNs cache POST responses when the body is identical"
+      ],
+      "answer": [0],
+      "explanation": "A lookup is safe and idempotent and its answer depends only on (locale, normalised q, limit), so it should be a GET that browsers and the CDN can store, with stale-if-error protecting outages. POST forfeits all of that and puts every keystroke on the origin and the egress bill. Body size limits are far above any prefix. JSON parsing cost is microseconds, irrelevant next to the lost caching. CDNs don't cache POST by default, and the per-user field would defeat sharing anyway.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C12-019",
+      "type": "single",
+      "tags": ["api-design", "errors"],
+      "difficulty": 1,
+      "prompt": "What should `GET /v1/suggest?q=` (an empty or whitespace-only prefix) return?",
+      "choices": [
+        "200 with an empty suggestions list",
+        "400 Bad Request, because a prefix is required",
+        "404 Not Found, because no suggestion matches",
+        "503 with Retry-After, so the client tries again"
+      ],
+      "answer": [0],
+      "explanation": "Nothing is wrong; there is just nothing to suggest, and the client ranges over an empty list without special cases. A 400 makes normal typing behaviour (clearing the box) look like a client bug, triggering error logging or retries. 404 means the resource doesn't exist, which is also wrong for a valid endpoint. 503 is for the service being unable to answer and invites retries for a request that will never produce anything.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C12-020",
+      "type": "single",
+      "tags": ["api-design", "ordering", "client"],
+      "difficulty": 2,
+      "prompt": "A user has typed `pizza`, but the dropdown shows completions of `pi`: the response for `pi` was slow and arrived after the one for `pizza`. What is the fix?",
+      "choices": [
+        "The client tags each request with an increasing sequence number and drops any response older than the last one rendered; the server echoes the normalised q as a second check",
+        "Raise the debounce to 500 ms so fewer requests are in flight",
+        "Lower the CDN TTL so responses are fresher",
+        "Have the server process each user's requests in order behind a per-user lock"
+      ],
+      "answer": [0],
+      "explanation": "Out-of-order arrival is a client rendering problem, solved on the client: discard stale responses by sequence number, or compare the echoed q with the current input. Cancelling in-flight requests reduces waste but isn't sufficient on its own. A longer debounce makes the race rarer but not impossible, and slows every suggestion. TTL has nothing to do with arrival order. Requests can go to different replicas and responses can still race in the network, so a per-user server lock doesn't help and adds state to a stateless path.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C12-021",
+      "type": "multi",
+      "tags": ["caching", "api-design", "http"],
+      "difficulty": 2,
+      "prompt": "Select ALL the properties that make the suggest response cacheable by browsers and the CDN.",
+      "choices": [
+        "It is served for a GET request",
+        "It depends only on (locale, normalised q, limit), with no per-user data",
+        "It carries Cache-Control: public with a max-age (plus stale-while-revalidate and stale-if-error)",
+        "It sets Vary: Cookie so every user gets a fresh result",
+        "It includes the user id in the query string so abuse can be traced"
+      ],
+      "answer": [0, 1, 2],
+      "explanation": "GET, a response that's the same for everyone with the same key, and an explicit public TTL are what let every layer store it; the stale-* directives keep hot prefixes served through origin errors. Vary: Cookie and a user id in the URL both put the user into the cache key, so nothing is shared across users and the hit rate collapses to ≈ 0. Trace abuse with edge rate limits per IP or client token instead.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C12-022",
+      "type": "single",
+      "tags": ["caching", "normalisation", "cdn"],
+      "difficulty": 2,
+      "prompt": "Some clients send `q=Piz`, others `q=piz` or `q=piz%20` for the same input. The CDN hit rate for short prefixes is about half what you expected. What is the fix?",
+      "choices": [
+        "Normalise the prefix the same way everywhere: on the client, in the CDN cache key, and in the server with the same function the build uses for queries",
+        "Increase max-age so entries live longer",
+        "Add more CDN points of presence",
+        "Make the API case-sensitive and document it"
+      ],
+      "answer": [0],
+      "explanation": "Each spelling is a separate cache entry with an identical answer, so the misses multiply. One normalisation function (lower case, trim, collapse whitespace) applied by the client, the CDN key configuration and the index makes them one key at every layer, and the server's lookup must match the build or it returns wrong \"nothing found\" answers. Longer max-age and more PoPs keep more duplicate entries; they don't merge them. A case-sensitive API makes the duplication official.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C12-023",
+      "type": "single",
+      "tags": ["trie", "memory", "data-modelling"],
+      "difficulty": 2,
+      "prompt": "Why does the serving index store query ids (plus one id → text table) under each prefix rather than the query strings themselves?",
+      "choices": [
+        "A popular query appears in the top-K of every prefix it dominates, so inline strings repeat it ≈ depth times; 4-byte ids store it once, and a takedown becomes one tombstone in the id table",
+        "Strings can't be sorted, so ranking needs numeric ids",
+        "Ids make the prefix walk O(1) instead of O(len(prefix))",
+        "Go strings are immutable, so they can't be stored in a trie node"
+      ],
+      "answer": [0],
+      "explanation": "`weather` is in the top-5 of `w`, `we`, …, `weather`: seven copies as strings, and the same for every popular query, which multiplied the failure story's index ≈ 4×. Ids cost 4 B per occurrence and centralise the text, so suppressing a query everywhere is a single change. Strings sort fine. The walk is O(len(prefix)) either way; ids change the payload, not the path. Immutable strings are stored in Go structs all the time.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C12-024",
+      "type": "single",
+      "tags": ["storage", "design", "databases"],
+      "difficulty": 2,
+      "prompt": "A nightly job rebuilds `suggestions(prefix TEXT PRIMARY KEY, results JSONB)` with a 100 M-row UPSERT in the same Postgres that holds user accounts. Logins slow down at 03:00 every night. What is the best change?",
+      "choices": [
+        "Make the serving index an immutable, versioned snapshot file in object storage, loaded into each replica's RAM, with no live database on the read path",
+        "Spread the UPSERT over the whole night in smaller batches",
+        "Add a read replica and route suggestion queries to it",
+        "Store results as TEXT instead of JSONB to make rows smaller"
+      ],
+      "answer": [0],
+      "explanation": "The serving data changes all at once, hourly or nightly, and is read at keystroke rate, which is the profile of a build artefact, not of OLTP rows: built, validated, versioned, distributed, swapped. Smaller batches spread the bloat and buffer-pool pollution out but keep it in the accounts database. A read replica still replays every write and keeps a database on the read path. Column type is a minor size tweak that addresses neither problem.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C12-025",
+      "type": "single",
+      "tags": ["design", "operations", "deployment"],
+      "difficulty": 2,
+      "prompt": "The aggregation job pushes updates into every replica's in-memory index over RPC under a write lock. Every hour the whole fleet blinks for ≈ 40 s, and when a buggy build was pushed nobody could roll back. What should the write path do instead?",
+      "choices": [
+        "Publish an immutable, versioned snapshot to object storage; replicas pull it, load it beside the current one, validate it and swap one pointer, with a canary replica first and waves after",
+        "Split the update into smaller batches so each holds the lock for less time",
+        "Move to larger replicas so the update finishes faster",
+        "Add retries with backoff to the aggregation job's RPCs"
+      ],
+      "answer": [0],
+      "explanation": "Snapshots give an atomic switch (no lock on the read path), rollback (the previous version still exists), canarying, and reproducibility. Smaller batches still hold locks on the hot path, still update every node at the same minute, and still leave nothing to roll back to. Bigger boxes shorten the blink without removing it. Retries make pushes more reliable, including pushes of a bad build.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-the-read-path-and-the-write-path"
+    },
+    {
+      "id": "C12-026",
+      "type": "single",
+      "tags": ["health-checks", "operations", "load-balancing"],
+      "difficulty": 2,
+      "prompt": "After a deploy, the empty-result rate rises while error rates and latency stay green. A freshly started replica answers every lookup with 200 and an empty list for the ≈ 2 minutes it takes to load its snapshot. What fixes this?",
+      "choices": [
+        "The load balancer's health check must mean \"snapshot loaded and validated\", not \"process is up\"",
+        "Return 503 for every request until the first snapshot loads, and keep the health check as is",
+        "Load the snapshot lazily, one prefix at a time, on first request",
+        "Alert on the 5xx rate so this is caught next time"
+      ],
+      "answer": [0],
+      "explanation": "Readiness should reflect the ability to serve correct answers, so the load balancer never routes to a replica without an index. Returning 503 while still marked healthy sends real users errors instead of routing them elsewhere. Lazy per-prefix loading means a slow, inconsistent start and a partially loaded index serving answers. A 5xx alert would not fire at all here: the failure is emptiness, so the alert should be on the empty-result rate.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-the-read-path-and-the-write-path"
+    },
+    {
+      "id": "C12-027",
+      "type": "multi",
+      "tags": ["operations", "reliability", "deployment"],
+      "difficulty": 2,
+      "prompt": "A pipeline bug produces a snapshot with ≈ 2% of the usual prefixes. Select ALL the mechanisms that keep it from reaching most users.",
+      "choices": [
+        "Validation against the manifest (size, node count) and a set of golden prefixes that must return non-empty lists, failing the publish",
+        "A canary replica whose empty-result rate is compared with the fleet before the rollout continues",
+        "The previous version kept in object storage, so any replica can swap back",
+        "Client-side debounce",
+        "A higher minimum-support threshold"
+      ],
+      "answer": [0, 1, 2],
+      "explanation": "Validation turns a bad build into a failed job; the canary catches what validation misses after one replica instead of the fleet; versioned snapshots make rollback a pointer swap. Debounce reduces request volume and doesn't inspect what the index contains. A higher support threshold would remove even more prefixes; it's a safety control, not a release guard.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-the-read-path-and-the-write-path"
+    },
+    {
+      "id": "C12-028",
+      "type": "single",
+      "tags": ["safety", "freshness", "design"],
+      "difficulty": 2,
+      "prompt": "Legal requires that a removed suggestion disappear within 10 minutes. The main index is rebuilt and rolled out hourly. Where does the takedown take effect?",
+      "choices": [
+        "In a small override set (suppressed ids, pins) published on its own fast path and applied at lookup as a filter over the top-K, which is why nodes keep a few more than K",
+        "Trigger an emergency full rebuild and fleet-wide rollout for every takedown",
+        "Purge the CDN entries for the affected prefixes and leave the index unchanged",
+        "Edit the query out of each replica's in-memory trie through an admin RPC"
+      ],
+      "answer": [0],
+      "explanation": "A tiny, separately published filter propagates in minutes without touching the immutable main index, and the audit trail records who removed what. Emergency rebuilds take the full build-and-rollout time and turn every takedown into a risky deploy. A CDN purge alone lets the origin serve the same suggestion again on the next miss. Editing the index in place gives up atomic swap, validation and rollback for one use case, and the next hourly build brings the query back unless the override exists anyway.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-the-read-path-and-the-write-path"
+    },
+    {
+      "id": "C12-029",
+      "type": "single",
+      "tags": ["freshness", "alerting", "observability"],
+      "difficulty": 2,
+      "prompt": "The aggregation pipeline dies on Friday evening and nobody notices until Monday. What did users see over the weekend, and which alert was missing?",
+      "choices": [
+        "Suggestions from Friday's last snapshot, stale but present; the missing alert is snapshot age (no new snapshot for ≈ 2× the build interval)",
+        "Empty dropdowns; the missing alert is the 5xx rate on the suggest fleet",
+        "503 errors from every replica; the missing alert is the load balancer's health check",
+        "Random suggestions from a partial snapshot; the missing alert is p99 latency"
+      ],
+      "answer": [0],
+      "explanation": "Replicas keep serving the last good snapshot by design (fail open), so nothing errors and nothing is slow: only freshness degrades. That needs freshness SLIs (snapshot age per replica, version skew, a synthetic query that must appear within the SLO). The fleet doesn't go empty or return 503s when the pipeline stops, and partial snapshots are stopped by validation. Error and latency dashboards stay green, which is exactly why they're not enough.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-the-read-path-and-the-write-path"
+    },
+    {
+      "id": "C12-030",
+      "type": "numeric",
+      "tags": ["estimation", "bandwidth", "deployment"],
+      "difficulty": 2,
+      "prompt": "Every hour, a ≈ 3 GB snapshot is distributed to 17 replicas in a region. What is the average transfer rate inside the region? Answer in MB/s.",
+      "value": 14,
+      "tolerance": 0.25,
+      "unit": "MB/s",
+      "explanation": "3 GB × 17 ≈ 51 GB per hour; ÷ 3,600 s ≈ 14 MB/s (≈ 113 Mbps). Trivial for a datacentre network, which is why hourly rebuilds are cheap and minute-level freshness is a pipeline-design problem, not a bandwidth problem.",
+      "ref": "unit-1-guided-design.md#2-estimation-walkthrough"
+    },
+    {
+      "id": "C12-031",
+      "type": "single",
+      "tags": ["trie", "topk", "latency"],
+      "difficulty": 2,
+      "prompt": "Your trie computes the top 5 at query time by traversing the prefix node's subtree. `pizza h` takes ≈ 5 µs; `s` takes ≈ 40 ms of CPU. Which statement explains it and points to the fix?",
+      "choices": [
+        "Cost is proportional to the subtree size, so the most-requested short prefixes are the most expensive; precompute the top-K per node at build time",
+        "The trie is too deep; replace it with a hash map and keep ranking at query time",
+        "The 40 ms is a garbage-collector pause, unrelated to the prefix",
+        "Add replicas until the one-letter lookups fit; the design is fine"
+      ],
+      "answer": [0],
+      "explanation": "`s` has millions of queries below it and is requested by nearly every search: exactly backwards for a hot path. Precomputing the top-K per node makes every lookup O(len(prefix) + K), ≈ 100 ns, regardless of popularity. A hash map with query-time ranking still ranks millions of matches. GC pauses would hit all prefixes, not scale with subtree size. At ≈ 9k one-letter lookups/s × 40 ms ≈ 360 cores, adding replicas is a cost disaster, not a fix.",
+      "ref": "unit-2-deep-dives.md#5-tries-sorted-tables-fsts-where-the-top-k-lives"
+    },
+    {
+      "id": "C12-032",
+      "type": "single",
+      "tags": ["stampede", "caching", "topk"],
+      "difficulty": 2,
+      "prompt": "To save the query-time top-K trie, the team puts an LRU cache of prefix → top-5 in front of it. It works, except that once an hour the whole fleet melts for a minute. What is happening?",
+      "choices": [
+        "Each hourly snapshot swap starts with a cold cache, and every replica recomputes every hot prefix at the same time: a synchronised stampede",
+        "LRU evicts the hottest prefixes first, so they're always missing",
+        "Snapshot downloads saturate the network once an hour",
+        "The cache holds old suggestions, so users retry their searches"
+      ],
+      "answer": [0],
+      "explanation": "A cache in front of an expensive computation is only as good as its warm state; invalidating it fleet-wide on a schedule is synchronised expiry, the A3 stampede. The fix is not to compute at query time at all (precompute per node). LRU keeps recently used keys, and hot prefixes are the most recently used. Distribution is ≈ 14 MB/s per region. Stale suggestions don't cause CPU melt.",
+      "ref": "unit-2-deep-dives.md#5-tries-sorted-tables-fsts-where-the-top-k-lives"
+    },
+    {
+      "id": "C12-033",
+      "type": "multi",
+      "tags": ["trie", "data-structures", "memory"],
+      "difficulty": 2,
+      "prompt": "Select ALL that are true about a hash map from prefix string → top-K ids compared with a trie holding a precomputed top-K per node.",
+      "choices": [
+        "Both give lookups of ≈ 100 ns once the top-K is precomputed",
+        "The hash map stores each prefix as its own key, so there is no prefix sharing",
+        "The trie lets nodes whose subtree has ≤ K queries skip a stored top-K and enumerate the subtree instead",
+        "The hash map cannot serve prefixes longer than three characters"
+      ],
+      "answer": [0, 1, 2],
+      "explanation": "Both are fast; the differences are memory and capability. The map pays ≈ Σ prefix lengths in key bytes plus per-entry overhead, and can't enumerate what lies below a prefix; the trie shares prefixes and supports the hybrid skip and debugging. The map is a fine answer when a batch job already emits (prefix, top-K) rows and memory is not tight. There is no three-character limit on map keys.",
+      "ref": "unit-2-deep-dives.md#5-tries-sorted-tables-fsts-where-the-top-k-lives"
+    },
+    {
+      "id": "C12-034",
+      "type": "single",
+      "tags": ["go", "memory", "latency"],
+      "difficulty": 3,
+      "prompt": "A Go trie with a `map[rune]*node` per node holds 100 M nodes. Lookups are ≈ 100 ns, but p99 shows a sawtooth into hundreds of milliseconds that lines up with GC cycles. What is the fix?",
+      "choices": [
+        "A pointer-free layout: nodes, child ranges, ids and strings in a few large flat slices indexed by integers, which the GC skips, and which can be memory-mapped from the snapshot file",
+        "Set GOGC=off so the collector never runs",
+        "Allocate nodes from a sync.Pool",
+        "Serve each lookup on more goroutines to hide the pause"
+      ],
+      "answer": [0],
+      "explanation": "The mark phase visits every pointer in the live heap; hundreds of millions of map and node pointers make each cycle long and costly, and the 2× heap during a swap doubles it. Flat slices of integers contain no pointers for the collector to trace, and the same layout serialises as-is, so the second copy during a swap can be page cache instead of heap. GOGC=off lets the heap grow until the process is killed and still leaves the pointers. sync.Pool recycles short-lived objects; these nodes are long-lived. More goroutines don't remove the mark work.",
+      "ref": "unit-2-deep-dives.md#5-tries-sorted-tables-fsts-where-the-top-k-lives"
+    },
+    {
+      "id": "C12-035",
+      "type": "numeric",
+      "tags": ["estimation", "memory", "go"],
+      "difficulty": 2,
+      "prompt": "100 M prefix nodes in a naive Go trie at ≈ 300 bytes per node (a map per node, pointers everywhere). How much memory does the index need, before swap headroom? Answer in GB.",
+      "value": 30,
+      "tolerance": 0.25,
+      "unit": "GB",
+      "explanation": "100 M × 300 B = 3 × 10^10 B ≈ 30 GB, ≈ 60 GB with the 2× swap headroom: it still fits a 128 GB box, but the compact layout at ≈ 30–100 B per node is the difference between 32 GB and 128 GB instances across the fleet, plus far less GC work.",
+      "ref": "unit-2-deep-dives.md#5-tries-sorted-tables-fsts-where-the-top-k-lives"
+    },
+    {
+      "id": "C12-036",
+      "type": "single",
+      "tags": ["trie", "data-structures"],
+      "difficulty": 1,
+      "prompt": "What does a finite state transducer (as used by Lucene's suggesters) share that a trie does not?",
+      "choices": [
+        "Common suffixes as well as common prefixes, because it is a minimal automaton over the sorted terms",
+        "Nothing; an FST is a trie with a different name",
+        "Hash buckets between unrelated keys",
+        "Infix matches, so `cup` finds `world cup` directly"
+      ],
+      "answer": [0],
+      "explanation": "Minimisation merges equivalent states, so `…station` and `…nation` share their endings; weights on arcs let the best completions be found by a bounded best-first search. That makes it the smallest structure, the answer to \"make it 3× smaller\", and too intricate to build live. It is not just a trie (a trie only shares prefixes), it is not a hash structure, and it is still a prefix structure: infix needs word-level indexing or an n-gram index.",
+      "ref": "unit-2-deep-dives.md#5-tries-sorted-tables-fsts-where-the-top-k-lives"
+    },
+    {
+      "id": "C12-037",
+      "type": "single",
+      "tags": ["trie", "topk", "memory"],
+      "difficulty": 2,
+      "prompt": "In the hybrid trie, which nodes can skip storing a top-K list without making lookups expensive?",
+      "choices": [
+        "Nodes whose subtree holds ≤ K queries: the subtree is the answer and is enumerated at negligible cost",
+        "Only terminal nodes, where a query ends",
+        "The one-character prefix nodes, because the CDN answers them",
+        "Every node deeper than MaxPrefix"
+      ],
+      "answer": [0],
+      "explanation": "If at most K queries lie below a node, walking them is as cheap as reading a stored list, and most deep nodes qualify, so the stored top-Ks concentrate on the few million shallow nodes. Terminal nodes are a narrower set and many terminal nodes have large subtrees (`pizza` has `pizza hut` below it). One-character nodes have the largest subtrees and must store their top-K; the CDN is a cache, not a substitute. There are no nodes deeper than MaxPrefix.",
+      "ref": "unit-2-deep-dives.md#5-tries-sorted-tables-fsts-where-the-top-k-lives"
+    },
+    {
+      "id": "C12-038",
+      "type": "single",
+      "tags": ["trie", "api-design"],
+      "difficulty": 2,
+      "prompt": "The index stores nodes for prefixes up to MaxPrefix = 20 runes. A user types a 25-character prefix. What should Suggest do?",
+      "choices": [
+        "Walk to the 20-rune node, then keep only candidates that match the full 25-character prefix; the result may be shorter than K",
+        "Return the 20-rune node's top-K unchanged",
+        "Return 400, because the prefix exceeds the index depth",
+        "Return an empty list, because no node exists for that prefix"
+      ],
+      "answer": [0],
+      "explanation": "Truncate-then-filter never shows a completion that doesn't match what the user typed, and costs a string comparison on ≤ K candidates. Returning the 20-rune node's list unfiltered can suggest queries that diverge after character 20. A 400 turns normal typing into an error. Returning nothing throws away valid completions that do match. The lab's TestSuggest_PrefixLongerThanMaxPrefixIsTruncatedThenFiltered checks exactly this.",
+      "ref": "unit-2-deep-dives.md#5-tries-sorted-tables-fsts-where-the-top-k-lives"
+    },
+    {
+      "id": "C12-039",
+      "type": "numeric",
+      "tags": ["estimation", "topk", "capacity"],
+      "difficulty": 2,
+      "prompt": "In the lab's break-it benchmark, the sorted-array-plus-scan design takes ≈ 1.4 ms of CPU for a one-letter prefix. At peak you serve ≈ 9k one-letter lookups/s. How many CPU cores does the scan design spend on those lookups alone? Answer in cores.",
+      "value": 12.6,
+      "tolerance": 0.25,
+      "unit": "cores",
+      "explanation": "1.4 ms × 9,000/s = 12.6 CPU-seconds per second ≈ 13 cores, against ≈ 70 ns × 9,000 ≈ 0.6 ms per second for the precomputed index. The scan's cost scales with the number of queries sharing the prefix, so the shortest, most common prefixes cost the most.",
+      "ref": "unit-2-deep-dives.md#5-tries-sorted-tables-fsts-where-the-top-k-lives"
+    },
+    {
+      "id": "C12-040",
+      "type": "single",
+      "tags": ["freshness", "decay"],
+      "difficulty": 2,
+      "prompt": "Counts v1 never decay, so `world cup` suggests last year's final. Counts v2 reset at midnight, so suggestions at 00:05 are noise and flap all morning. What should v3 do?",
+      "choices": [
+        "Exponential decay with a half-life, applied lazily: keep (score, lastUpdate) per query and multiply by 2^(−elapsed/halfLife) whenever it is touched",
+        "Reset counts every hour instead of every day",
+        "Keep exact per-query counts for a sliding 7-day window",
+        "Rank by the most recent search time instead of by count"
+      ],
+      "answer": [0],
+      "explanation": "Decay never resets, forgets smoothly, keeps one pair per query, and gives the product a single knob (hours for trends, days for the main index); queries that round to zero can be pruned, bounding memory. Hourly resets make the noise problem 24× more frequent. A 7-day exact window needs unbounded per-query state (it ran out of memory in the failure story) and has a cliff at the edge. Recency alone ignores volume: one search a second ago would beat a million an hour ago.",
+      "ref": "unit-2-deep-dives.md#6-freshness-aggregation-decay-snapshot-publishing-and-hot-prefixes"
+    },
+    {
+      "id": "C12-041",
+      "type": "numeric",
+      "tags": ["freshness", "decay"],
+      "difficulty": 2,
+      "prompt": "With a one-day half-life, a query was searched 100 times exactly three days ago and not since. What is its decayed score now? Answer as a score.",
+      "value": 12.5,
+      "tolerance": 0.1,
+      "unit": "score",
+      "explanation": "100 × 2^(−3/1) = 100 ÷ 8 = 12.5. A query searched 20 times today scores ≈ 20 and outranks it, which is the point: this week counts more than last year without ever resetting. The lab's TestCounter_HalfLifeDecay checks the same halving (8 → 4 → 2 → 1).",
+      "ref": "unit-2-deep-dives.md#6-freshness-aggregation-decay-snapshot-publishing-and-hot-prefixes"
+    },
+    {
+      "id": "C12-042",
+      "type": "numeric",
+      "tags": ["sketch", "estimation", "memory"],
+      "difficulty": 3,
+      "prompt": "A count-min sketch with ε = 10^-4 and δ = 10^-3 uses w = ⌈e/ε⌉ columns and d = ⌈ln(1/δ)⌉ rows of 4-byte counters. How much memory is that? Answer in MB.",
+      "value": 0.76,
+      "tolerance": 0.25,
+      "unit": "MB",
+      "explanation": "w = ⌈2.718 / 0.0001⌉ ≈ 27,183; d = ⌈ln 1000⌉ = ⌈6.9⌉ = 7; 27,183 × 7 ≈ 190k counters × 4 B ≈ 0.76 MB (≈ 0.8 MB). Under a megabyte to estimate frequencies for ≈ 200 M distinct queries a day, with an over-estimate of at most ε × N with probability 1 − δ.",
+      "ref": "unit-2-deep-dives.md#6-freshness-aggregation-decay-snapshot-publishing-and-hot-prefixes"
+    },
+    {
+      "id": "C12-043",
+      "type": "single",
+      "tags": ["sketch", "safety", "freshness"],
+      "difficulty": 3,
+      "prompt": "The trending tier scores queries with a count-min sketch. A query only two people ever searched shows up as trending under a celebrity's name. What went wrong, and what is the fix?",
+      "choices": [
+        "The sketch only over-estimates, so a rare query that collides with hot ones looks popular; nominate candidates with a heavy-hitters structure, verify them against exact counts, and apply the distinct-user threshold to this tier too",
+        "The sketch under-estimates, so raise every estimate by ε × N",
+        "Replace the count-min sketch with a HyperLogLog to get exact counts",
+        "Increase δ to make collisions less likely"
+      ],
+      "answer": [0],
+      "explanation": "Collisions only add, so a sketch can promote a rare and possibly private query: the Unit 1 privacy incident through another door. The sketch scores; it shouldn't nominate. Space-Saving tracks real candidates, exact verification removes collision artefacts, and min support on distinct users (an HLL per candidate) must hold in every tier. The sketch never under-estimates. HyperLogLog estimates cardinality (how many distinct users), not per-query frequency, and it's approximate too. A larger δ is a higher failure probability, making it worse.",
+      "ref": "unit-2-deep-dives.md#6-freshness-aggregation-decay-snapshot-publishing-and-hot-prefixes"
+    },
+    {
+      "id": "C12-044",
+      "type": "multi",
+      "tags": ["freshness", "safety", "design"],
+      "difficulty": 2,
+      "prompt": "Select ALL that are true of the two-tier freshness design (an hourly main snapshot plus a per-minute recent snapshot).",
+      "choices": [
+        "The recent tier uses a short half-life (≈ 10–30 min) and is small enough to rebuild and swap every minute",
+        "At lookup, candidates are scored as main + β × recent, re-ranked, and cut to K",
+        "The blocklist, minimum support and override set apply to both tiers, or a takedown resurfaces as trending",
+        "Shortening the main index's half-life to minutes gives the same result without a second tier"
+      ],
+      "answer": [0, 1, 2],
+      "explanation": "A tiny recent tier (≈ 50k queries) catches trends in minutes while the stable main tier keeps evergreen queries steady; the merge is K + K items, nanoseconds; and every safety rule must cover the merged result. Shortening the main half-life makes the whole index noisy (the one-minute break-it: a quiet night empties it) and gives up stability to buy freshness that a second tier provides without that cost.",
+      "ref": "unit-2-deep-dives.md#6-freshness-aggregation-decay-snapshot-publishing-and-hot-prefixes"
+    },
+    {
+      "id": "C12-045",
+      "type": "single",
+      "tags": ["freshness", "decay", "memory"],
+      "difficulty": 2,
+      "prompt": "Why does the design use a half-life rather than \"count the last 7 days\"?",
+      "choices": [
+        "A hard window needs exact per-query state for the whole window and has a cliff at its edge; decay keeps one (score, timestamp) pair per query and forgets smoothly",
+        "A 7-day window can't be computed by a batch job",
+        "Decay gives exact counts, a window only approximate ones",
+        "Half-lives are required by the count-min sketch"
+      ],
+      "answer": [0],
+      "explanation": "With ≈ 200 M distinct queries a day, a 7-day exact window is a huge state, and an observation counts fully at 6 days 23 hours and zero an hour later, so rankings jump. Decay bounds memory (prune what rounds to zero) and has one knob per tier; windowed sums with weights are its batch form. Batch jobs compute windows easily, so that's not the objection. Decay produces weighted scores, not exact counts. A sketch counts events; it has no opinion about decay.",
+      "ref": "unit-2-deep-dives.md#6-freshness-aggregation-decay-snapshot-publishing-and-hot-prefixes"
+    },
+    {
+      "id": "C12-046",
+      "type": "single",
+      "tags": ["concurrency", "latency", "design"],
+      "difficulty": 2,
+      "prompt": "To get fresher suggestions, someone streams count updates straight into the serving trie under a sync.RWMutex: thousands of microsecond write locks per second. Read p99 goes from 0.2 ms to 30 ms. What is the right design?",
+      "choices": [
+        "Never mutate the serving index: build immutable snapshots (a small per-minute recent tier for freshness) and publish each with one atomic pointer swap",
+        "Replace the RWMutex with a sync.Mutex",
+        "Shard the lock by first character so writers block fewer readers",
+        "Batch updates and apply them once a second under the write lock"
+      ],
+      "answer": [0],
+      "explanation": "Readers queue behind writers and writers behind readers, coupling read latency to write activity on the hottest path. Immutable snapshots and an atomic swap remove the lock from the read path entirely and keep rollback and validation. A plain Mutex serialises readers too, making it worse. Sharded locks shrink the blast radius but keep the coupling and still give no versions to roll back to. Batching trades many short stalls for fewer, longer ones.",
+      "ref": "unit-2-deep-dives.md#6-freshness-aggregation-decay-snapshot-publishing-and-hot-prefixes"
+    },
+    {
+      "id": "C12-047",
+      "type": "single",
+      "tags": ["concurrency", "go", "memory-model"],
+      "difficulty": 3,
+      "prompt": "In the lab's break-it, racyService stores the current index in a plain pointer field. Without -race the swap test passes every time on amd64. Why is it still a bug?",
+      "choices": [
+        "A plain write creates no happens-before edge: a reader can observe the new pointer without seeing the fully built index, and the compiler may reorder; atomic.Pointer's Store/Load give release/acquire ordering",
+        "amd64 pointer writes are not atomic, so readers see torn pointers",
+        "The race detector produces false positives for pointer fields, so it isn't really a bug",
+        "The garbage collector may free the old index while a reader still uses it"
+      ],
+      "answer": [0],
+      "explanation": "The Go memory model only guarantees that a reader sees everything written before a publish if the publish and the load synchronise; a plain field doesn't. An aligned pointer write happens to be atomic on amd64, which is why it looks fine, but construction can still appear out of order. The race detector reports real unsynchronised accesses, not false positives. The GC tracks references, so an index a reader holds is never freed under it.",
+      "ref": "unit-2-deep-dives.md#6-freshness-aggregation-decay-snapshot-publishing-and-hot-prefixes"
+    },
+    {
+      "id": "C12-048",
+      "type": "multi",
+      "tags": ["partitioning", "hot-key", "sharding"],
+      "difficulty": 2,
+      "prompt": "A multi-locale index is range-partitioned by first character over 8 shards. The `s` shard runs at 90% CPU while `x–z` idles. Select ALL the mechanisms that help.",
+      "choices": [
+        "Split the hot range (`s` into `sa–sm` and `sn–sz`) using a routing table instead of fixed first-letter ranges",
+        "Give hot shards more replicas than cold ones",
+        "Serve one- and two-character prefixes from the CDN and from a small local copy on every node, so the hottest keys never reach a shard",
+        "Add more shards while keeping the fixed first-letter ranges"
+      ],
+      "answer": [0, 1, 2],
+      "explanation": "Dynamic range splitting, load-proportional replication and serving the hottest keys from a layer above are the A4 hot-key tools applied to prefixes; hashing the prefix onto a ring is also legitimate, since locality buys nothing here. Adding shards with the same fixed ranges leaves all of `s` on one shard: the skew is in the range boundaries, not the shard count.",
+      "ref": "unit-2-deep-dives.md#6-freshness-aggregation-decay-snapshot-publishing-and-hot-prefixes"
+    },
+    {
+      "id": "C12-049",
+      "type": "single",
+      "tags": ["concurrency", "go", "memory"],
+      "difficulty": 3,
+      "prompt": "An interviewer asks: \"After Swap, when is it safe to free the old index?\" What is the correct answer for the Go service?",
+      "choices": [
+        "When the last in-flight lookup that loaded the old pointer returns; in Go the garbage collector handles it, and in C++ you'd need RCU or hazard pointers for the same guarantee",
+        "Immediately after Swap returns",
+        "After a fixed 5-second grace period",
+        "Never; keep every version in memory for rollback"
+      ],
+      "answer": [0],
+      "explanation": "A reader that loaded the old pointer may still be walking the old index. Go's collector frees it only once no reference remains, so correctness is automatic and the memory cost is the ≈ 2× window during the swap. Freeing immediately is a use-after-free in a manual-memory language. A fixed grace period is a guess about reader duration, not a guarantee. Keeping every version exhausts memory; rollback reloads the previous version from local disk or object storage.",
+      "ref": "unit-2-deep-dives.md#6-freshness-aggregation-decay-snapshot-publishing-and-hot-prefixes"
+    },
+    {
+      "id": "C12-050",
+      "type": "single",
+      "tags": ["personalisation", "caching", "privacy"],
+      "difficulty": 2,
+      "prompt": "Product wants \"my recent searches first\". The first implementation reads the user's history from a database on every keystroke and adds Vary: Cookie to the global endpoint. The CDN hit rate drops to ≈ 0. What is the better design?",
+      "choices": [
+        "Keep the global endpoint public and cacheable; merge the user's recent queries on the client (or from a separate authenticated, uncached endpoint called in parallel), personal matches first and duplicates removed",
+        "Keep Vary: Cookie and add more CDN capacity",
+        "Cache each user's personalised responses publicly at the CDN with a short TTL",
+        "Put the user id in the global cache key so each user's entries are reused across sessions"
+      ],
+      "answer": [0],
+      "explanation": "Personal data must stay out of the shared cache key; merging where the personal data already lives keeps the global path a 100 ns, cacheable lookup with no new dependency. More CDN capacity doesn't help when nothing is shared between users. Caching personal responses publicly is a privacy incident. A user id in the key is Vary: Cookie by another name: ≈ 0 hit rate.",
+      "ref": "unit-2-deep-dives.md#7-stretch--personalisation-and-spelling-correction"
+    },
+    {
+      "id": "C12-051",
+      "type": "single",
+      "tags": ["fuzzy", "latency", "data-structures"],
+      "difficulty": 2,
+      "prompt": "Typo tolerance is added by computing edit distance against every candidate under the prefix; `pizx` takes 50 ms. Which approach keeps fuzzy prefix matching bounded per keystroke?",
+      "choices": [
+        "Precompute candidates (SymSpell delete-variants, or a Levenshtein automaton walked over the index), cap the distance at 1 for short inputs, and only turn fuzziness on after ≈ 3–4 characters",
+        "Run edit distance against all candidates but cache the results per prefix",
+        "Allow distance 2 from the first character so users with bad typos are helped early",
+        "Move the edit-distance computation to the client"
+      ],
+      "answer": [0],
+      "explanation": "Precomputed candidate generation turns typo lookup into a handful of O(len) probes, and the bounds keep the candidate count small; exact matches still rank first. Caching query-time edit distance is the §5 compute-at-query-time failure with a cache stampede waiting at each swap. Distance 2 on one or two characters generates thousands of candidate prefixes, nearly all matching something. The client doesn't hold the candidates, so it would have to download them.",
+      "ref": "unit-2-deep-dives.md#7-stretch--personalisation-and-spelling-correction"
+    }
+  ]
+}

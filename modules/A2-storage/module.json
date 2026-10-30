@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "id": "A2",
+  "slug": "storage",
+  "title": "Storage: SQL vs NoSQL, indexes, B-tree vs LSM, transactions, schema design",
+  "track": "A",
+  "status": "written",
+  "core": true,
+  "summary": "Why databases are shaped the way they are: access patterns drive schema, indexes and engine choice; isolation anomalies you will actually hit.",
+  "hours": {
+    "core": 15,
+    "stretch": 3,
+    "total": 18
+  },
+  "prerequisites": [
+    "A0"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/A2-storage",
+    "readme": "modules/A2-storage/README.md",
+    "quiz": "modules/A2-storage/quiz.json",
+    "design_exercise": "modules/A2-storage/design-exercise.md",
+    "teachback": "modules/A2-storage/teachback.md",
+    "lab": "labs/a2",
+    "solution": "solutions/a2"
+  },
+  "labs": [
+    {
+      "package": "lsm",
+      "title": "LSM tree: memtable, SSTables, bloom filters, tiered compaction with tombstones",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "btree",
+      "title": "B+tree index: page splits, leaf-chained range scans, invariant checker",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "isolation",
+      "title": "MVCC store: read committed, snapshot isolation, serializable validation, anomaly tests",
+      "unit": 3,
+      "core": true
+    },
+    {
+      "package": "wal",
+      "title": "Write-ahead log: checksummed records, torn-tail recovery, group commit",
+      "unit": 2,
+      "core": false
+    }
+  ],
+  "units": [
+    {
+      "n": 1,
+      "title": "Access patterns, schema and indexes",
+      "file": "modules/A2-storage/unit-1-access-patterns-indexes.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "btree"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Write paths: WAL, LSM trees and the B-tree trade-off",
+      "file": "modules/A2-storage/unit-2-write-paths.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "lsm",
+        "wal"
+      ]
+    },
+    {
+      "n": 3,
+      "title": "Transactions, isolation and schema evolution",
+      "file": "modules/A2-storage/unit-3-transactions-schema.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "isolation"
+      ]
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Choose a data model (relational, key-value, wide-column, document) from a written list of access patterns with rates, latency targets and consistency needs, and defend it with numbers.",
+      "core": true
+    },
+    {
+      "text": "Explain how a B+tree index works (pages, fan-out, splits, leaf chain) and compute its height, size and page reads from page and entry sizes.",
+      "core": true
+    },
+    {
+      "text": "Implement a B+tree with page splits, leaf-chained range scans, lazy deletes and an invariant checker, and measure fill factor and buffer-pool behaviour for sequential versus random keys (labs/a2/btree).",
+      "core": true
+    },
+    {
+      "text": "Design composite, covering and partial indexes for a query (equality, then sort, then range; leftmost prefix), count their write cost, and read an EXPLAIN plan.",
+      "core": true
+    },
+    {
+      "text": "Explain the write-ahead rule, the cost of fsync, group commit, torn pages and crash recovery, and say what each durability setting lets you lose.",
+      "core": true
+    },
+    {
+      "text": "Implement an LSM tree with a memtable, immutable sorted tables, bloom filters, tiered compaction and tombstones, and measure write, read and space amplification (labs/a2/lsm).",
+      "core": true
+    },
+    {
+      "text": "Choose between a B-tree and an LSM engine for a workload using write/read/space amplification arithmetic and SSD-endurance numbers, and say when the answer flips.",
+      "core": true
+    },
+    {
+      "text": "Implement a write-ahead log with checksummed records, torn-tail truncation, mid-log corruption detection and group commit against a crash-simulating file (labs/a2/wal).",
+      "core": false
+    },
+    {
+      "text": "Name the isolation anomalies (dirty read, non-repeatable read, phantom, lost update, write skew), say which level and which technique (conditional update, FOR UPDATE, version column, snapshot isolation, serializable, guard row) prevents each, and explain why READ COMMITTED double-spends.",
+      "core": true
+    },
+    {
+      "text": "Implement an MVCC store with read committed, snapshot isolation with first-committer-wins and optimistic serializable validation, and demonstrate lost update, write skew and phantoms in tests (labs/a2/isolation).",
+      "core": true
+    },
+    {
+      "text": "Plan zero-downtime schema changes with expand/migrate/contract, throttled keyset backfills, online index builds and lock timeouts, and explain why a fast ALTER can cause an outage.",
+      "core": true
+    },
+    {
+      "text": "Design the storage layer for a ledger and statements system: engines, schema, indexes, transaction and isolation choices, durability, migration plan and capacity numbers.",
+      "core": true
+    }
+  ]
+}

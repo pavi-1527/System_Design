@@ -1,0 +1,1216 @@
+{
+  "module": "A8",
+  "title": "Observability, SLOs, capacity planning",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "A8-001",
+      "type": "single",
+      "tags": [
+        "observability",
+        "tracing"
+      ],
+      "difficulty": 2,
+      "prompt": "A member's transfer failed at 02:07 and support has the X-Trace-ID the app showed on the error screen. You need to know exactly why this one request failed. Where do you go first?",
+      "choices": [
+        "The dashboard of error ratio by route, because metrics cover every request",
+        "Logs and traces filtered by that trace ID, because they hold per-request detail",
+        "The CPU utilisation graph of the transfers pods around 02:07",
+        "The synthetic canary results for 02:07"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Per-request questions are answered by logs and traces, which carry high-cardinality identifiers such as the trace ID. The error-ratio dashboard aggregates thousands of requests and cannot isolate one; CPU is a cause-level resource signal that rarely explains a single failure; the canary tests a scripted path, not this member's request.",
+      "ref": "unit-1-seeing-the-system.md#1-metrics-logs-and-traces-what-each-is-for"
+    },
+    {
+      "id": "A8-002",
+      "type": "numeric",
+      "tags": [
+        "observability",
+        "cardinality",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A request counter has the labels route (40 values), method (4), status class (5) and pod (100). Assuming every combination occurs, how many time series does that one metric create?",
+      "value": 80000,
+      "tolerance": 0.05,
+      "unit": "series",
+      "explanation": "40 x 4 x 5 x 100 = 80,000 series. Memory and index cost in a metrics database scale with the number of distinct label sets, not with request volume, which is why labels need bounded value sets.",
+      "ref": "unit-1-seeing-the-system.md#1-metrics-logs-and-traces-what-each-is-for"
+    },
+    {
+      "id": "A8-003",
+      "type": "single",
+      "tags": [
+        "cardinality",
+        "metrics",
+        "observability"
+      ],
+      "difficulty": 2,
+      "prompt": "After an incident, an engineer adds a member_id label (about 150,000 active values per day) to the main request counter so support can see per-member error rates. What is the most likely consequence?",
+      "choices": [
+        "Queries get faster because the data is more specific",
+        "The number of series grows with the number of distinct members, so the metrics store can run out of memory and take monitoring down",
+        "Only log volume grows; metrics are unaffected",
+        "Nothing: label values are free, only metric names cost memory"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Every distinct label set is its own time series, so an unbounded identifier multiplies the series count by the number of values and can crash the metrics store, which is down exactly when you need it. Queries do not get faster, logs are unaffected, and label values are the main cost driver. Per-member questions belong in logs and traces.",
+      "ref": "unit-1-seeing-the-system.md#1-metrics-logs-and-traces-what-each-is-for"
+    },
+    {
+      "id": "A8-004",
+      "type": "multi",
+      "tags": [
+        "tracing",
+        "observability"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL statements that are true of tail-based trace sampling compared with head-based sampling.",
+      "choices": [
+        "It can keep every trace that contained an error or was slow",
+        "It must buffer the spans of a trace until the whole trace is complete",
+        "All spans of one trace must reach the same collector instance for the decision to work",
+        "It is cheaper because unsampled requests never create spans"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Tail sampling decides after the trace is complete, so it can favour errors and slow traces, but that requires buffering and routing all spans of a trace to one decision point. The last statement describes head sampling, where unsampled requests create no spans; tail sampling pays to generate and ship every span.",
+      "ref": "unit-1-seeing-the-system.md#1-metrics-logs-and-traces-what-each-is-for"
+    },
+    {
+      "id": "A8-005",
+      "type": "single",
+      "tags": [
+        "tracing",
+        "observability"
+      ],
+      "difficulty": 2,
+      "prompt": "You trace 1% of requests chosen at random at the front door. The error rate is 0.1%, and engineers complain they almost never find a trace for a failed request. What is the right change?",
+      "choices": [
+        "Raise head sampling to 100% permanently",
+        "Add the trace ID as a label on every metric",
+        "Use tail-based sampling that keeps all error and slow traces plus a small share of the rest",
+        "Log the request body so traces are not needed"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A random coin flip made before the outcome is known keeps only 1% of failures. Tail sampling keeps the interesting traces at a bounded cost. 100% tracing is usually unaffordable at thousands of req/s; a trace-ID label would explode metric cardinality; logging bodies adds volume and leaks sensitive data without giving you the timing breakdown.",
+      "ref": "unit-1-seeing-the-system.md#1-metrics-logs-and-traces-what-each-is-for"
+    },
+    {
+      "id": "A8-006",
+      "type": "single",
+      "tags": [
+        "logging",
+        "observability"
+      ],
+      "difficulty": 1,
+      "prompt": "What is a 'canonical log line'?",
+      "choices": [
+        "One wide structured event per request, written at the end, carrying every field you might later group or filter by",
+        "A log line written at the start and end of every function call",
+        "The single sampled debug line kept for each deploy",
+        "A human-readable summary of the day's errors"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A canonical log line is one structured event per request with all the useful fields (tenant, route, status, upstream timings, trace ID). It lets you answer new questions after the fact without paying for those dimensions as metric labels. The other options describe function-level tracing, a sampling policy and a report, none of which is the practice.",
+      "ref": "unit-1-seeing-the-system.md#1-metrics-logs-and-traces-what-each-is-for"
+    },
+    {
+      "id": "A8-007",
+      "type": "numeric",
+      "tags": [
+        "logging",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A service handles 2,000 req/s and writes 5 log lines per request at about 300 bytes each. Roughly how many GB of logs does it produce per day (use 86,400 s/day, 1 GB = 10^9 bytes)?",
+      "value": 259,
+      "tolerance": 0.15,
+      "unit": "GB",
+      "explanation": "2,000 x 5 x 300 B = 3 MB/s; 3 MB/s x 86,400 s = 259 GB/day. A metric sample costs about a byte or two, so logging every request is two or three orders of magnitude more expensive per event; that is why one canonical line and sampling matter.",
+      "ref": "unit-1-seeing-the-system.md#1-metrics-logs-and-traces-what-each-is-for"
+    },
+    {
+      "id": "A8-008",
+      "type": "single",
+      "tags": [
+        "alerting",
+        "observability"
+      ],
+      "difficulty": 2,
+      "prompt": "A 'CPU above 80% for 5 minutes' alert pages 40 times a month, 38 of them harmless. In the same month the core-banking vendor returns 504 for 12% of balance lookups for three hours while CPU stays at 25%, and nothing pages. What is the best fix?",
+      "choices": [
+        "Lower the CPU threshold to 60% so it fires sooner",
+        "Raise the CPU threshold to 95% so it fires less often",
+        "Page on user-visible symptoms (SLO burn on error ratio and latency, plus a synthetic transfer) and demote CPU to a dashboard or ticket",
+        "Add the same CPU alert for every individual pod"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "CPU is a cause-level metric: it was noisy when nothing was wrong and silent when members were hurt (threads were blocked waiting on the vendor, not computing). A symptom alert on the member-visible error ratio catches the vendor failure regardless of cause. Moving the CPU threshold in either direction only changes which side of the same mismatch you suffer; per-pod copies multiply the noise.",
+      "ref": "unit-1-seeing-the-system.md#2-golden-signals-red-use-what-to-look-at-and-what-to-page-on"
+    },
+    {
+      "id": "A8-009",
+      "type": "multi",
+      "tags": [
+        "alerting",
+        "observability"
+      ],
+      "difficulty": 2,
+      "prompt": "Which of these are good candidates to PAGE a human at 3 a.m. for a payments API? Select ALL that apply.",
+      "choices": [
+        "The error ratio of POST /v1/transfers is burning the error budget fast",
+        "A synthetic canary transfer through the real front door has failed repeatedly",
+        "A pod's CPU has been above 80% for five minutes",
+        "A single pod was restarted by the orchestrator"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "Pages should describe what members experience: budget burn on the money-movement route and an end-to-end canary. High CPU and a single restart are causes; they belong on dashboards or tickets unless they guarantee an imminent symptom, and Kubernetes restarts pods routinely without member impact.",
+      "ref": "unit-1-seeing-the-system.md#2-golden-signals-red-use-what-to-look-at-and-what-to-page-on"
+    },
+    {
+      "id": "A8-010",
+      "type": "single",
+      "tags": [
+        "observability",
+        "metrics"
+      ],
+      "difficulty": 1,
+      "prompt": "Which method is the right checklist for a RESOURCE such as a connection pool, queue or disk?",
+      "choices": [
+        "USE: utilisation, saturation, errors",
+        "RED: rate, errors, duration",
+        "Only the 'traffic' golden signal",
+        "Apdex score"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "USE (Brendan Gregg) is for resources; saturation, best read as waiting or queue age, is the leading indicator. RED describes request-driven services. Traffic alone says nothing about how close a resource is to its limit, and Apdex is a satisfaction score, not a resource method.",
+      "ref": "unit-1-seeing-the-system.md#2-golden-signals-red-use-what-to-look-at-and-what-to-page-on"
+    },
+    {
+      "id": "A8-011",
+      "type": "single",
+      "tags": [
+        "observability",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A circuit breaker opens and begins rejecting calls to a dead vendor instantly. The service's average latency drops from 400 ms to 15 ms. How should you interpret this?",
+      "choices": [
+        "The system is healthier: lower latency means better service",
+        "Fast failures drag the average down; track the error rate (including short-circuited calls) and the latency of successful requests separately",
+        "The latency metric is broken and should be ignored",
+        "The vendor has recovered"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Rejections complete in microseconds, so mean latency improves exactly when the system is failing. The error ratio and the breaker state show the damage, and latency should be reported for successful requests (or split by outcome). The metric is not broken, it is measuring a mixture, and nothing indicates recovery.",
+      "ref": "unit-1-seeing-the-system.md#2-golden-signals-red-use-what-to-look-at-and-what-to-page-on"
+    },
+    {
+      "id": "A8-012",
+      "type": "single",
+      "tags": [
+        "percentiles",
+        "observability"
+      ],
+      "difficulty": 1,
+      "prompt": "97% of requests take about 90 ms and 3% take about 2 seconds. Members complain that the app 'hangs'. Which statistic matches the complaint?",
+      "choices": [
+        "The mean (about 147 ms)",
+        "The median (90 ms)",
+        "The p99 (about 2 s)",
+        "The minimum"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The p99 lands in the slow 3% and matches the experience of the unlucky members. The mean (147 ms) describes almost no request, the median says the typical request is fine, and the minimum is irrelevant to complaints.",
+      "ref": "unit-1-seeing-the-system.md#3-percentiles-and-why-averages-lie"
+    },
+    {
+      "id": "A8-013",
+      "type": "numeric",
+      "tags": [
+        "percentiles",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A screen load makes 20 independent backend calls. For each call there is a 1% chance it is slower than that call's p99. What percentage of screen loads contain at least one such slow call?",
+      "value": 18.2,
+      "tolerance": 0.1,
+      "unit": "percent",
+      "explanation": "1 - 0.99^20 = 1 - 0.818 = 18.2%. With 100 calls it would be about 63%. Tail latency of the parts becomes typical latency of the whole, which is why high percentiles of components matter.",
+      "ref": "unit-1-seeing-the-system.md#3-percentiles-and-why-averages-lie"
+    },
+    {
+      "id": "A8-014",
+      "type": "single",
+      "tags": [
+        "percentiles",
+        "histograms"
+      ],
+      "difficulty": 3,
+      "prompt": "Instance A served 990 requests this minute with a p99 of 10 ms. Instance B served 10 requests with a p99 of 1,000 ms (all its requests were slow). A dashboard averages the two p99 values and shows 505 ms. What is the true fleet-wide p99, roughly?",
+      "choices": [
+        "About 505 ms, because averaging is a fair summary",
+        "About 10 ms: only 1% of requests are slow, so the 99th percentile sits at the top of the fast group; the average of percentiles is not a percentile",
+        "About 1,000 ms, because the max instance decides",
+        "About 20 ms, which the request-weighted average of the two p99s gives exactly"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "With 1,000 requests of which 10 (1%) are slow, the 99th-percentile element is still a fast one, so the true p99 is about 10 ms. Averaging percentiles gives a number related to neither group; even the request-weighted average (about 20 ms) is only coincidentally close here and is badly wrong elsewhere (for 980 fast and 20 slow it says about 30 ms while the true p99 is about 1,000 ms). Percentiles must be computed from merged counts, not combined.",
+      "ref": "unit-1-seeing-the-system.md#3-percentiles-and-why-averages-lie"
+    },
+    {
+      "id": "A8-015",
+      "type": "numeric",
+      "tags": [
+        "percentiles",
+        "histograms"
+      ],
+      "difficulty": 3,
+      "prompt": "Instance A handled 900 requests, all at 10 ms. Instance B handled 100 requests, all at 500 ms. Using merged data, what is the fleet-wide p99 latency in milliseconds? (Use the element at sorted rank floor(0.99 x (n-1)).)",
+      "value": 500,
+      "tolerance": 0.05,
+      "unit": "ms",
+      "explanation": "Merged data has 1,000 requests and 100 of them (10%) are at 500 ms, so the 99th percentile is 500 ms. The average of the two p99s would be 255 ms and the request-weighted average 59 ms; both badly understate a real tail.",
+      "ref": "unit-1-seeing-the-system.md#3-percentiles-and-why-averages-lie"
+    },
+    {
+      "id": "A8-016",
+      "type": "multi",
+      "tags": [
+        "percentiles",
+        "histograms"
+      ],
+      "difficulty": 2,
+      "prompt": "Which of these can be correctly aggregated across instances (and across time) to compute a fleet-wide quantile later? Select ALL that apply.",
+      "choices": [
+        "Per-bucket counts of a histogram (identical bucket layout everywhere)",
+        "Each instance's own p99 value",
+        "The sum and count of observations (for the mean)",
+        "Quantiles computed client-side by a summary metric"
+      ],
+      "answer": [
+        0,
+        2
+      ],
+      "explanation": "Counts add: bucket counts merge into a fleet histogram from which the quantile is computed once, and sum and count give an exact mean. Pre-computed percentiles (including client-side summary quantiles) cannot be combined into a percentile of the union.",
+      "ref": "unit-1-seeing-the-system.md#3-percentiles-and-why-averages-lie"
+    },
+    {
+      "id": "A8-017",
+      "type": "single",
+      "tags": [
+        "histograms",
+        "percentiles"
+      ],
+      "difficulty": 2,
+      "prompt": "Every request takes exactly 310 ms. A Prometheus histogram has bucket edges at 0.1, 0.25, 0.5 and 1 second. What does histogram_quantile(0.99, ...) return?",
+      "choices": [
+        "0.31 s, the true value",
+        "About 0.4975 s: it interpolates 99% of the way across the (0.25, 0.5] bucket assuming a uniform spread",
+        "0.5 s, the bucket's upper bound",
+        "0.25 s, the lower bound"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The 99th percentile falls in the (0.25, 0.5] bucket and Prometheus interpolates linearly inside it: 0.25 + 0.99 x 0.25 = 0.4975 s, a 60% error here because the uniform-spread assumption is false. The error is bounded only by the bucket width.",
+      "ref": "unit-1-seeing-the-system.md#4-histogram-designs-fixed-buckets-log-linear-sketches-hdr-and-t-digest"
+    },
+    {
+      "id": "A8-018",
+      "type": "single",
+      "tags": [
+        "histograms",
+        "slo"
+      ],
+      "difficulty": 2,
+      "prompt": "The latency SLO is '99% of transfers complete in under 300 ms' and the histogram has edges at 100, 250, 500 and 1000 ms. The SLI can only be read as 67% (edge below) or 97% (edge above). What is the simplest way to make the SLI exact?",
+      "choices": [
+        "Scrape more often",
+        "Add a bucket edge at exactly 300 ms",
+        "Switch to a summary metric with a 0.99 quantile",
+        "Average the per-pod p99 values"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "An SLI needs count(<= 300 ms) / count(all); with a bucket edge at 300 ms the le=\"0.3\" counter gives it exactly. Scraping frequency does not change bucket boundaries; a summary's client-side quantile cannot be aggregated or turned into a ratio; averaging p99s is the percentile mistake.",
+      "ref": "unit-1-seeing-the-system.md#4-histogram-designs-fixed-buckets-log-linear-sketches-hdr-and-t-digest"
+    },
+    {
+      "id": "A8-019",
+      "type": "numeric",
+      "tags": [
+        "histograms",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A DDSketch-style histogram with 1% relative error has growth factor gamma = (1+0.01)/(1-0.01) = 1.0202 (ln gamma is about 0.0200). Roughly how many buckets cover latencies from 1 ms to 100 s (a range of 10^5)?",
+      "value": 576,
+      "tolerance": 0.1,
+      "unit": "buckets",
+      "explanation": "buckets = ln(max/min) / ln(gamma) = ln(10^5) / 0.0200 = 11.51 / 0.0200, about 576. Memory depends on the dynamic range and the accuracy, not on the number of samples.",
+      "ref": "unit-1-seeing-the-system.md#4-histogram-designs-fixed-buckets-log-linear-sketches-hdr-and-t-digest"
+    },
+    {
+      "id": "A8-020",
+      "type": "single",
+      "tags": [
+        "histograms",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "In a log-linear histogram with relative error alpha, you tighten alpha from 1% to 0.5% for the same value range. Roughly what happens to the number of buckets?",
+      "choices": [
+        "It stays about the same",
+        "It roughly doubles, because ln(gamma) is about 2 x alpha",
+        "It roughly quadruples",
+        "It halves"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "ln(gamma) is approximately 2 x alpha for small alpha, so the bucket count (ln(max/min) / ln gamma) scales as 1/alpha: halving alpha doubles the buckets. It is not quadratic, and finer accuracy cannot reduce the count.",
+      "ref": "unit-1-seeing-the-system.md#4-histogram-designs-fixed-buckets-log-linear-sketches-hdr-and-t-digest"
+    },
+    {
+      "id": "A8-021",
+      "type": "multi",
+      "tags": [
+        "histograms",
+        "percentiles"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL statements that are true of a log-linear (DDSketch-style) histogram with a fixed relative error alpha.",
+      "choices": [
+        "Two sketches with the same alpha merge exactly by adding bucket counts index by index",
+        "Memory is bounded by the dynamic range of the data (log of max over min), not by the number of samples",
+        "Sketches with different alpha can be merged by adding bucket counts at the same index",
+        "The guarantee is on rank error, not on the value returned"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "Same-gamma bucket boundaries line up, so merging is addition, and the number of non-empty buckets is limited by ln(max/min)/ln(gamma). Different alpha means different boundaries, so the same index covers different value ranges and a naive merge is meaningless. The guarantee is relative error on the value; rank-error guarantees belong to t-digest and KLL.",
+      "ref": "unit-1-seeing-the-system.md#4-histogram-designs-fixed-buckets-log-linear-sketches-hdr-and-t-digest"
+    },
+    {
+      "id": "A8-022",
+      "type": "single",
+      "tags": [
+        "histograms",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "In the lab's Sketch, goroutine 1 calls a.Merge(b) while goroutine 2 calls b.Merge(a). Each Merge locks its own receiver and then locks the argument. What happens, and what is the fix?",
+      "choices": [
+        "Nothing: mutexes in Go are reentrant",
+        "A possible deadlock from opposite lock ordering; fix by snapshotting the argument under its own lock, releasing it, then locking the receiver",
+        "A data race only; fix with atomic counters",
+        "A panic from locking twice; fix by recover()"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Go mutexes are not reentrant, and two goroutines taking the same two locks in opposite order can deadlock. Never holding both locks (copy the other sketch's state first) removes the ordering problem and also makes a.Merge(a) safe. The failure is a deadlock, not a panic or merely a race.",
+      "ref": "unit-1-seeing-the-system.md#4-histogram-designs-fixed-buckets-log-linear-sketches-hdr-and-t-digest"
+    },
+    {
+      "id": "A8-023",
+      "type": "single",
+      "tags": [
+        "load-testing",
+        "percentiles"
+      ],
+      "difficulty": 3,
+      "prompt": "A load generator sends one request, waits for the response and then sends the next on its schedule. The server freezes for 5 seconds once, yet the generator reports p99 = 1 ms. What explains this?",
+      "choices": [
+        "The server is fine; one stall in 6,000 requests cannot move a p99",
+        "Coordinated omission: the generator waited during the stall and never sent the requests that real users would have sent, so the slowest samples were omitted",
+        "The histogram has too few buckets",
+        "Clock skew between generator and server"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A closed-loop generator slows down with the system under test and omits the samples that would have exposed the slowness (about 500 requests in this run, which would put the true p99 near 4.5 s). Open-loop sending and measuring from the intended send time fix it. The stall affects 8% of intended requests, not one in 6,000.",
+      "ref": "unit-1-seeing-the-system.md#5-measuring-latency-correctly-coordinated-omission-and-where-to-measure"
+    },
+    {
+      "id": "A8-024",
+      "type": "single",
+      "tags": [
+        "load-testing",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "A pre-launch test uses 200 virtual users in a closed loop with no think time. Throughput plateaus at 3,000 req/s with a flat p99. Production peak is forecast at 5,000 req/s. What is the right conclusion?",
+      "choices": [
+        "The system has headroom: p99 stayed flat as load rose",
+        "The test cannot show behaviour beyond capacity because a closed loop self-limits; rerun open-loop at 5,000 req/s and step up to find the knee",
+        "Add more virtual users until the p99 rises, then multiply by 1.5",
+        "Switch to measuring the mean"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A closed loop with N users cannot offer more than the system completes: throughput plateaus at capacity and latency settles at about N x service time, hiding the overload cliff. The plateau at 3,000 req/s suggests capacity is below the 5,000 req/s peak. Only an open-loop arrival rate shows what happens past capacity.",
+      "ref": "unit-1-seeing-the-system.md#5-measuring-latency-correctly-coordinated-omission-and-where-to-measure"
+    },
+    {
+      "id": "A8-025",
+      "type": "multi",
+      "tags": [
+        "load-testing",
+        "observability"
+      ],
+      "difficulty": 2,
+      "prompt": "Which of these help avoid coordinated omission when measuring latency? Select ALL that apply.",
+      "choices": [
+        "Send requests on a fixed or random-arrival schedule regardless of earlier responses (open loop)",
+        "Measure latency from the intended send time rather than the actual send time",
+        "Back-fill missed samples using an expected interval (as HdrHistogram can)",
+        "Increase the number of virtual users in a closed-loop test"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Open-loop scheduling, intended-time measurement and expected-interval back-fill all restore the omitted slow samples. Adding more closed-loop users only changes the self-limiting concurrency; it still waits during a stall.",
+      "ref": "unit-1-seeing-the-system.md#5-measuring-latency-correctly-coordinated-omission-and-where-to-measure"
+    },
+    {
+      "id": "A8-026",
+      "type": "single",
+      "tags": [
+        "observability",
+        "slo"
+      ],
+      "difficulty": 2,
+      "prompt": "Where is the best place to measure the latency SLI for an API behind a load balancer and an application tier?",
+      "choices": [
+        "Inside the handler, because it knows the route best",
+        "At the load balancer or edge, because it includes queueing before the app and sees rejected or timed-out requests",
+        "In the mobile client only",
+        "On the database"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The handler timer starts after the request has already waited in accept queues and proxies, and never sees requests rejected earlier, so it under-reports during stalls. The edge sees both. Client-side measurement is true for the member but not controllable enough to page on; the database sees only its own slice.",
+      "ref": "unit-1-seeing-the-system.md#5-measuring-latency-correctly-coordinated-omission-and-where-to-measure"
+    },
+    {
+      "id": "A8-027",
+      "type": "single",
+      "tags": [
+        "logging",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "The log shipper cannot keep up with a service emitting 3,000 events/s. Which application-side behaviour is correct for debug and info telemetry?",
+      "choices": [
+        "Block the request thread until the log is accepted",
+        "Use an unbounded in-memory buffer",
+        "Drop events through a bounded non-blocking buffer and count the drops, alerting on them",
+        "Crash the process so the orchestrator restarts it"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Blocking couples request latency to the logging system, unbounded buffering ends in an out-of-memory crash, and crashing is self-inflicted downtime. A bounded buffer that drops and counts keeps the request path healthy and makes the loss visible. Audit records are different: they need a durable spool, not dropping.",
+      "ref": "unit-1-seeing-the-system.md#6-telemetry-pipelines-sampling-and-sensitive-data-stretch"
+    },
+    {
+      "id": "A8-028",
+      "type": "single",
+      "tags": [
+        "logging",
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "Why should audit records not share a pipeline with debug telemetry in a bank?",
+      "choices": [
+        "Audit records are larger",
+        "Audit records must be complete and tamper-evident with regulated retention, while debug telemetry should be sampled and may be dropped",
+        "Debug telemetry needs more compute",
+        "There is no reason; one pipeline is simpler"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The two have opposite requirements: completeness and retention for the audit trail versus cost control and sampling for debugging. A shared pipeline forces a choice that fails one of them. Size and compute are not the issue.",
+      "ref": "unit-1-seeing-the-system.md#6-telemetry-pipelines-sampling-and-sensitive-data-stretch"
+    },
+    {
+      "id": "A8-029",
+      "type": "single",
+      "tags": [
+        "slo",
+        "observability"
+      ],
+      "difficulty": 1,
+      "prompt": "What is the generic form of a service level indicator (SLI)?",
+      "choices": [
+        "The p99 latency over the last hour",
+        "good events divided by valid events",
+        "The number of nines in the contract",
+        "CPU utilisation at peak"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "An SLI is a ratio of good events to valid events over a window, which makes it additive across instances and time and directly usable for error budgets. A percentile is not additive, 'nines' are a target not an indicator, and CPU is a resource metric.",
+      "ref": "unit-2-slos-capacity.md#1-slis-slos-and-slas-choosing-what-to-promise"
+    },
+    {
+      "id": "A8-030",
+      "type": "numeric",
+      "tags": [
+        "slo",
+        "estimation"
+      ],
+      "difficulty": 1,
+      "prompt": "How many minutes of total outage does a 99.9% availability SLO allow over a 30-day window?",
+      "value": 43.2,
+      "tolerance": 0.05,
+      "unit": "min",
+      "explanation": "0.1% x 30 days x 24 h x 60 min = 43.2 minutes. 99.95% allows 21.6 minutes and 99.99% allows 4.32 minutes.",
+      "ref": "unit-2-slos-capacity.md#2-error-budgets-and-burn-rate"
+    },
+    {
+      "id": "A8-031",
+      "type": "single",
+      "tags": [
+        "slo",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A contract promises 99.99% availability, measured by a monitor that pings /healthz every minute. During the core vendor's four-hour maintenance window every transfer returns 502 while /healthz returns 200, and the platform's report says 100% uptime. What is the root problem?",
+      "choices": [
+        "The health endpoint is too slow",
+        "The SLI does not measure what members experience: it is a component liveness check, not a user-journey success ratio",
+        "99.99% is too low",
+        "The monitor should ping every second"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The indicator was disconnected from the user journey, so a total outage of the product's main function was invisible. Pinging more often would not change what is measured; 99.99% is, if anything, too high for a path through a dependency with maintenance windows.",
+      "ref": "unit-2-slos-capacity.md#1-slis-slos-and-slas-choosing-what-to-promise"
+    },
+    {
+      "id": "A8-032",
+      "type": "single",
+      "tags": [
+        "slo",
+        "reliability",
+        "async"
+      ],
+      "difficulty": 3,
+      "prompt": "You are asked to sign a 99.9% SLA for synchronous transfers, but the core banking system is 99.5% available with about four hours of maintenance a month. What is the best approach?",
+      "choices": [
+        "Sign it and add more replicas of your own service",
+        "Decouple: accept and durably queue transfers so acceptance does not depend on the core, promise acceptance availability and settlement freshness separately, and exclude announced maintenance from the settlement promise",
+        "Sign 99.99% to leave headroom",
+        "Retry core calls more aggressively so failures disappear"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Serial dependencies multiply, so a synchronous path cannot exceed the core's availability, and replicas of your own tier do not change that. Accept-and-queue makes acceptance independent of the core, and two honestly defined promises replace one impossible one. Promising more nines makes it worse, and aggressive retries amplify load during an outage.",
+      "ref": "unit-2-slos-capacity.md#1-slis-slos-and-slas-choosing-what-to-promise"
+    },
+    {
+      "id": "A8-033",
+      "type": "single",
+      "tags": [
+        "slo"
+      ],
+      "difficulty": 2,
+      "prompt": "How should an external SLA relate to the internal SLO for the same service?",
+      "choices": [
+        "They should be identical so there is only one number",
+        "The SLO should be stricter than the SLA so you are alerted long before the contract is breached",
+        "The SLA should be stricter than the SLO",
+        "They are unrelated"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The internal SLO (and its error budget) is what drives alerting and engineering decisions; keeping it tighter than the contract leaves headroom to detect and fix problems before customers are owed credits. If they were identical you would learn of trouble when already in breach.",
+      "ref": "unit-2-slos-capacity.md#1-slis-slos-and-slas-choosing-what-to-promise"
+    },
+    {
+      "id": "A8-034",
+      "type": "multi",
+      "tags": [
+        "slo",
+        "observability"
+      ],
+      "difficulty": 2,
+      "prompt": "For an availability SLI on POST /v1/transfers, which events should be EXCLUDED from the denominator (not counted as valid)? Select ALL that apply.",
+      "choices": [
+        "422 responses for insufficient funds (a correct business decline)",
+        "Synthetic canary requests tagged with the synthetic-traffic header",
+        "503 responses the service returned because it was overloaded",
+        "502 responses caused by core-banking timeouts"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "A correct decline is the service working as designed and canary traffic is not member traffic, so both are excluded. Load shedding and dependency timeouts are failures from the member's point of view and must stay in the denominator as bad events; excluding them would let you improve the SLI by refusing traffic.",
+      "ref": "unit-2-slos-capacity.md#1-slis-slos-and-slas-choosing-what-to-promise"
+    },
+    {
+      "id": "A8-035",
+      "type": "single",
+      "tags": [
+        "slo",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A 30-minute total outage happens either at 03:00 (about 100 requests/minute) or at 12:00 (about 6,000 requests/minute). Compare a request-based SLI (good requests / all requests over the day) with a time-based SLI ('good minutes' / all minutes). Which statement is true?",
+      "choices": [
+        "Both SLIs give the same answer for both outages",
+        "The request-based SLI is far worse for the noon outage; the time-based SLI is the same for both",
+        "The time-based SLI is far worse for the noon outage; the request-based SLI is the same",
+        "Neither SLI changes because 30 minutes is under the daily budget"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Request-based SLIs weigh by the number of members hurt, so the peak outage costs far more (about 94.7% versus 99.7% in the reference run), while a time-based SLI counts the same 30 bad minutes either way (about 97.9%). Know which one the contract and the engineering budget use.",
+      "ref": "unit-2-slos-capacity.md#1-slis-slos-and-slas-choosing-what-to-promise"
+    },
+    {
+      "id": "A8-036",
+      "type": "single",
+      "tags": [
+        "slo",
+        "multi-tenant"
+      ],
+      "difficulty": 3,
+      "prompt": "A tiny credit union with 200 members has been completely down for three hours, yet the platform's global availability SLO looks healthy. What is the best response?",
+      "choices": [
+        "Nothing: the global SLO is met",
+        "Add per-tenant SLIs (or a per-tenant floor) with alerts and synthetic probes per tenant, keeping the global SLO for engineering trade-offs",
+        "Raise the global SLO to 99.99%",
+        "Remove small tenants from the SLI"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A traffic-weighted aggregate hides small tenants completely. Per-tenant SLIs (cheap for 40 tenants with recording rules) and per-tenant probes make sure a tenant with little traffic is still observed. Raising the global target does not change the weighting, and excluding tenants hides the problem on purpose.",
+      "ref": "unit-2-slos-capacity.md#1-slis-slos-and-slas-choosing-what-to-promise"
+    },
+    {
+      "id": "A8-037",
+      "type": "numeric",
+      "tags": [
+        "error-budget",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "An API averages 500 req/s, so about 1.296 billion requests per 30 days, with a 99.9% SLO. An incident returns 5% errors for one hour while traffic is 800 req/s. What percentage of the month's request-based error budget does the incident consume?",
+      "value": 11.1,
+      "tolerance": 0.1,
+      "unit": "percent",
+      "explanation": "Bad requests = 800 x 3,600 x 0.05 = 144,000. Budget = 0.001 x 1.296 billion = 1,296,000 bad requests. 144,000 / 1,296,000 = 11.1%. At 03:00 with 100 req/s the same incident would cost only about 1.4%, a property of request-based budgets.",
+      "ref": "unit-2-slos-capacity.md#2-error-budgets-and-burn-rate"
+    },
+    {
+      "id": "A8-038",
+      "type": "numeric",
+      "tags": [
+        "burn-rate",
+        "slo"
+      ],
+      "difficulty": 2,
+      "prompt": "The SLO is 99.9% and the service is currently returning 2% errors. What is the burn rate?",
+      "value": 20,
+      "tolerance": 0.05,
+      "unit": "x",
+      "explanation": "Burn rate = observed error rate / allowed error rate = 2% / 0.1% = 20. At that rate a full 30-day budget lasts 30 days / 20 = 1.5 days.",
+      "ref": "unit-2-slos-capacity.md#2-error-budgets-and-burn-rate"
+    },
+    {
+      "id": "A8-039",
+      "type": "numeric",
+      "tags": [
+        "burn-rate",
+        "error-budget"
+      ],
+      "difficulty": 2,
+      "prompt": "A service burns its error budget at a steady rate of 6 (six times the sustainable rate), starting from a full 30-day budget. After how many days is the budget exhausted?",
+      "value": 5,
+      "tolerance": 0.05,
+      "unit": "days",
+      "explanation": "Time to exhaustion = period / burn rate = 30 days / 6 = 5 days. A burn of 14.4 would exhaust it in 50 hours and a burn of 1 in exactly 30 days.",
+      "ref": "unit-2-slos-capacity.md#2-error-budgets-and-burn-rate"
+    },
+    {
+      "id": "A8-040",
+      "type": "single",
+      "tags": [
+        "error-budget",
+        "slo"
+      ],
+      "difficulty": 2,
+      "prompt": "A load-balancer misconfiguration sends no traffic to your service for 20 minutes. The burn-rate dashboard shows 0 and stays green. What is the right design response?",
+      "choices": [
+        "Nothing: no errors means no problem",
+        "Report 'no data' as unknown rather than 100% good, add an alert on absent traffic, and run a synthetic probe through the real front door",
+        "Lower the burn-rate thresholds",
+        "Switch to a time-based SLO"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Burn-rate alerts only see failures that produce events, so a failure that removes the traffic is invisible to them. Treating 0/0 as unknown plus absent-data alerts and synthetic probes covers the gap. Lowering thresholds or switching SLI type does not create events that do not exist.",
+      "ref": "unit-2-slos-capacity.md#2-error-budgets-and-burn-rate"
+    },
+    {
+      "id": "A8-041",
+      "type": "single",
+      "tags": [
+        "error-budget",
+        "slo"
+      ],
+      "difficulty": 2,
+      "prompt": "A service has delivered 99.99% for a year against a 99.9% SLO and product keeps asking for faster releases. What does this suggest?",
+      "choices": [
+        "The team should celebrate and freeze releases to protect the record",
+        "The unused error budget is a resource: agree how to spend it (faster releases, riskier migrations, cheaper redundancy), or tighten the SLO deliberately if users need it",
+        "The SLO is too tight and should be lowered to 99%",
+        "Nothing; budgets are only for postmortems"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Over-delivering reliability means ten times the allowed risk was left unspent; the budget exists to be traded for velocity. Either spend it by policy or raise the SLO on purpose if users value the extra reliability. Lowering the SLO to 99% would be a loosening nobody asked for.",
+      "ref": "unit-2-slos-capacity.md#2-error-budgets-and-burn-rate"
+    },
+    {
+      "id": "A8-042",
+      "type": "single",
+      "tags": [
+        "burn-rate",
+        "alerting"
+      ],
+      "difficulty": 2,
+      "prompt": "For a 30-day, 99.9% SLO, which burn-rate threshold means 'consume 2% of the error budget in one hour'?",
+      "choices": [
+        "1",
+        "6",
+        "14.4",
+        "144"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "burn = fraction x period / window = 0.02 x 720 h / 1 h = 14.4, which corresponds to a 1.44% error rate. 6 is 5% of the budget in 6 hours, 1 is 10% in 3 days, and 144 would be a ten-fold mis-derivation.",
+      "ref": "unit-2-slos-capacity.md#3-multi-window-multi-burn-rate-alerts"
+    },
+    {
+      "id": "A8-043",
+      "type": "single",
+      "tags": [
+        "alerting",
+        "burn-rate"
+      ],
+      "difficulty": 3,
+      "prompt": "A single-window rule (1-hour window, burn >= 14.4) keeps paging for almost an hour after an outage has been fixed. What change fixes this without making detection of real outages slower?",
+      "choices": [
+        "Shorten the single window to 5 minutes",
+        "Require a short window (about 5 minutes) to exceed the threshold as well as the long window",
+        "Raise the threshold to 144",
+        "Add a for: 30m clause"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The long window still holds the bad minutes, so it alone cannot reset quickly. Adding a short window that must also exceed the threshold resets the alert within minutes while detection stays fast, because severe outages push both windows over together. A 5-minute-only rule is noisy; a 10x threshold misses brownouts; a for: clause delays detection.",
+      "ref": "unit-2-slos-capacity.md#3-multi-window-multi-burn-rate-alerts"
+    },
+    {
+      "id": "A8-044",
+      "type": "single",
+      "tags": [
+        "burn-rate",
+        "alerting"
+      ],
+      "difficulty": 3,
+      "prompt": "A steady 0.5% error rate (burn 5 at 99.9%) begins and never stops. With the standard rules (14.4x on 1h/5m, 6x on 6h/30m, 1x on 3d/6h), what happens?",
+      "choices": [
+        "The 14.4x rule pages within minutes",
+        "The 6x rule pages within hours",
+        "Only the 1x rule fires, as a ticket, once the 3-day window averages at or above 1x",
+        "No rule ever fires"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Burn 5 is below both page thresholds (14.4 and 6), so no page fires; the 3-day 1x rule eventually fires as a ticket, which is the right response to a problem that would take about six days to exhaust the budget. It does fire eventually, so 'never' is wrong.",
+      "ref": "unit-2-slos-capacity.md#3-multi-window-multi-burn-rate-alerts"
+    },
+    {
+      "id": "A8-045",
+      "type": "multi",
+      "tags": [
+        "alerting",
+        "burn-rate"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL statements that are true of a multi-window, multi-burn-rate alert rule.",
+      "choices": [
+        "The long window provides significance: enough budget was really consumed",
+        "The short window provides recency and fast reset",
+        "It fires when EITHER window exceeds the threshold",
+        "Its threshold is derived as budgetFraction x period / longWindow"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "The rule requires both windows to exceed the threshold (AND), the long one for significance and the short one for recency. The thresholds come from budget arithmetic, for example 0.02 x 720 / 1 = 14.4, not from taste. 'Either window' would reintroduce both false positives and slow reset.",
+      "ref": "unit-2-slos-capacity.md#3-multi-window-multi-burn-rate-alerts"
+    },
+    {
+      "id": "A8-046",
+      "type": "single",
+      "tags": [
+        "alerting",
+        "burn-rate"
+      ],
+      "difficulty": 3,
+      "prompt": "A service at 2 req/s overnight has noisy burn-rate pages: one failure among 50 requests is a 2% error ratio. What is the best fix?",
+      "choices": [
+        "Divide every threshold by ten",
+        "Require a minimum event count in the window, lengthen the windows or add synthetic traffic, and consider alerting on bad-event counts for tiny services",
+        "Delete the alert at night",
+        "Page on every individual error"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Small denominators make ratios jumpy. Guarding on event count, widening the windows or adding synthetic requests addresses the cause without destroying the budget arithmetic; changing the threshold by a factor of ten does that. Disabling the alert or paging per error trades noise for blindness or more noise.",
+      "ref": "unit-2-slos-capacity.md#3-multi-window-multi-burn-rate-alerts"
+    },
+    {
+      "id": "A8-047",
+      "type": "single",
+      "tags": [
+        "burn-rate",
+        "alerting"
+      ],
+      "difficulty": 3,
+      "prompt": "An engineer sets the page threshold for a 99% SLO at burn rate 144 'to cut noise'. What is wrong?",
+      "choices": [
+        "Nothing; larger is quieter",
+        "The maximum possible burn rate for a 99% SLO is 1/(1-0.99) = 100, so the rule can never fire",
+        "144 is exactly right for all SLOs",
+        "It will fire too often"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A total outage burns at 1/(1 - SLO) = 100 for a 99% SLO, the highest burn that exists, so a threshold of 144 is unreachable. Always check thresholds against that ceiling; derive them from the budget fraction instead of picking round numbers.",
+      "ref": "unit-2-slos-capacity.md#3-multi-window-multi-burn-rate-alerts"
+    },
+    {
+      "id": "A8-048",
+      "type": "single",
+      "tags": [
+        "alerting"
+      ],
+      "difficulty": 1,
+      "prompt": "How is the PRECISION of a set of alerts defined?",
+      "choices": [
+        "The share of real incidents that raised an alert",
+        "The share of fired alerts that were about real, significant problems",
+        "The time from the start of a problem to its alert",
+        "The number of alerts per day"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Precision is alerts-that-mattered over alerts-fired. The share of real incidents that alerted is recall; the time to alert is detection time; the daily count is volume.",
+      "ref": "unit-2-slos-capacity.md#4-alert-quality-and-the-on-call-loop"
+    },
+    {
+      "id": "A8-049",
+      "type": "single",
+      "tags": [
+        "alerting",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "A team adds 'for: 10m' to every alert to reduce noise. Which description of the effect is most accurate?",
+      "choices": [
+        "Precision and recall both improve",
+        "Precision improves, but incidents shorter than 10 minutes are missed (or alerted after they end) and detection is at least 10 minutes later",
+        "Recall improves because alerts last longer",
+        "Nothing changes except the dashboard"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A duration clause removes short false alerts but also short real ones, and delays every alert by the duration, so an incident that ends before the clause is satisfied is missed or alerted late. Burn-rate windows achieve the same filtering with explicit budget meaning.",
+      "ref": "unit-2-slos-capacity.md#4-alert-quality-and-the-on-call-loop"
+    },
+    {
+      "id": "A8-050",
+      "type": "single",
+      "tags": [
+        "alerting",
+        "observability"
+      ],
+      "difficulty": 2,
+      "prompt": "Which metric most directly tells you your alerting has a RECALL problem?",
+      "choices": [
+        "Pages per on-call shift",
+        "The share of incidents first reported by customers or support instead of by an alert",
+        "Mean time to acknowledge",
+        "The number of alert rules"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Incidents found by customers are, by definition, real problems that did not alert in time. Pages per shift and acknowledge time describe load and responsiveness, and the rule count says nothing about coverage.",
+      "ref": "unit-2-slos-capacity.md#4-alert-quality-and-the-on-call-loop"
+    },
+    {
+      "id": "A8-051",
+      "type": "numeric",
+      "tags": [
+        "capacity",
+        "queueing"
+      ],
+      "difficulty": 2,
+      "prompt": "Using the M/M/1 model, a service with an average service time of 20 ms runs at 90% utilisation. What is the mean response time in milliseconds?",
+      "value": 200,
+      "tolerance": 0.05,
+      "unit": "ms",
+      "explanation": "R = S / (1 - rho) = 20 ms / 0.1 = 200 ms. At 50% it would be 40 ms and at 95% 400 ms: the hockey stick comes from queueing delay, not service time.",
+      "ref": "unit-2-slos-capacity.md#5-capacity-planning-and-load-testing"
+    },
+    {
+      "id": "A8-052",
+      "type": "numeric",
+      "tags": [
+        "capacity",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "Three availability zones each run the same number of pods at 60% CPU. One zone fails and its traffic is redistributed evenly. What CPU utilisation (percent) do the surviving pods reach?",
+      "value": 90,
+      "tolerance": 0.05,
+      "unit": "percent",
+      "explanation": "Total work is 3 x 0.6 = 1.8 pod-equivalents on 2/3 of the pods: 1.8 / 2 = 0.9. To keep survivors at or below 70% the steady state must be at most 70% x 2/3, about 47%. Failure-domain headroom is a multiplier, not an afterthought.",
+      "ref": "unit-2-slos-capacity.md#5-capacity-planning-and-load-testing"
+    },
+    {
+      "id": "A8-053",
+      "type": "numeric",
+      "tags": [
+        "capacity",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Peak traffic is 3,000 req/s. One pod handles 250 req/s at the point where p99 reaches the SLO limit, and you plan to run at 60% of that. How many pods do you need to serve peak (ignore failure-domain headroom)?",
+      "value": 20,
+      "tolerance": 0.05,
+      "unit": "pods",
+      "explanation": "Usable capacity per pod = 250 x 0.6 = 150 req/s; 3,000 / 150 = 20 pods. With three zones and AZ-loss headroom you would need 20 x 3/2 = 30 pods.",
+      "ref": "unit-2-slos-capacity.md#5-capacity-planning-and-load-testing"
+    },
+    {
+      "id": "A8-054",
+      "type": "numeric",
+      "tags": [
+        "capacity",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A connection pool to the core-banking system holds 50 connections and each call takes 300 ms. By Little's law, what is the maximum sustainable throughput in requests per second, regardless of how many application pods you run?",
+      "value": 167,
+      "tolerance": 0.05,
+      "unit": "req/s",
+      "explanation": "Throughput = concurrency / time per call = 50 / 0.3 = 167 req/s. At 2,400 req/s you would need 2,400 x 0.3 = 720 connections in flight. Every pool is a capacity ceiling to compute, and scaling pods does not raise it.",
+      "ref": "unit-2-slos-capacity.md#5-capacity-planning-and-load-testing"
+    },
+    {
+      "id": "A8-055",
+      "type": "single",
+      "tags": [
+        "capacity",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "Payday traffic is predictable: 6x baseline within about ten minutes on the 1st of each month. The autoscaler takes about four minutes to deliver new pods. What is the best plan?",
+      "choices": [
+        "Rely on reactive autoscaling and set CPU target to 40%",
+        "Scheduled pre-scaling before the event, static headroom for the lag, a reactive autoscaler as backstop, and prioritised load shedding for what still exceeds capacity",
+        "Do nothing and let retries absorb the spike",
+        "Double the connection pool size to the core vendor only"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A predictable cliff should not depend on a feedback loop with minutes of delay. Pre-scale for the calendar, keep headroom for the lag, use the autoscaler for the unplanned remainder and shed low-priority work to protect admitted traffic. Retries amplify overload, and enlarging a pool does not help if the vendor's limit is the ceiling.",
+      "ref": "unit-2-slos-capacity.md#5-capacity-planning-and-load-testing"
+    },
+    {
+      "id": "A8-056",
+      "type": "single",
+      "tags": [
+        "load-testing",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "Which kind of test shows you where latency starts to climb with offered load (the knee)?",
+      "choices": [
+        "A smoke test",
+        "An open-loop step test that raises the arrival rate in stages and records latency at each stage",
+        "A closed-loop test with a fixed number of users",
+        "A soak test at 20% of expected peak"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A step test with open-loop arrivals traces latency against offered load and exposes the knee. A smoke test only checks that the system runs, a closed loop self-limits and hides overload, and a low-level soak finds leaks, not capacity.",
+      "ref": "unit-2-slos-capacity.md#5-capacity-planning-and-load-testing"
+    },
+    {
+      "id": "A8-057",
+      "type": "numeric",
+      "tags": [
+        "slo",
+        "reliability",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A request must pass serially through three services with availabilities 99.9%, 99.95% and 99.95%, all failing independently. About how many minutes per 30 days (43,200 minutes) is it expected to be unavailable?",
+      "value": 86,
+      "tolerance": 0.1,
+      "unit": "min",
+      "explanation": "Product = 0.999 x 0.9995 x 0.9995 = 0.99800, so unavailability is about 0.2%: 0.002 x 43,200 = about 86 minutes. Each hard dependency subtracts its own unavailability from the ceiling.",
+      "ref": "unit-2-slos-capacity.md#6-composing-slos-and-slos-for-asynchronous-pipelines-stretch"
+    },
+    {
+      "id": "A8-058",
+      "type": "single",
+      "tags": [
+        "async",
+        "slo"
+      ],
+      "difficulty": 2,
+      "prompt": "A webhook delivery pipeline shows a 100% success rate and healthy consumers, yet partners report events arriving three hours late. Which SLI would have caught this?",
+      "choices": [
+        "Availability of the delivery endpoint",
+        "Freshness: the share of events delivered within a threshold of their creation, plus the age of the oldest undelivered event",
+        "CPU utilisation of the consumers",
+        "Error rate of the producers"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Everything was eventually delivered, so success rate stayed at 100% while lateness grew. A freshness SLI measures delivered_at - created_at (and the age of stuck work), which is what partners experience. Consumer CPU and producer errors say nothing about delay.",
+      "ref": "unit-2-slos-capacity.md#6-composing-slos-and-slos-for-asynchronous-pipelines-stretch"
+    },
+    {
+      "id": "A8-059",
+      "type": "single",
+      "tags": [
+        "reliability",
+        "slo"
+      ],
+      "difficulty": 3,
+      "prompt": "Two replicas each have 99% availability and fail independently, giving about 99.99% together. A shared deployment process also causes simultaneous failures of both for 0.05% of the time. What is the combined availability now, roughly?",
+      "choices": [
+        "Still 99.99%",
+        "About 99.94%: shared-cause failures dominate and the second replica adds little beyond them",
+        "About 99.5%",
+        "About 100%"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Both-down probability becomes about 0.0005 (shared) plus 0.0001 (independent), roughly 0.0006, so availability is about 99.94%. Redundancy helps only against independent failures; deploys, config, certificates and regions are common causes.",
+      "ref": "unit-2-slos-capacity.md#6-composing-slos-and-slos-for-asynchronous-pipelines-stretch"
+    },
+    {
+      "id": "A8-060",
+      "type": "single",
+      "tags": [
+        "slo",
+        "observability"
+      ],
+      "difficulty": 2,
+      "prompt": "In the burnrate lab, a Tracker is queried over a window ending at 'now' with no events recorded in that window. What should SLI() report, and why?",
+      "choices": [
+        "ok = true with SLI = 1.0, because no errors occurred",
+        "ok = false: 0/0 is unknown, not perfect, so callers can distinguish 'no data' from 'healthy'",
+        "SLI = 0, because there is no success",
+        "It should panic so the bug is noticed"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Returning 100% for an empty window would make a failure that removes all traffic look perfect. Returning 'unknown' lets the alert layer treat it correctly (never fire a burn rule on it) and lets operators alert on absent data separately. Zero would page constantly at night, and panicking in a metrics library is never acceptable.",
+      "ref": "unit-2-slos-capacity.md#2-error-budgets-and-burn-rate"
+    },
+    {
+      "id": "A8-061",
+      "type": "single",
+      "tags": [
+        "alerting",
+        "slo"
+      ],
+      "difficulty": 3,
+      "prompt": "In the lab's Evaluator, a rule has Long = 1 h, Short = 5 min, Threshold = 14.4. At 'now' the 1-hour burn is 400 but the 5-minute window contains no events at all. Should the rule fire?",
+      "choices": [
+        "Yes: the long window is far above the threshold",
+        "No: a window with no traffic cannot exceed a threshold, and the short window must also confirm the problem is happening now",
+        "Yes, and with a higher severity",
+        "It depends on the severity label"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Both windows must exist and meet the threshold. An empty short window cannot confirm the problem is current, which is exactly the incident-over case the short window exists to suppress. A dead load balancer looks the same, which is why absent-traffic needs its own alert.",
+      "ref": "unit-2-slos-capacity.md#3-multi-window-multi-burn-rate-alerts"
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "id": "E1",
+  "slug": "url-shortener-service",
+  "title": "Build: URL shortener service",
+  "track": "E",
+  "status": "written",
+  "core": true,
+  "summary": "Multi-process service on localhost: a durable log-structured store, an API with idempotent creates, a redirect cache with negative caching and stampede protection, a per-client rate limiter, failure injection, and an open-loop p99 report.",
+  "hours": {
+    "core": 15,
+    "stretch": 3,
+    "total": 18
+  },
+  "prerequisites": [
+    "A1",
+    "A2",
+    "A3",
+    "A7",
+    "B0"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/E1-url-shortener-service",
+    "readme": "modules/E1-url-shortener-service/README.md",
+    "quiz": "modules/E1-url-shortener-service/quiz.json",
+    "design_exercise": "modules/E1-url-shortener-service/design-exercise.md",
+    "teachback": "modules/E1-url-shortener-service/teachback.md",
+    "lab": "labs/e1",
+    "solution": "solutions/e1"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "The durable store: an append-only log, crash recovery and a store process",
+      "file": "modules/E1-url-shortener-service/unit-1-durable-store.md",
+      "hours": {
+        "core": 5,
+        "stretch": 0.5
+      },
+      "labs": [
+        "shorty"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "The API and the redirect cache: idempotent creates, negative caching, stampedes, invalidation across instances",
+      "file": "modules/E1-url-shortener-service/unit-2-api-and-cache.md",
+      "hours": {
+        "core": 5,
+        "stretch": 0.5
+      },
+      "labs": [
+        "shorty"
+      ]
+    },
+    {
+      "n": 3,
+      "title": "Limits, failure injection and the p99 report",
+      "file": "modules/E1-url-shortener-service/unit-3-limits-failure-load.md",
+      "hours": {
+        "core": 5,
+        "stretch": 2
+      },
+      "labs": [
+        "shorty",
+        "loadgen"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "shorty",
+      "title": "The service: append-only checksummed log with crash recovery, store and api processes, idempotent creates, LRU+TTL redirect cache with negative caching, singleflight and stale-if-error, per-client token bucket, deadline budgets, graceful drain; multi-process failure-injection tests",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "loadgen",
+      "title": "Open-loop load generator with intended-start latency (coordinated omission), nearest-rank percentiles and a p50/p95/p99 report",
+      "unit": 3,
+      "core": false
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Write a design-rationale document for a multi-process service before building it, with per-component failure predictions, and revise it against what failure injection actually showed.",
+      "core": true
+    },
+    {
+      "text": "Implement an append-only, checksummed log with an in-memory index, an fsync policy and crash recovery that truncates a torn tail but refuses to open on mid-file corruption, and explain why SIGKILL cannot test fsync.",
+      "core": true
+    },
+    {
+      "text": "Expose the log as a store process with insert-if-absent, and explain why that one atomic primitive lets several API instances allocate random codes and claim idempotency keys without coordinating.",
+      "core": true
+    },
+    {
+      "text": "Implement an idempotent create with a stored intent record that any retry can roll forward, with the right status for replay (201 + Idempotent-Replayed), reuse with a different body (422) and concurrent duplicates.",
+      "core": true
+    },
+    {
+      "text": "Design the redirect hot path: 302 with explicit Cache-Control, 404 vs 410 with tombstones, an LRU+TTL cache with negative entries, singleflight on a detached context, and serve-time expiry checks.",
+      "core": true
+    },
+    {
+      "text": "Close the invalidation race between a delete and an in-flight cache fill, and state (and measure) the staleness bound for other instances when invalidation is local.",
+      "core": true
+    },
+    {
+      "text": "Implement a per-client token-bucket limiter with bounded memory and truthful Retry-After, place it before any expensive work, and compute what a per-instance limit really admits behind a load balancer.",
+      "core": true
+    },
+    {
+      "text": "Apply deadline budgets, stale-if-error and fast 503 + Retry-After so the service degrades predictably when the store is down, slow or partitioned, and drain in-flight requests on SIGTERM.",
+      "core": true
+    },
+    {
+      "text": "Inject failures across processes (SIGKILL, SIGTERM under load, latency, blackhole, refused connections, torn and corrupt files) and turn each prediction into a deterministic test.",
+      "core": true
+    },
+    {
+      "text": "Build an open-loop load generator that measures from the intended start, report p50/p95/p99 with nearest-rank percentiles, and explain how coordinated omission hides a stall.",
+      "core": false
+    }
+  ]
+}

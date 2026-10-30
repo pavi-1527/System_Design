@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "id": "C5",
+  "slug": "news-feed",
+  "title": "Case study: news feed",
+  "track": "C",
+  "status": "written",
+  "core": true,
+  "summary": "Fan-out on write vs read, celebrity problem, bounded timeline caches, cursor feeds, ranking and consistency, with a hybrid fan-out lab.",
+  "hours": {
+    "core": 7,
+    "stretch": 2,
+    "total": 9
+  },
+  "prerequisites": [
+    "A3",
+    "A4",
+    "A6"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/C5-news-feed",
+    "readme": "modules/C5-news-feed/README.md",
+    "quiz": "modules/C5-news-feed/quiz.json",
+    "design_exercise": "modules/C5-news-feed/design-exercise.md",
+    "teachback": "modules/C5-news-feed/teachback.md",
+    "lab": "labs/c5",
+    "solution": "solutions/c5"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Guided design: requirements, estimation, API, data model, high-level design",
+      "file": "modules/C5-news-feed/unit-1-guided-design.md",
+      "hours": {
+        "core": 3.5,
+        "stretch": 0.5
+      },
+      "labs": []
+    },
+    {
+      "n": 2,
+      "title": "Deep dives: fan-out strategy, timeline cache, ranking and consistency, the lab",
+      "file": "modules/C5-news-feed/unit-2-deep-dives.md",
+      "hours": {
+        "core": 3.5,
+        "stretch": 1.5
+      },
+      "labs": [
+        "feed"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "feed",
+      "title": "Hybrid fan-out timeline service: bounded timelines, celebrity merge on read, cursor paging, idempotent posts",
+      "unit": 2,
+      "core": true
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Scope a news-feed prompt in six minutes: ask the clarifying questions that change the design (follow graph shape, feed ordering, consistency of own posts, media), state NFRs as numbers and an explicit out-of-scope list.",
+      "core": true
+    },
+    {
+      "text": "Estimate post and feed-read QPS, fan-out write amplification, timeline-cache memory, post storage with replication and feed egress, and tie each number to the decision it drives (partition, cache, async fan-out, hybrid).",
+      "core": true
+    },
+    {
+      "text": "Design the feed API (idempotent post creation, cursor-paginated feed, follow/unfollow) and a data model whose partition keys follow the access patterns (posts by author, timelines by reader, graph in both directions).",
+      "core": true
+    },
+    {
+      "text": "Draw the post path (API → posts store + outbox/log → fan-out workers → timeline caches) and the read path (timeline cache → hydrate → merge celebrities), justify every box with a requirement or a number, and walk one request through each.",
+      "core": true
+    },
+    {
+      "text": "Choose between fan-out on write, fan-out on read and the hybrid with a celebrity threshold, using numbers for a 50 M-follower account, and state when the answer flips.",
+      "core": true
+    },
+    {
+      "text": "Design the timeline cache: bounded per-user lists, memory sizing, inactive-user eviction, rebuild on miss, hot-key and stampede protection, and the fallback when a reader scrolls past the window.",
+      "core": true
+    },
+    {
+      "text": "Reason about feed consistency: read-your-own-posts, out-of-order fan-out, dedupe across sources, propagation of deletes and unfollows, and what eventual means for a feed.",
+      "core": true
+    },
+    {
+      "text": "Implement a hybrid fan-out timeline service in Go that passes its tests under -race: bounded timelines, celebrity merge on read, cursor paging without duplicates or skips, idempotent posts, lazy deletes, eager unfollows.",
+      "core": true
+    },
+    {
+      "text": "Explain how a ranked feed changes the architecture (candidate generation, feature hydration, scoring, re-ranking) and what it costs in latency, freshness and storage.",
+      "core": false
+    }
+  ]
+}

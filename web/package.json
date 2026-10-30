@@ -1,0 +1,13 @@
+{
+  "name": "sd-serve-vendor",
+  "private": true,
+  "description": "Pins the browser libraries that `sd serve` embeds. Run `npm run vendor` to refresh internal/web/static/vendor; the Go build never needs npm.",
+  "scripts": {
+    "vendor": "node vendor.mjs"
+  },
+  "devDependencies": {
+    "@highlightjs/cdn-assets": "11.12.0",
+    "markdown-it": "15.0.3",
+    "mermaid": "12.2.0"
+  }
+}

@@ -1,0 +1,1331 @@
+{
+  "module": "A3",
+  "title": "Caching",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "A3-001",
+      "type": "numeric",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 1,
+      "prompt": "A cache serves 99.5% of the reads for an account-summary endpoint. The database behind it is sized for the traffic that reaches it in steady state. The cache cluster is restarted and comes back empty, and all traffic continues. By what factor does the load on the database increase while the cache is cold (ignoring any retries)?",
+      "value": 200,
+      "tolerance": 0.05,
+      "unit": "x",
+      "explanation": "In steady state the database sees the miss fraction 1 - h = 0.5% of the traffic. With an empty cache every request misses, so it sees 100%. The multiplier is 1 / (1 - h) = 1 / 0.005 = 200. The better the hit ratio, the bigger the cliff when the cache disappears: a 99.5% hit ratio is a statement about how much the database depends on it.",
+      "ref": "unit-1-why-where-how-much.md#1-what-a-cache-buys-and-where-caches-sit"
+    },
+    {
+      "id": "A3-002",
+      "type": "single",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Payday, 08:55. Operations restarts the Redis nodes in front of the account-summary service ('it's only a cache'). The hit ratio was 97% and the database was downsized to handle about 5% of peak traffic. Requests start timing out, clients retry, and the cache does not warm up. Which diagnosis best explains why the cache cannot recover on its own?",
+      "choices": [
+        "The 3% of keys that are uncacheable now dominate the load because the cache lost its other 97% of entries",
+        "Timed-out misses never fill the cache and retries add load, so the database stays saturated and the cache stays cold",
+        "Restarting nodes one at a time makes the hash ring rebalance, which blocks every write to the database meanwhile",
+        "Redis drops its TTL settings on restart, so entries are stored without expiry and the application never refreshes them"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A cold cache sends 100% of the traffic (about 33x the steady load at a 97% hit ratio) to a database sized for far less. Requests queue and time out; a request that times out does not finish its fill, so the cache stays empty while the retries keep the load up: a feedback loop. Redis does not lose its TTL behaviour on a restart, the 3% of misses in steady state is an ordinary tail of rarely read keys that is trivial next to a full flush, and the ring-rebalance explanation describes an unrelated mechanism (and a cache restart does not block writes to the database).",
+      "ref": "unit-1-why-where-how-much.md#1-what-a-cache-buys-and-where-caches-sit"
+    },
+    {
+      "id": "A3-003",
+      "type": "numeric",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 1,
+      "prompt": "A cache hit costs 1 ms. A miss costs the 1 ms lookup, plus 30 ms for the database, plus 1 ms to write the entry back. With a 90% hit ratio, what is the mean latency per request in milliseconds?",
+      "value": 4.1,
+      "tolerance": 0.1,
+      "unit": "ms",
+      "explanation": "T_eff = h * T_hit + (1 - h) * (T_lookup + T_db + T_fill) = 0.9 * 1 + 0.1 * (1 + 30 + 1) = 0.9 + 3.2 = 4.1 ms. Note that a miss (32 ms) is slower than having no cache at all (30 ms): the lookup and fill are the price of the bet.",
+      "ref": "unit-1-why-where-how-much.md#1-what-a-cache-buys-and-where-caches-sit"
+    },
+    {
+      "id": "A3-004",
+      "type": "single",
+      "tags": [
+        "caching",
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "An engineer adds a gateway rule that caches 'GET /api/accounts/summary' for 60 seconds, keyed by URL only, in a shared cache in front of all members. What is the most serious problem?",
+      "choices": [
+        "The URL does not identify the member, so one member's response can be served to another",
+        "A 60-second TTL is too short to give a useful hit ratio for account data that members read many times a day",
+        "The cache evicts the response whenever the member's balance changes, which will hurt the hit ratio badly",
+        "Gateways cannot cache responses with a JSON body, so the rule will silently never match any request"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The response is personal but the cache key is shared: the first member's summary is returned to everyone requesting the same URL until it expires. Personal data needs the member in the key or must not be stored in shared caches at all (Cache-Control: private, no-store, or Vary on the identity). The TTL is a freshness concern, not the main hazard; gateways and CDNs cache JSON bodies routinely; and nothing evicts the entry when a balance changes unless invalidation exists, which is a separate concern.",
+      "ref": "unit-1-why-where-how-much.md#1-what-a-cache-buys-and-where-caches-sit"
+    },
+    {
+      "id": "A3-005",
+      "type": "multi",
+      "tags": [
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "A request path has a 60%-hit in-process L1 in front of a remote L2 that serves 90% of the requests it receives, in front of a database. Select ALL statements that are true.",
+      "choices": [
+        "The database receives about 4% of the original requests",
+        "The L2 hit ratio, measured on the requests it receives, is likely lower than it was before the L1 was added",
+        "The worst-case staleness a user can see is roughly the sum of the layers' TTLs",
+        "The L1 is shared by all application instances, so one instance's fill is visible to the others"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Miss rates multiply: 0.4 * 0.1 = 4% reaches the database. Staleness composes additively because an entry can be almost expired in one layer when it is copied into the next. The L1 takes the easy, popular hits, so what reaches L2 is a colder mix and its measured hit ratio falls. An in-process L1 lives in one process: each instance has its own copy, which is exactly why invalidating it needs a broadcast and why copies can differ.",
+      "ref": "unit-1-why-where-how-much.md#1-what-a-cache-buys-and-where-caches-sit"
+    },
+    {
+      "id": "A3-006",
+      "type": "single",
+      "tags": [
+        "caching",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "A card-controls service acknowledges 'freeze card' as soon as it is written to Redis; a background job flushes dirty keys to Postgres every 5 seconds. Redis fails over to a replica that is missing the last second of writes, and the flush buffer is lost. Which statement describes what went wrong in the design?",
+      "choices": [
+        "Write-behind acknowledged writes that existed only in volatile cache memory, so a failover lost them",
+        "Cache-aside left stale entries because the invalidation message was lost when the node failed over",
+        "Refresh-ahead reloaded the old value from Postgres just before the periodic flush ran",
+        "Write-through was configured with the wrong order, so the cache was updated before the database was written"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Write-behind returns after the cache write and flushes later, so anything unflushed is acknowledged but not durable; a failover or crash loses it. Write-through would have waited for the database write. Cache-aside writes the database first, so an acknowledged write is never lost (at worst a stale cached read). Refresh-ahead is about reloading hot keys before they expire and plays no part here. A safety-critical flag should never be behind a write-behind cache without a durable log.",
+      "ref": "unit-1-why-where-how-much.md#2-caching-patterns-aside-through-behind-around-ahead"
+    },
+    {
+      "id": "A3-007",
+      "type": "single",
+      "tags": [
+        "caching"
+      ],
+      "difficulty": 1,
+      "prompt": "Which caching pattern acknowledges a write only after BOTH the cache and the database have been updated?",
+      "choices": [
+        "Refresh-ahead",
+        "Write-behind",
+        "Write-through",
+        "Write-around"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Write-through writes to the cache and the database synchronously before acknowledging. Write-behind acknowledges after the cache write and flushes later. Write-around writes only to the database and does not populate the cache. Refresh-ahead is a read-side technique that reloads hot entries before they expire.",
+      "ref": "unit-1-why-where-how-much.md#2-caching-patterns-aside-through-behind-around-ahead"
+    },
+    {
+      "id": "A3-008",
+      "type": "multi",
+      "tags": [
+        "caching",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL patterns in which the database has already been written by the time the client receives the success response.",
+      "choices": [
+        "Cache-aside with delete-after-write",
+        "Write-behind with an in-memory buffer",
+        "Write-through",
+        "Write-around"
+      ],
+      "answer": [
+        0,
+        2,
+        3
+      ],
+      "explanation": "In cache-aside the application writes the database and then invalidates; in write-through the cache layer writes through to the database before acknowledging; write-around writes only the database. Write-behind with an in-memory buffer acknowledges first and writes the database later, which is why it can lose acknowledged data.",
+      "ref": "unit-1-why-where-how-much.md#2-caching-patterns-aside-through-behind-around-ahead"
+    },
+    {
+      "id": "A3-009",
+      "type": "single",
+      "tags": [
+        "caching",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "For write-through, why is 'write the database first, then the cache' the safe order?",
+      "choices": [
+        "It guarantees that no two concurrent writers can ever interleave their updates to the same key",
+        "Databases are faster than caches, so putting the slower write first makes the second one cheaper",
+        "It lets the cache be flushed to the database in batches, which reduces the write load",
+        "The cache may lag the truth (a miss) but must never lead it with a value the database rejected"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "If the cache were written first and the database write failed or rolled back, the cache would serve a value that never existed. A cache that is merely behind produces misses, which are harmless. The order says nothing about relative speed, does not prevent interleavings between concurrent writers (that needs versions or serialisation), and batching is a write-behind property.",
+      "ref": "unit-1-why-where-how-much.md#2-caching-patterns-aside-through-behind-around-ahead"
+    },
+    {
+      "id": "A3-010",
+      "type": "single",
+      "tags": [
+        "caching",
+        "storage"
+      ],
+      "difficulty": 3,
+      "prompt": "Write-back caching appears in operating systems and databases (dirty pages flushed later). What makes it safe there, when it is unsafe for an application cache like Redis?",
+      "choices": [
+        "A durable, ordered log is written before the acknowledgement, so unflushed pages can be rebuilt",
+        "The kernel replicates every dirty page to a second machine before it acknowledges the write",
+        "Dirty pages are always flushed within one second of being modified, so the loss window is tiny",
+        "Disks are more reliable than Redis nodes, so lost writes after a crash are very rare in practice"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A database writes its WAL (and fsyncs) before acknowledging, so the dirty pages that are written back later can be reconstructed from the log after a crash: write-back is safe if and only if a durable log precedes it. Reliability of the storage medium is not the point, there is no universal one-second flush bound (checkpoint intervals vary), and operating systems do not replicate dirty pages across machines.",
+      "ref": "unit-1-why-where-how-much.md#2-caching-patterns-aside-through-behind-around-ahead"
+    },
+    {
+      "id": "A3-011",
+      "type": "numeric",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A write-behind cache absorbs 2,000 acknowledged writes per second spread over 200 hot keys and flushes the dirty keys to the database every 5 seconds, writing each dirty key once per flush. About how many database writes per second does the database see?",
+      "value": 40,
+      "tolerance": 0.15,
+      "unit": "writes/s",
+      "explanation": "At most one write per dirty key per flush: 200 keys / 5 s = 40 writes per second, instead of 2,000: a 50x reduction. That is write coalescing, the upside of write-behind. The downside is that up to 200 keys' latest values are acknowledged but unflushed at any moment.",
+      "ref": "unit-1-why-where-how-much.md#2-caching-patterns-aside-through-behind-around-ahead"
+    },
+    {
+      "id": "A3-012",
+      "type": "single",
+      "tags": [
+        "caching",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "A team says 'our session data in Redis is just a cache'. Sessions are created at login and nothing else holds them. What is the right response?",
+      "choices": [
+        "Agree, because any data that lives in Redis can be rebuilt from the system of record at any time, so loss is never a concern",
+        "Ask whether another copy exists; if not, it is a store, so choose persistence and loss semantics deliberately",
+        "Add a longer TTL to the session entries so that they survive node restarts and failovers",
+        "Move the sessions to a CDN so that they are cached close to the users who own them"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A cache is disposable because the source of truth can refill it. If the cache holds the only copy, it is a store: decide replication, persistence and what a lost entry means (a forced re-login may be acceptable; a lost consent record is not). Sessions cannot be rebuilt from a database that never saw them, a longer TTL does nothing for a node that restarts, and a CDN is the wrong place for authenticated state.",
+      "ref": "unit-1-why-where-how-much.md#2-caching-patterns-aside-through-behind-around-ahead"
+    },
+    {
+      "id": "A3-013",
+      "type": "single",
+      "tags": [
+        "eviction",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "A strict LRU cache holds 1,000,000 hot entries. A monthly job reads 4,000,000 distinct keys exactly once each through the same cache-aside path. How many of the original hot entries are still cached when the job ends?",
+      "choices": [
+        "Essentially none",
+        "About a quarter of them",
+        "About three quarters of them",
+        "All of them, because they have the most hits"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Every insertion makes the new key most-recently-used and evicts the least-recently-used one. After 1,000,000 insertions all of the original entries are gone, and the rest of the scan only churns its own entries. LRU judges value by recency alone, and a one-time access is the most recent event. Hit counts play no role in LRU, which is why it is vulnerable to scans.",
+      "ref": "unit-1-why-where-how-much.md#3-eviction-deciding-what-to-forget"
+    },
+    {
+      "id": "A3-014",
+      "type": "single",
+      "tags": [
+        "eviction",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "Which is the best FIRST fix for a nightly batch job that flushes an interactive cache and craters the morning hit ratio?",
+      "choices": [
+        "Switch the whole cache from LRU to FIFO so that old entries are removed first",
+        "Shorten the TTL of every entry to 30 seconds so that scanned keys disappear quickly",
+        "Double the memory of the shared cache so that the scan fits alongside the hot entries without evicting any of them",
+        "Make the batch reads bypass the cache, or use a separate cache, so they never populate it"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The cheapest fix removes the cause: one-pass reads should not populate the interactive cache. Scan-resistant policies (SLRU, TinyLFU) are good insurance for the scan you did not predict. Doubling memory only helps if the scan is smaller than the extra space; FIFO is no more scan-resistant than LRU (and ignores reuse); shortening TTLs would make misses more frequent without keeping the hot set.",
+      "ref": "unit-1-why-where-how-much.md#3-eviction-deciding-what-to-forget"
+    },
+    {
+      "id": "A3-015",
+      "type": "single",
+      "tags": [
+        "eviction",
+        "concurrency"
+      ],
+      "difficulty": 1,
+      "prompt": "In a concurrent in-memory LRU cache, why can a plain Get not run under a read lock (sync.RWMutex RLock)?",
+      "choices": [
+        "A read lock would let two Gets return different values for the same key",
+        "A hit promotes the entry, which rewrites the list pointers and statistics, so Get is a write",
+        "Reads and writes of a Go map are never allowed at the same time, whatever the lock type is",
+        "sync.RWMutex cannot be used with generic types, so only a plain Mutex compiles"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A hit moves the node to the front of the recency list: that mutates shared state. Two Gets under RLock would race on the pointers (the race detector flags it). The map restriction is true but it is not the reason that distinguishes Get from a plain read; RWMutex works with generics; and two Gets would return the same value but corrupt the list.",
+      "ref": "unit-1-why-where-how-much.md#3-eviction-deciding-what-to-forget"
+    },
+    {
+      "id": "A3-016",
+      "type": "single",
+      "tags": [
+        "eviction"
+      ],
+      "difficulty": 2,
+      "prompt": "How does a CLOCK (second-chance) cache avoid the per-hit pointer updates of a strict LRU?",
+      "choices": [
+        "A hit only sets a reference bit; the hand clears bits and evicts the first entry whose bit is already clear",
+        "It never reorders entries, and it always evicts the entry that was inserted earliest of all, in FIFO order",
+        "It samples a few random keys on every hit and evicts the one used least frequently of the sample",
+        "It keeps a second list that a background thread periodically merges into the main list of entries"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "CLOCK keeps entries in a circular buffer with a reference bit. A hit sets the bit (no list surgery, no lock on a list); the hand sweeps on eviction, giving referenced entries a second chance. Always evicting the oldest inserted one is FIFO. Random sampling at eviction time describes Redis's approximated LRU. A merged second list is a segmented design, not CLOCK.",
+      "ref": "unit-1-why-where-how-much.md#3-eviction-deciding-what-to-forget"
+    },
+    {
+      "id": "A3-017",
+      "type": "multi",
+      "tags": [
+        "eviction"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL techniques that make a cache resistant to one-pass scans.",
+      "choices": [
+        "InnoDB-style midpoint insertion with a delay before promotion",
+        "Segmented LRU / 2Q (new entries start in a probation segment)",
+        "Plain LRU with a larger capacity",
+        "A TinyLFU admission filter (admit a newcomer only if it is more frequent than the victim)"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "SLRU/2Q, TinyLFU admission and InnoDB's midpoint insertion all require more than a single access before an entry displaces the established hot set. A larger plain LRU just raises the size of the scan needed to flush it: it moves the threshold but does not change the behaviour.",
+      "ref": "unit-1-why-where-how-much.md#3-eviction-deciding-what-to-forget"
+    },
+    {
+      "id": "A3-018",
+      "type": "single",
+      "tags": [
+        "eviction"
+      ],
+      "difficulty": 2,
+      "prompt": "What goes wrong with an LFU cache whose counters never decay?",
+      "choices": [
+        "A single scan flushes the hot set exactly as it does in an LRU cache of the same size, because it bumps every counter",
+        "The most frequently used entries are evicted first, because frequency is counted from the moment they entered memory",
+        "Stale popularity: old favourites keep high counts forever, and new items are evicted before they can build a count",
+        "The counters overflow after a while, and every entry in the cache is evicted at the same moment, leaving it empty"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Without aging, frequency means 'frequency ever', so yesterday's viral item hoards memory and today's new items look cold and are evicted at once. Practical LFUs halve or decay counts periodically. LFU is scan-resistant (a single access has frequency 1), so it does not behave like LRU on scans, and counters do not cause mass eviction on overflow in any sane implementation (they saturate).",
+      "ref": "unit-1-why-where-how-much.md#3-eviction-deciding-what-to-forget"
+    },
+    {
+      "id": "A3-019",
+      "type": "single",
+      "tags": [
+        "eviction",
+        "caching"
+      ],
+      "difficulty": 3,
+      "prompt": "A cache bounded to 100,000 ENTRIES stores both 2 KB account summaries and 200 KB statement renderings. After a statement-heavy afternoon the instance runs out of memory. Which change addresses the root cause?",
+      "choices": [
+        "Bound the cache by total cost in bytes, refuse oversized values, and consider not caching huge values at all",
+        "Lower the entry limit from 100,000 to 1,000 so that the cache can never hold too many large values at once, whatever their size",
+        "Increase the TTL so that statements stay cached for longer and fewer of them are reloaded",
+        "Switch the eviction policy to random, which evicts large entries as often as small ones"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "An entry-count limit does not bound memory when sizes differ by 100x: 100,000 statements would be 20 GB. Bounding the sum of costs (with oversized values refused) makes memory predictable. Lowering the count to 1,000 wastes the cache for small values; random eviction does not change how much memory the entries occupy; a longer TTL keeps big entries around longer.",
+      "ref": "unit-1-why-where-how-much.md#3-eviction-deciding-what-to-forget"
+    },
+    {
+      "id": "A3-020",
+      "type": "single",
+      "tags": [
+        "eviction",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A count-min sketch with 4 rows estimates how often each key was requested (the minimum of the key's four counters). Which statement about its estimates is correct (ignoring counter saturation and aging)?",
+      "choices": [
+        "It never over-estimates a key's count, because collisions can only lose increments from counters",
+        "Taking the maximum across rows instead of the minimum would give a tighter estimate",
+        "It is exact for keys that are not currently in the cache, since they have no entry to collide with",
+        "It never under-estimates a key's count, because collisions can only inflate counters"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Every increment adds to one counter in each row, and other keys that collide add to the same counters, so each counter is at least the true count; the minimum of four counters is still at least the true count and is the least inflated. It is not exact (collisions), taking the maximum would pick the most inflated counter, and it tracks keys regardless of whether they are in the cache.",
+      "ref": "unit-1-why-where-how-much.md#3-eviction-deciding-what-to-forget"
+    },
+    {
+      "id": "A3-021",
+      "type": "single",
+      "tags": [
+        "eviction"
+      ],
+      "difficulty": 2,
+      "prompt": "A TinyLFU-style cache is full. A candidate key has an estimated frequency of 3 and the least-recently-used resident has an estimated frequency of 3. What does the admission rule do?",
+      "choices": [
+        "It admits the candidate and evicts the resident, because the newest entry is preferred on ties",
+        "It admits the candidate and keeps the resident too, by growing the cache by one entry",
+        "It evicts a randomly chosen third entry and admits the candidate in the freed slot",
+        "It rejects the candidate: a tie keeps the incumbent, and only a strictly higher frequency wins"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The rule is Estimate(candidate) > Estimate(victim). With ties the cache keeps the incumbent, which avoids churn from equally (un)popular keys and is what makes one-hit wonders lose to residents with at least as many hits. Admitting on a tie turns the filter into plain LRU on low-frequency traffic; the cache does not grow; and the filter only ever compares with the victim chosen by the base policy.",
+      "ref": "unit-1-why-where-how-much.md#3-eviction-deciding-what-to-forget"
+    },
+    {
+      "id": "A3-022",
+      "type": "single",
+      "tags": [
+        "eviction",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "Why do you watch the AGE of evicted entries as well as the eviction rate?",
+      "choices": [
+        "Young evicted entries show that the TTL is configured too long for the data being cached",
+        "Old evicted entries mean the cache is working perfectly, so there is nothing at all to tune or to watch in the eviction metrics",
+        "Evicting entries younger than their TTL means memory, not expiry, is limiting the cache, so it is too small",
+        "The age of the evicted entries tells you which eviction policy the cache is actually using"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "If the cache evicts entries well before their TTL would have expired, capacity is binding and the hit ratio is being paid for in memory. Old evictions mean the entries had lived most of their useful life. A TTL that is too long would show as entries expiring rarely and staleness complaints, not as young evictions. The age does not identify the policy.",
+      "ref": "unit-1-why-where-how-much.md#3-eviction-deciding-what-to-forget"
+    },
+    {
+      "id": "A3-023",
+      "type": "numeric",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Account popularity is Zipf-like with exponent 1 over N = 10 million accounts. An ideal cache holding the C = 100,000 most popular accounts hits with probability H(C)/H(N), where H(n) is approximately ln(n) + 0.577. Roughly what hit ratio is that, as a percentage?",
+      "value": 72,
+      "tolerance": 0.06,
+      "unit": "%",
+      "explanation": "H(10^5) = ln(10^5) + 0.577 = 11.51 + 0.58 = 12.09. H(10^7) = 16.12 + 0.58 = 16.70. Ratio = 0.724, so about 72%. Each 10x of cache adds only about 13 points here (59% at 10k, 72% at 100k, 86% at 1M): the curve is logarithmic in size.",
+      "ref": "unit-1-why-where-how-much.md#4-sizing-a-cache-from-hit-rate-math"
+    },
+    {
+      "id": "A3-024",
+      "type": "numeric",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 1,
+      "prompt": "A service does 10,000 requests per second. Raising the cache hit ratio from 95% to 99% reduces the load on the database by what factor?",
+      "value": 5,
+      "tolerance": 0.05,
+      "unit": "x",
+      "explanation": "Database load is Q * (1 - h): 10,000 * 0.05 = 500 req/s at 95% versus 10,000 * 0.01 = 100 req/s at 99%. 500 / 100 = 5. Always reason in miss ratio: four points of hit ratio is a 5x cut in backend load.",
+      "ref": "unit-1-why-where-how-much.md#4-sizing-a-cache-from-hit-rate-math"
+    },
+    {
+      "id": "A3-025",
+      "type": "numeric",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A page issues 20 independent cache lookups, each with a 99% hit ratio. What percentage of page loads see no miss at all?",
+      "value": 82,
+      "tolerance": 0.05,
+      "unit": "%",
+      "explanation": "P(no miss) = h^k = 0.99^20 = 0.818, about 82%. At 95% it would be 0.95^20 = 36%, so 64% of pages would include at least one backend round trip. Fan-out turns small miss rates into large page-level effects.",
+      "ref": "unit-1-why-where-how-much.md#4-sizing-a-cache-from-hit-rate-math"
+    },
+    {
+      "id": "A3-026",
+      "type": "single",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "What does the reuse distance of a request measure, and how does it relate to an LRU cache?",
+      "choices": [
+        "The number of bytes between a key and its neighbour in memory; it determines how fragmented the cache is",
+        "The number of distinct keys accessed since the previous access to the same key; an LRU of capacity C hits when it is below C",
+        "The time since the key was last written; an LRU cache hits whenever that is less than the TTL",
+        "The number of requests, repeats included, since the previous access to the same key; an LRU hits whenever it is below 1,000 requests"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Reuse (stack) distance counts DISTINCT intervening keys; an LRU cache of capacity C holds the C most recently used keys, so it hits exactly the accesses whose distance is below C. That makes the whole hit-ratio-versus-size curve computable from one pass over a trace. Counting raw requests rather than distinct keys is wrong (repeats do not push a key down further), write time and TTL concern freshness, and memory adjacency is unrelated.",
+      "ref": "unit-1-why-where-how-much.md#4-sizing-a-cache-from-hit-rate-math"
+    },
+    {
+      "id": "A3-027",
+      "type": "single",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "Last quarter the team doubled the Redis memory from 8 GB to 16 GB and the hit ratio rose from 90% to 91.2%. Finance now asks to halve it. What is the best way to decide?",
+      "choices": [
+        "Replay a key trace at several cache sizes, read off the hit-ratio curve, and price the extra misses against the memory saved",
+        "Double it again to see whether the curve eventually flattens out at a hit ratio close to 100%, then decide",
+        "Keep it as it is, because a hit ratio of 90% is the standard target that every production cache should reach",
+        "Halve it, since the last doubling showed that memory barely matters for the hit ratio of this particular workload at any size"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The curve is concave and workload-specific; the move from 8 to 16 GB sat on the flat part, but halving may fall off a cliff if 8 GB is near the knee. Measure the curve (trace replay or reuse-distance analysis), convert the extra misses into database or vendor cost, and decide. Extrapolating from one flat segment can be badly wrong, there is no universal hit-ratio target, and doubling again just spends more money on the flat part.",
+      "ref": "unit-1-why-where-how-much.md#4-sizing-a-cache-from-hit-rate-math"
+    },
+    {
+      "id": "A3-028",
+      "type": "numeric",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "You plan to cache 2,000,000 hot account summaries. Each has a 1,500-byte serialised payload and about 100 bytes of key and per-entry overhead in the cache. Allow 30% headroom for fragmentation and snapshots. Roughly how many GB (decimal) of memory should you provision?",
+      "value": 4.2,
+      "tolerance": 0.1,
+      "unit": "GB",
+      "explanation": "2,000,000 * (1,500 + 100) B = 3.2 GB; * 1.3 headroom = 4.16 GB, about 4.2 GB. Replicas add availability, not capacity, so this is per shard of the data, and the real limit may be ops/s or bandwidth rather than memory.",
+      "ref": "unit-1-why-where-how-much.md#4-sizing-a-cache-from-hit-rate-math"
+    },
+    {
+      "id": "A3-029",
+      "type": "single",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A load test with uniformly random keys over the whole key space shows a cache hit ratio of about 10% with a cache sized at 10% of the keys. The team concludes caching is not worth it. What is wrong with the test?",
+      "choices": [
+        "The test should have used a much smaller cache, because small caches show the benefit more clearly",
+        "Hit ratio cannot be measured in a load test, only in production, so the 10% figure is meaningless",
+        "Uniform keys always produce a 100% hit ratio, so the 10% result must come from a bug in the test",
+        "Uniform keys have no skew or reuse, so any cache can only hit about its share of the key space"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Caches mine skew. With no key more popular than another, the best a cache of 10% of the keys can do is hit about 10% of the time. Production access is heavy-tailed, so the load test must reproduce realistic popularity and reuse (a replayed trace or a Zipf generator). Uniform keys do not give 100% hits, hit ratio is measurable, and shrinking the cache would only reduce the hit ratio further.",
+      "ref": "unit-1-why-where-how-much.md#4-sizing-a-cache-from-hit-rate-math"
+    },
+    {
+      "id": "A3-030",
+      "type": "single",
+      "tags": [
+        "invalidation",
+        "consistency",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "Cache-aside with a 60 s TTL. A transfer service commits the new balance and then deletes the cache key. Some members still see the old balance for the whole minute. Which interleaving explains it?",
+      "choices": [
+        "The writer deletes the key, and then the database commit fails and rolls back the new balance",
+        "Two readers miss at the same moment, and both of them load the same new balance from the database",
+        "A reader selects the old balance, the writer commits and deletes the absent key, then the reader sets the old balance",
+        "The cache evicts the key just before the writer deletes it, so the delete finds nothing to remove"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The reader's read happened before the commit but its SET lands after the writer's delete, so the stale value is written over the invalidation and lives until the TTL: the stale-set race. A failed commit would leave the old value correct. Two readers loading the same new value is a harmless duplicate load (a stampede concern). An eviction before the delete makes the delete a no-op but does not put an old value back.",
+      "ref": "unit-2-correctness.md#5-invalidation-and-ttl-strategy"
+    },
+    {
+      "id": "A3-031",
+      "type": "single",
+      "tags": [
+        "invalidation",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "A developer 'fixes' the stale-set race by deleting the cache key BEFORE the database update instead of after. What happens?",
+      "choices": [
+        "Nothing changes at all: the relative order of the delete and the update does not matter",
+        "Readers now always miss, so every reader is forced to read fresh data directly from the database after the delete",
+        "The window widens: a reader can read the old row after the delete and set it after the update commits",
+        "The race disappears, because the key is already gone before the update reaches the database"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "With delete-then-update, any reader that misses after the delete but before the commit reads the OLD row, and its SET can land after the commit: the exposed window now spans the writer's whole transaction. The key being absent does not make a reader's read fresh, because the database still holds the old value until commit. The order matters in both directions.",
+      "ref": "unit-2-correctness.md#5-invalidation-and-ttl-strategy"
+    },
+    {
+      "id": "A3-032",
+      "type": "multi",
+      "tags": [
+        "invalidation",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL mechanisms that prevent a stale cache fill from outliving a newer write to the source of truth.",
+      "choices": [
+        "Leases: the miss returns a token that an invalidation voids, and the fill must present a valid token",
+        "Updating the cache in place from each writer instead of deleting",
+        "Setting a one-hour TTL so entries are refreshed regularly",
+        "Versioned compare-and-set on the cache entry, with the writer leaving a tombstone instead of just deleting"
+      ],
+      "answer": [
+        0,
+        3
+      ],
+      "explanation": "Versioned CAS (with tombstones so the version survives a delete) and leases both let the cache refuse a fill that carries older information than the latest write. Updating in place has its own ordering race between concurrent writers. A long TTL does the opposite of bounding staleness. (A short TTL bounds the damage but does not prevent the stale fill.)",
+      "ref": "unit-2-correctness.md#5-invalidation-and-ttl-strategy"
+    },
+    {
+      "id": "A3-033",
+      "type": "single",
+      "tags": [
+        "invalidation",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "A cache uses version numbers: a fill is accepted only if its version is newer than what is stored. The writer invalidates by deleting the key. A slow reader then fills an old version successfully. Why?",
+      "choices": [
+        "The delete resets all versions in the cache to the newest value it has seen from any writer",
+        "Version numbers cannot be compared across processes, so every fill that arrives from another process is accepted without a check",
+        "After the delete there is no stored version to compare with, so the old fill finds an empty key and succeeds",
+        "The reader's fill bypasses the version check whenever the key is stored as a hash"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A delete erases the version metadata along with the value, so the stale fill is the 'first' write. The fix is a tombstone: the writer stores (new version, deleted) with a short TTL, and fills are compared against it. Version numbers compare fine across processes, a delete does not change any other key's versions, and there is no bypass for hash keys.",
+      "ref": "unit-2-correctness.md#5-invalidation-and-ttl-strategy"
+    },
+    {
+      "id": "A3-034",
+      "type": "single",
+      "tags": [
+        "invalidation",
+        "consistency",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "A service fills its cache from an asynchronous read replica that is typically 300 ms behind the primary. Delete-on-write invalidation runs correctly. Why can the cache still hold stale data for a full TTL?",
+      "choices": [
+        "Replicas return values from the future, which then expire early in the cache",
+        "Delete commands are ignored by caches while a replica is lagging behind the primary, so the invalidation is never applied at all",
+        "Replicas cannot be used for reads under any circumstances in a system that has a cache in front of it",
+        "The fill can read a value that was already stale at the replica and store it after the invalidation has run"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The invalidation fires after the primary commits; a miss that immediately follows can read the replica before the change has replicated and cache the pre-change value, and nothing will invalidate it again. Fill from the primary, check a version against the cache entry, or accept TTL-bounded staleness. Reading from replicas is common and fine when the staleness is understood; deletes are not ignored; and replicas lag, they never run ahead.",
+      "ref": "unit-2-correctness.md#5-invalidation-and-ttl-strategy"
+    },
+    {
+      "id": "A3-035",
+      "type": "single",
+      "tags": [
+        "invalidation",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "What does a 'generation key' (for example 'catalog:{tenant}:v{gen}:{sku}', with gen read from a small always-fresh place) buy you?",
+      "choices": [
+        "Protection against hot keys, because each generation spreads the traffic over new names",
+        "Invalidating every key for the tenant with one write: bump gen, and old keys are never read again",
+        "Automatic eviction of the old keys at the moment gen changes, which frees their memory immediately",
+        "Strong consistency between the cache and the database for every read that goes through the cache"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Bumping the generation makes all old keys unreachable at the cost of one small write, and a stale reader writes to an old key nobody reads. It is not strong consistency (readers must still learn the new gen), the old entries stay in memory until TTL or eviction, and it does nothing about hot keys.",
+      "ref": "unit-2-correctness.md#5-invalidation-and-ttl-strategy"
+    },
+    {
+      "id": "A3-036",
+      "type": "numeric",
+      "tags": [
+        "invalidation",
+        "consistency",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A member's browser caches an API response for 30 s, a CDN for 60 s, an in-process L1 for 5 s and the Redis L2 for 20 s. Ignoring invalidation, what is the worst-case age in seconds of the data that the member can be shown?",
+      "value": 115,
+      "tolerance": 0.05,
+      "unit": "s",
+      "explanation": "Staleness composes additively across layers because an entry can be nearly expired in one layer when the next layer copies it: 30 + 60 + 5 + 20 = 115 s. Budget freshness across the whole path, not per layer.",
+      "ref": "unit-2-correctness.md#5-invalidation-and-ttl-strategy"
+    },
+    {
+      "id": "A3-037",
+      "type": "single",
+      "tags": [
+        "invalidation",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Why derive invalidations from the database change log (outbox or CDC) instead of issuing the DELETE in the request handler after the commit?",
+      "choices": [
+        "Change logs are always faster than direct deletes issued from the request handler",
+        "It makes the TTL unnecessary, because every change is guaranteed to reach the cache",
+        "It prevents readers from ever seeing the old value, because the log is applied atomically with the commit and the cache delete",
+        "The handler can crash between commit and delete, and other writers such as batch jobs never run the handler"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A post-commit delete in the handler is a dual write: a crash in the gap leaves a stale entry, and writes made by other paths skip it. Deriving invalidations from committed changes covers both. It is not faster, the TTL is still needed as a backstop for lost or delayed messages, and a reader can still see the old value until the consumer applies the delete.",
+      "ref": "unit-2-correctness.md#5-invalidation-and-ttl-strategy"
+    },
+    {
+      "id": "A3-038",
+      "type": "single",
+      "tags": [
+        "invalidation",
+        "caching"
+      ],
+      "difficulty": 3,
+      "prompt": "Which statement about 'delayed double delete' (delete after the write, and again after a short delay) is correct?",
+      "choices": [
+        "It narrows the window, but only if the delay exceeds every reader's read-to-set gap, which nothing guarantees",
+        "It guarantees that no stale value can ever be cached after the write, because the second delete removes any late fill",
+        "It makes the cache linearizable with respect to the database, because deletes are applied in commit order",
+        "It is equivalent to a lease, because the second delete voids every fill that was started before the write"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The second delete catches a stale fill that landed before it, provided the fill was in flight less than the delay. A paused reader (GC, a retry, a slow network) can still fill after both deletes. It is a timing assumption, not a guarantee; a lease or version check is a different mechanism that makes the cache refuse the stale fill; and caches with deletes are not linearizable regardless.",
+      "ref": "unit-2-correctness.md#5-invalidation-and-ttl-strategy"
+    },
+    {
+      "id": "A3-039",
+      "type": "numeric",
+      "tags": [
+        "stampede",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A hot key is read 8,000 times per second. Rebuilding it takes 1.2 seconds and there is no request coalescing. Roughly how many rebuilds start at each expiry, assuming the entry is absent for the whole 1.2 s?",
+      "value": 9600,
+      "tolerance": 0.1,
+      "unit": "rebuilds",
+      "explanation": "Every request that arrives while the entry is absent starts its own rebuild: lambda * T = 8,000 * 1.2 = 9,600. Worse, the rebuild time itself grows with that load, so the window lengthens and the number grows: a positive feedback loop.",
+      "ref": "unit-2-correctness.md#6-stampedes-thundering-herds-dogpiles-and-synchronized-expiry"
+    },
+    {
+      "id": "A3-040",
+      "type": "single",
+      "tags": [
+        "stampede"
+      ],
+      "difficulty": 2,
+      "prompt": "Raising the TTL of a hot key from 60 seconds to 1 hour in order to reduce stampedes mainly achieves what?",
+      "choices": [
+        "Stampedes are eliminated entirely, because the key almost never expires during normal operation",
+        "Expiries become 60x rarer but each one is the same size, and staleness grows 60x",
+        "Nothing at all: the TTL has no effect on how often an entry expires",
+        "Each stampede becomes 60x smaller, because fewer requests arrive per expiry"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A longer TTL changes how often the cliff occurs, not how big it is, and it lengthens the staleness. Stampedes are not eliminated (cold starts, flushes and the next expiry remain), and the size of an individual stampede depends on traffic and rebuild time, not on the TTL.",
+      "ref": "unit-2-correctness.md#6-stampedes-thundering-herds-dogpiles-and-synchronized-expiry"
+    },
+    {
+      "id": "A3-041",
+      "type": "single",
+      "tags": [
+        "stampede",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "A fleet has 40 application instances, each with per-process singleflight for a hot key that is read constantly. How many loader executions does one expiry cause across the fleet, and what is the standard way to get it lower?",
+      "choices": [
+        "Zero, because the singleflight group keeps the previous value and serves it to everyone",
+        "About 8,000, one for each request that arrived while the entry was absent",
+        "About 40, one per instance; serve stale while one refresher works, or take a fleet-wide lease",
+        "Exactly 1, because a singleflight group is shared by every process that uses the same key name"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Singleflight collapses concurrent calls inside one process; the 40 processes do not know about each other, so each loads once. 40 loads is usually fine; to approach 1, serve stale (a single background refresher) or take a short lease across the fleet. Singleflight is not global, it does not remove coalescing's per-process nature, and it does not remember results between calls.",
+      "ref": "unit-2-correctness.md#6-stampedes-thundering-herds-dogpiles-and-synchronized-expiry"
+    },
+    {
+      "id": "A3-042",
+      "type": "single",
+      "tags": [
+        "stampede",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "A homemade singleflight runs the shared load under the FIRST caller's context. Fifty callers are waiting when that first caller's mobile client times out and cancels. What happens?",
+      "choices": [
+        "The load continues in the background and every waiter, including the first one, still gets the loaded value",
+        "The group deadlocks, because a cancelled context cannot be released while other callers are still waiting on it",
+        "The shared load is cancelled, and all fifty waiters get a cancellation error for a request they never cancelled",
+        "Only the first caller fails; the other waiters keep waiting and then receive the loaded value after a short delay"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Cancelling the leader's context cancels the load that everyone shares, and its error fans out to all waiters. The correct design runs the load under a context detached from any single caller (keeping values), cancels it only when the LAST waiter has gone, and lets each waiter return on its own context. The load does not keep running under a cancelled context, and there is no deadlock.",
+      "ref": "unit-2-correctness.md#6-stampedes-thundering-herds-dogpiles-and-synchronized-expiry"
+    },
+    {
+      "id": "A3-043",
+      "type": "multi",
+      "tags": [
+        "stampede",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL properties that a production-grade singleflight (request coalescing) group should have.",
+      "choices": [
+        "A panic in the loader is delivered to every waiter instead of leaving them blocked",
+        "A slow load for one key never blocks loads for other keys",
+        "Results are remembered after the call so later calls for the key return immediately",
+        "Concurrent calls for the same key share one execution and one result"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "Collapsing concurrent calls, isolating keys from each other and releasing waiters on panic are the core of the contract. Remembering results is the cache's job: a group that kept results (and errors) would be a cache with no TTL and no invalidation.",
+      "ref": "unit-2-correctness.md#6-stampedes-thundering-herds-dogpiles-and-synchronized-expiry"
+    },
+    {
+      "id": "A3-044",
+      "type": "single",
+      "tags": [
+        "stampede",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "With stale-while-revalidate (TTL 10 s, stale window 20 s), twenty requests arrive 15 seconds after the entry was loaded, while the database is slow. What should the cache do?",
+      "choices": [
+        "Return an error to all twenty requests, because the entry is past its freshness window",
+        "Start twenty background refreshes so that at least one of them finishes quickly",
+        "Block all twenty requests until a background refresh completes, so nobody sees old data",
+        "Return the stale value to all twenty immediately and start exactly one background refresh"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Between TTL and TTL + stale window the value may still be served; the first reader triggers one refresh and nobody waits. Blocking defeats the purpose, erroring is only right past the stale window, and twenty refreshes recreate the stampede.",
+      "ref": "unit-2-correctness.md#6-stampedes-thundering-herds-dogpiles-and-synchronized-expiry"
+    },
+    {
+      "id": "A3-045",
+      "type": "single",
+      "tags": [
+        "stampede",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "Probabilistic early expiration (XFetch) makes each hit recompute with a probability that rises as expiry approaches. What happens to a key that is read about once a minute?",
+      "choices": [
+        "It is refreshed every second regardless of traffic, because the early-refresh check runs on a background timer",
+        "It is refreshed much earlier than hot keys, because it has the most remaining time before its expiry arrives",
+        "It almost never refreshes early and just expires normally, which is right: early refresh pays off only for hot keys",
+        "It can never be cached, because its probability of an early refresh is exactly zero at every moment"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The early-refresh trigger fires with probability about exp(-remaining / (delta * beta)), where delta is the recompute time, so for a cold key the chance that any request lands in the dangerous window is small and the key just expires. For hot keys (lambda * delta much larger than 1) someone almost surely refreshes before expiry. It does not run on a timer, it does not favour cold keys, and it does not prevent caching.",
+      "ref": "unit-2-correctness.md#6-stampedes-thundering-herds-dogpiles-and-synchronized-expiry"
+    },
+    {
+      "id": "A3-046",
+      "type": "numeric",
+      "tags": [
+        "stampede",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A deploy warms 50,000 keys with an identical 300-second TTL. You add jitter that spreads their expiry evenly over a 60-second window. About how many reloads per second does the database see during that window?",
+      "value": 833,
+      "tolerance": 0.1,
+      "unit": "loads/s",
+      "explanation": "50,000 keys / 60 s = 833 loads per second, instead of 50,000 in one second with no jitter. Size the spread as keys / seconds against what the database can absorb; stale-while-revalidate then hides what is left.",
+      "ref": "unit-2-correctness.md#6-stampedes-thundering-herds-dogpiles-and-synchronized-expiry"
+    },
+    {
+      "id": "A3-047",
+      "type": "single",
+      "tags": [
+        "stampede",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "Which statement about TTL jitter (effective TTL = TTL * (1 - J * random)) is correct?",
+      "choices": [
+        "It spreads entries written together over a window; shortening the TTL keeps the freshness promise intact",
+        "It makes keys expire in the same order in which they were written, so the oldest entries are reloaded first",
+        "It prevents a single hot key from stampeding at its own expiry, because the expiry time becomes random",
+        "It extends each TTL by a random amount, which improves freshness for the average read of every key"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Shortening by a random fraction de-synchronises mass expiry without ever exceeding the promised staleness. Extending TTLs would break the promise, a single hot key still has one expiry to stampede at (use coalescing or early refresh), and jitter randomises the order rather than preserving it.",
+      "ref": "unit-2-correctness.md#6-stampedes-thundering-herds-dogpiles-and-synchronized-expiry"
+    },
+    {
+      "id": "A3-048",
+      "type": "single",
+      "tags": [
+        "stampede",
+        "caching"
+      ],
+      "difficulty": 3,
+      "prompt": "A loader helper caches ANY error, including context cancellation, for ErrorTTL = 30 s to protect the database. One impatient client times out during a slow query. What is the consequence?",
+      "choices": [
+        "The database is protected and the key is retried every second until it succeeds",
+        "Every caller asking for that key gets 'context canceled' for 30 seconds, although the key is fine",
+        "Only the client that timed out sees the error, because the error is attached to its request",
+        "Nothing: caching errors is always safe, because the error is the correct answer for that moment"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A cancellation says something about one caller's patience, not about the key, so caching it turns a single slow client into a 30-second outage for everyone. Cache definitive answers (found, not found) and, with care, short-lived failures of the source, but never context errors. Error caching is not always safe; the key is not retried during the TTL; and the error is served to everyone, not only the client that timed out.",
+      "ref": "unit-2-correctness.md#6-stampedes-thundering-herds-dogpiles-and-synchronized-expiry"
+    },
+    {
+      "id": "A3-049",
+      "type": "single",
+      "tags": [
+        "caching",
+        "stampede"
+      ],
+      "difficulty": 2,
+      "prompt": "A partner job requests 5,000 account IDs per second that no longer exist. Every request misses the cache and the database finds no row. What does a short negative cache do, and what must the 'create account' path do to keep it safe?",
+      "choices": [
+        "Replace the database lookup with a Bloom filter, which never reports an ID as present when it is not",
+        "Cache not-found responses in the CDN with a one-hour TTL so that the whole fleet benefits from them",
+        "Remember 'not found' for tens of seconds, and delete the negative entry when the account is created",
+        "Store the empty result forever; creating accounts is rare, so the create path needs no special action"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Short TTL negative entries absorb repeated lookups, and clearing the entry on create closes the gap where a new account would be invisible until the TTL. Caching 'not found' forever (or for an hour) would hide accounts created later. A Bloom filter has false positives (never false negatives), so it does not replace the lookup for IDs that pass it.",
+      "ref": "unit-2-correctness.md#7-negative-caching-cache-penetration-and-hot-keys"
+    },
+    {
+      "id": "A3-050",
+      "type": "single",
+      "tags": [
+        "caching",
+        "stampede"
+      ],
+      "difficulty": 3,
+      "prompt": "During a 5-second database blip, a loader returns timeout errors, and the cache stores every error as a negative 'not found' entry for 60 seconds. What do members experience?",
+      "choices": [
+        "Members see stale balances for 5 seconds only, matching the length of the database blip",
+        "Accounts that exist appear missing for up to a minute after the database has recovered",
+        "Nothing visible, because negative entries expire together with the incident that caused them",
+        "Slower responses while the entries live, but every answer that is returned is still correct"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A timeout is not evidence that a record is absent. Caching it as 'not found' hides real records for the negative TTL, long after recovery. Only a definitive not-found from the source is cacheable as absent. The entries do not expire when the blip ends, and the problem is wrong answers rather than slow ones.",
+      "ref": "unit-2-correctness.md#7-negative-caching-cache-penetration-and-hot-keys"
+    },
+    {
+      "id": "A3-051",
+      "type": "numeric",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "You want a Bloom filter over 10 million existing account IDs with about a 1% false-positive rate, which needs about 9.6 bits per key. How many megabytes does the bit array take (1 MB = 10^6 bytes)?",
+      "value": 12,
+      "tolerance": 0.1,
+      "unit": "MB",
+      "explanation": "10,000,000 keys * 9.6 bits = 96,000,000 bits = 12,000,000 bytes = 12 MB, with about 7 hash functions. For 0.1% it would be about 14.4 bits per key (18 MB).",
+      "ref": "unit-2-correctness.md#7-negative-caching-cache-penetration-and-hot-keys"
+    },
+    {
+      "id": "A3-052",
+      "type": "single",
+      "tags": [
+        "caching",
+        "hot-key"
+      ],
+      "difficulty": 2,
+      "prompt": "A Bloom filter of existing account IDs sits in front of the cache. It answers 'not present' for an ID. What can you conclude?",
+      "choices": [
+        "The ID was never added, so you can answer 'not found' without touching the cache or the database",
+        "The ID was deleted from the database at some point, so the filter has already removed its bits from the bit array",
+        "The filter is full and has to be rebuilt before it can give any further answers",
+        "The ID might exist, so a lookup against the cache and the database is still required"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A Bloom filter has no false negatives for keys that were added, so 'not present' is definitive (provided new IDs are added before they become visible). 'Present' is the ambiguous answer: a few percent are false positives. A Bloom filter says nothing about deletions (it cannot remove keys) or about being full.",
+      "ref": "unit-2-correctness.md#7-negative-caching-cache-penetration-and-hot-keys"
+    },
+    {
+      "id": "A3-053",
+      "type": "numeric",
+      "tags": [
+        "hot-key",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "One hot rate-table key is read from 60 application instances. Each instance keeps it in an in-process L1 cache with a 2-second TTL, refreshing from Redis on expiry. About how many reads per second reach Redis for that key, regardless of member traffic?",
+      "value": 30,
+      "tolerance": 0.1,
+      "unit": "reads/s",
+      "explanation": "Each instance fetches the key at most once per TTL: 60 instances / 2 s = 30 reads per second, instead of 120,000 member reads. The cost is up to 2 s of extra staleness and the need for invalidation to reach every instance.",
+      "ref": "unit-2-correctness.md#7-negative-caching-cache-penetration-and-hot-keys"
+    },
+    {
+      "id": "A3-054",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "One key receives 120,000 reads per second and the Redis node that owns it is saturated. Adding more nodes to the cluster does not help. Why?",
+      "choices": [
+        "The key maps to exactly one shard, so more nodes only rebalance the other keys",
+        "New nodes need to be warmed with data before they are allowed to serve any key at all",
+        "Every extra node would have to replicate each write synchronously, which cancels the gain",
+        "Redis clusters cannot be extended beyond three nodes, so the cluster is already at its limit"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Hash partitioning places a key on one shard, so the hot key's traffic cannot be spread by adding shards. Change how it is served: an in-process L1, copies under several key names, a CDN for public data, or a smaller value. Clusters have no such node limit, warming concerns new shards' cold start rather than this key, and replication cost is not the reason.",
+      "ref": "unit-2-correctness.md#7-negative-caching-cache-penetration-and-hot-keys"
+    },
+    {
+      "id": "A3-055",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "caching"
+      ],
+      "difficulty": 3,
+      "prompt": "Which statement about splitting a hot key into N copies (key#0 ... key#N-1) on different shards is correct?",
+      "choices": [
+        "It is the best option for data that changes every second, because writes to the copies are cheap",
+        "Reads spread over the shards, but every write or invalidation must update all N copies, which can briefly differ",
+        "Writes are spread across the copies, which also reduces the write load on each individual shard and on the database behind them",
+        "It removes the need for any invalidation, since each copy is refreshed independently of the others"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Reads can pick a random copy, but a write has to reach all N or readers may see different versions. It therefore suits read-mostly, rarely changing data like rate tables. Writes are multiplied by N rather than spread, invalidation is more complicated, not absent, and rapidly changing data pays the fan-out constantly (prefer a short L1 TTL there).",
+      "ref": "unit-2-correctness.md#7-negative-caching-cache-penetration-and-hot-keys"
+    },
+    {
+      "id": "A3-056",
+      "type": "single",
+      "tags": [
+        "caching",
+        "hot-key"
+      ],
+      "difficulty": 3,
+      "prompt": "An attacker requests millions of unique nonexistent keys. Your negative cache stores each for 30 seconds in the same Redis as real data. What is the main risk?",
+      "choices": [
+        "The negative entries make the TTLs of the real entries shorter",
+        "Redis refuses to store an entry that has no value, so the lookups simply fail",
+        "The negative entries consume memory and push out real, valuable entries",
+        "The negative entries are served to other members as if they were real accounts"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Negative entries are attacker-controlled input; unique keys fill the cache and push out useful entries. Give them a separate small budget (prefix with its own limit, or an instance), a short TTL, or use a Bloom filter for high-cardinality probing. They do not change other entries' TTLs, Redis stores sentinel markers happily, and a properly distinguished negative marker is never served as data.",
+      "ref": "unit-2-correctness.md#7-negative-caching-cache-penetration-and-hot-keys"
+    },
+    {
+      "id": "A3-057",
+      "type": "single",
+      "tags": [
+        "multitenancy",
+        "caching",
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "Two credit unions both number accounts from 100000. The cache key for account summaries is 'summary:{accountNumber}' in a cache shared by all tenants. What happens, and which signal would show it?",
+      "choices": [
+        "The cache rejects the second tenant's fill because the key already exists, and that tenant gets an error",
+        "Redis namespaces the keys by client connection automatically, so each tenant has a private keyspace",
+        "Both tenants always miss, so the hit ratio drops sharply and the dashboards show the problem at once",
+        "Whichever tenant filled the entry first is served to the other; only a tenant check on read would reveal it"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Cache keys are global within a cache, so colliding natural IDs alias to one entry and one tenant reads the other's data as a normal hit. Performance metrics cannot see it. Include the tenant in the key (built in one place) and verify the tenant stored in the value on every read, alarming on mismatch. A cache does not reject fills for existing keys, collisions produce hits rather than misses, and Redis does not namespace by connection.",
+      "ref": "unit-2-correctness.md#8-consistency-with-the-source-of-truth-tenancy-and-operating-the-cache"
+    },
+    {
+      "id": "A3-058",
+      "type": "single",
+      "tags": [
+        "multitenancy",
+        "caching"
+      ],
+      "difficulty": 3,
+      "prompt": "A key function builds tenant + ':' + entity + ':' + id. Which pair of inputs collides?",
+      "choices": [
+        "tenant 'a', entity 'summary', id 'c' versus tenant 'A', entity 'summary', id 'c'",
+        "tenant 'a', entity 'summary', id '1' versus tenant 'a', entity 'summary', id '2'",
+        "tenant 'a', entity 'summary', id 'c' versus tenant 'a', entity 'history', id 'c'",
+        "tenant 'a:b', entity 'summary', id 'c' versus tenant 'a', entity 'b:summary', id 'c'"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Joining with a character that can also appear inside a component is ambiguous: both inputs produce 'a:b:summary:c'. Length-prefixing or escaping each component makes the encoding injective. The other pairs differ in a component without involving the separator (and case differences are distinct strings), so they build different keys.",
+      "ref": "unit-2-correctness.md#8-consistency-with-the-source-of-truth-tenancy-and-operating-the-cache"
+    },
+    {
+      "id": "A3-059",
+      "type": "multi",
+      "tags": [
+        "consistency",
+        "caching",
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL data items that are reasonable to serve from a cache within an explicit staleness budget.",
+      "choices": [
+        "The 'card is frozen' flag used to authorise a card swipe",
+        "The available balance used to approve a debit",
+        "A generated PDF statement, which is immutable once produced",
+        "A rate table that carries effective dates, with a minutes-level TTL"
+      ],
+      "answer": [
+        2,
+        3
+      ],
+      "explanation": "Immutable data and effective-dated reference data tolerate caching. The balance used to approve a debit and the flag used to authorise a swipe are decision inputs where a stale 'enough funds' or 'not frozen' costs money: read the source of truth. A cache may serve the display copies of those same values.",
+      "ref": "unit-2-correctness.md#8-consistency-with-the-source-of-truth-tenancy-and-operating-the-cache"
+    },
+    {
+      "id": "A3-060",
+      "type": "single",
+      "tags": [
+        "security",
+        "consistency",
+        "caching"
+      ],
+      "difficulty": 3,
+      "prompt": "A platform caches 'canTransfer(userId)' decisions for one hour. A member's device is reported stolen and access is revoked at 10:00. What is the best redesign?",
+      "choices": [
+        "Keep the one-hour decision cache, but clear it every night and after each deployment so old decisions do not accumulate",
+        "Cache the inputs (roles, entitlements) briefly, evaluate every time, push revocation, and re-check the source for risky actions",
+        "Increase the TTL further so that far fewer policy lookups reach the entitlement service during peak hours",
+        "Store the decision at the CDN so that it is served faster and closer to the member's device"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A decision depends on subject, action, resource and context, and a cached 'allowed' outlives revocation by its TTL. Cache the slow-to-fetch inputs, evaluate decisions fresh, make revocation push through to the caches, and verify authoritatively for money-moving actions. Clearing nightly or lengthening the TTL makes exposure worse, and a CDN is the wrong place for personalised authorisation.",
+      "ref": "unit-2-correctness.md#8-consistency-with-the-source-of-truth-tenancy-and-operating-the-cache"
+    },
+    {
+      "id": "A3-061",
+      "type": "single",
+      "tags": [
+        "security",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Which is the best statement of the 'fail-safe direction' rule for caching a card's frozen flag?",
+      "choices": [
+        "Cache both states with the same TTL, because a wrong answer costs the same in either direction",
+        "Cache only where staleness fails safe: a stale 'frozen' inconveniences, a stale 'not frozen' allows fraud",
+        "Never cache even the display copy, because any copy of a card's state is unsafe to show to the member",
+        "Cache 'not frozen' for longer than 'frozen', because it is by far the more common state of a card"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "When the two kinds of error have different costs, only cache the direction whose errors fail safe, and keep the decision path on the system of record. Staleness here is not symmetric. The display can be cached with a budget. Caching 'not frozen' longer maximises the dangerous error.",
+      "ref": "unit-2-correctness.md#8-consistency-with-the-source-of-truth-tenancy-and-operating-the-cache"
+    },
+    {
+      "id": "A3-062",
+      "type": "single",
+      "tags": [
+        "caching",
+        "replication"
+      ],
+      "difficulty": 3,
+      "prompt": "Redis (asynchronous replication) fails over to a replica that was two seconds behind. Afterwards some members see balances that were already updated and some deleted keys reappear. What is the right way to think about the failover?",
+      "choices": [
+        "Only keys that have no TTL are affected, because keys with a TTL expire on their own and are then refreshed from the source",
+        "The promoted replica is authoritative, so its contents are correct by definition",
+        "Treat it as a partial flush: entries may be stale or resurrected, so bump a generation or cap TTLs",
+        "Redis guarantees that no data is lost on failover whenever the WAIT command is used"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "An asynchronous replica misses the newest writes, including deletes (invalidations), so stale and resurrected entries can exist after promotion. Invalidate by generation, shorten TTLs for a while, or reload critical keys. A replica is only as current as replication allowed; WAIT can reduce but not eliminate loss; and entries with TTLs are affected as well.",
+      "ref": "unit-2-correctness.md#8-consistency-with-the-source-of-truth-tenancy-and-operating-the-cache"
+    },
+    {
+      "id": "A3-063",
+      "type": "single",
+      "tags": [
+        "caching",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "The cache cluster becomes slow (not down) during a network incident. The app waits 5 seconds on every cache call, and the whole API times out. What is the better design?",
+      "choices": [
+        "Retry each failed cache call five times with a short pause before giving up on the request as a whole",
+        "Short cache timeouts (tens of ms) with a circuit breaker, falling back to the source with load protection or stale data",
+        "Remove the cache from the request path permanently, since it has proven unreliable under network stress",
+        "Raise the cache timeout to 30 seconds so that slow calls eventually succeed instead of being abandoned too early"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A cache is an optimisation, so waiting longer for it than for the source defeats its purpose. Fail fast, trip a breaker, and go to the source with a concurrency limit or serve stale. Longer timeouts and retries multiply the damage; removing the cache loses its benefit and still leaves the source exposed.",
+      "ref": "unit-2-correctness.md#8-consistency-with-the-source-of-truth-tenancy-and-operating-the-cache"
+    },
+    {
+      "id": "A3-064",
+      "type": "single",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Which metric would you add specifically so that a cross-tenant cache leak shows up on a dashboard?",
+      "choices": [
+        "A counter of reads where the value's stored tenant differs from the requesting tenant",
+        "The eviction rate of the cache cluster, with an alert on any sudden increase over the baseline",
+        "The p99 latency of cache GET calls, broken down by key prefix and by calling service",
+        "The overall cache hit ratio, measured across the fleet and averaged over one-minute windows"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A leak is a correctness failure that looks like a perfectly healthy hit. A verification counter (value tenant vs request tenant) is the signal that distinguishes them. Hit ratio, latency and eviction rate are performance signals: all three would look normal during a leak.",
+      "ref": "unit-2-correctness.md#8-consistency-with-the-source-of-truth-tenancy-and-operating-the-cache"
+    },
+    {
+      "id": "A3-065",
+      "type": "single",
+      "tags": [
+        "caching",
+        "security",
+        "multitenancy"
+      ],
+      "difficulty": 3,
+      "prompt": "A cache key contains the member's email address and national ID so that lookups are 'self-describing'. What is the problem?",
+      "choices": [
+        "Redis does not accept keys longer than 16 bytes, so lookups with such self-describing keys would fail",
+        "Self-describing keys make eviction slower because the policy has to parse each key before it can rank it",
+        "Email addresses and national IDs cannot be hashed, so the keys would be impossible to protect afterwards",
+        "Keys show up in logs, MONITOR output, replicas and snapshots, so personal data leaks and retention rules break"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Cache keys are visible in many operational channels and persisted in replicas and snapshots, so PII should never be in them: use opaque identifiers or keyed hashes. Redis allows keys far longer than 16 bytes, anything can be hashed, and key content does not materially affect eviction speed.",
+      "ref": "unit-2-correctness.md#8-consistency-with-the-source-of-truth-tenancy-and-operating-the-cache"
+    },
+    {
+      "id": "A3-066",
+      "type": "single",
+      "tags": [
+        "caching",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "A product manager wants the home screen to show 'balance as of 10:14:07'. How does this relate to caching?",
+      "choices": [
+        "It guarantees that the displayed balance is correct to the second at all times for every member",
+        "It lets the team skip invalidation entirely, since the member can see for themselves how old the value is",
+        "It makes caching unnecessary, because the balance can then always be fetched on demand without delay",
+        "It makes the staleness explicit, turning a hidden cache artifact into a stated product behaviour"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "When the source is slow or rate-limited, bounded staleness is a feature; exposing an as-of time lets members and support interpret it correctly. It does not remove the need for the cache, for invalidation after the member's own writes, or for the staleness budget, and it does not make the displayed value exact.",
+      "ref": "unit-2-correctness.md#8-consistency-with-the-source-of-truth-tenancy-and-operating-the-cache"
+    }
+  ]
+}

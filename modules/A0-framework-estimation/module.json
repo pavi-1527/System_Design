@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "A0",
+  "slug": "framework-estimation",
+  "title": "Interview framework & estimation",
+  "track": "A",
+  "status": "written",
+  "core": true,
+  "summary": "Run the 45-minute design interview as derived reasoning (requirements → estimates → API → data → HLD → deep dives → trade-offs), produce decision-driving back-of-envelope numbers fast, and defend every choice with claim → why here → cost → when it flips.",
+  "hours": {"core": 10, "stretch": 2, "total": 12},
+  "prerequisites": [],
+  "gate": {"requires": ["quiz", "lab", "design", "teachback"]},
+  "paths": {
+    "dir": "modules/A0-framework-estimation",
+    "readme": "modules/A0-framework-estimation/README.md",
+    "quiz": "modules/A0-framework-estimation/quiz.json",
+    "design_exercise": "modules/A0-framework-estimation/design-exercise.md",
+    "teachback": "modules/A0-framework-estimation/teachback.md",
+    "lab": "labs/a0",
+    "solution": "solutions/a0"
+  },
+  "units": [
+    {"n": 1, "title": "The 45-minute framework", "file": "modules/A0-framework-estimation/unit-1-interview-framework.md", "hours": {"core": 5, "stretch": 1}, "labs": []},
+    {"n": 2, "title": "Back-of-envelope estimation", "file": "modules/A0-framework-estimation/unit-2-estimation.md", "hours": {"core": 5, "stretch": 1}, "labs": ["capacity"]}
+  ],
+  "labs": [
+    {"package": "capacity", "title": "Capacity-modelling package (QPS, storage, bandwidth, servers, Little's law, availability, estimate sheet) + break-it compound-error estimator", "unit": 2, "core": true}
+  ],
+  "outcomes": [
+    {"text": "Derive the 45-minute framework (phases, time budget, three checkpoints) from what the interviewer must assess and from the dependency chain between design decisions, and adapt it when the interviewer changes the rules.", "core": true},
+    {"text": "Scope a design prompt in ≤ 6 minutes: core functional requirements, non-functional requirements each with a number, and an explicit out-of-scope list.", "core": true},
+    {"text": "Estimate average/peak QPS with a read/write split, storage with retention and replication, bandwidth, cache size for a hot set, server count with utilisation and spares, Little's-law concurrency, and serial/parallel availability within ±25% without a calculator.", "core": true},
+    {"text": "Choose whether a design needs partitioning, caching, a CDN, async buffering or redundancy by comparing each estimate with a known threshold, and say when the answer flips.", "core": true},
+    {"text": "Defend a design decision with claim → why here → cost → when it flips, and answer the six-rung probe ladder (failure, 10×, why not Y, how would you know, cost, migration).", "core": true},
+    {"text": "Drive the session (plan, signposts, parking lot), follow interviewer hints, and recover at the 0:10 / 0:25 / 0:40 checkpoints when behind.", "core": true},
+    {"text": "Implement a tested capacity-modelling package in Go and quantify how small estimation shortcuts compound into a wrong design.", "core": true},
+    {"text": "Estimate a design's monthly cost and identify the dominant cost line.", "core": false},
+    {"text": "Adapt the framework to LLD and machine-coding rounds.", "core": false}
+  ]
+}

@@ -1,0 +1,831 @@
+{
+  "module": "A0",
+  "title": "Interview framework & estimation",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "A0-001",
+      "type": "single",
+      "tags": [
+        "framework"
+      ],
+      "difficulty": 2,
+      "prompt": "In the 45-minute framework, why must estimation come before the data model?",
+      "choices": [
+        "Interviewers expect that order by convention, so deviating costs points",
+        "Estimation is quicker than data modelling, so it's better to get it out of the way",
+        "The data model needs the API's status codes, which come out of estimation",
+        "The numbers decide whether the data fits on one node, which store fits the access rates, and whether partitioning is needed"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Correct: the biggest data-model choices (single node vs partitioned, which store, which key) depend on volume and rates, so without numbers you pick a store by habit. 'Convention' is wrong because the order is derived from dependencies, not ritual, and interviewers accept deviations you can justify. Status codes come from the API, not from estimation. Duration is irrelevant: the order is about what each decision needs as input.",
+      "ref": "unit-1-interview-framework.md#1-what-is-being-scored-and-why-the-order-is-forced"
+    },
+    {
+      "id": "A0-002",
+      "type": "single",
+      "tags": [
+        "framework",
+        "time-management"
+      ],
+      "difficulty": 2,
+      "prompt": "It's 0:24. You've finished the API and data model, and the high-level design isn't started. What's the best move?",
+      "choices": [
+        "Skip the HLD and go straight to deep dives, since they carry the most senior signal",
+        "Apologise for being behind and ask the interviewer which part of the HLD to skip",
+        "Draw the HLD at full detail, however long it takes, because coverage matters most",
+        "Announce you'll sketch the end-to-end flow quickly, draw a thin skeleton of both happy paths in about 3 minutes, and defer detail"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Correct: the 0:25 checkpoint is a complete end-to-end diagram, and a thin but complete skeleton hits it while keeping time for depth. Full detail now pushes the deep dives out of the session. Skipping the HLD leaves nothing to dive into, so design coverage scores below the bar. Apologising and handing the decision to the interviewer gives up ownership. Compressing is your job.",
+      "ref": "unit-1-interview-framework.md#6-driving-following-and-recovering"
+    },
+    {
+      "id": "A0-003",
+      "type": "single",
+      "tags": [
+        "framework",
+        "communication"
+      ],
+      "difficulty": 2,
+      "prompt": "At 0:12, the interviewer asks, 'How would consistent hashing work for your cache?' You know the topic well. What do you do?",
+      "choices": [
+        "Ask whether the question is important before deciding how much to say",
+        "Explain it fully, including virtual nodes, rebalancing and alternatives, because the interviewer asked",
+        "Give a 30-90 second answer, note it in a parking lot for the deep dives, and re-anchor to the data model",
+        "Say 'I'll get to that later' and carry on without answering"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Correct: a short answer shows you know it, and parking plus re-anchoring keeps you on schedule. That's driving and following at once. The full explanation is the classic failure: 10+ minutes on a tangent wrecks every later checkpoint. Refusing to answer ignores an interviewer signal ('didn't take hints'). Asking whether it's important pushes the time-management decision back to the interviewer.",
+      "ref": "unit-1-interview-framework.md#6-driving-following-and-recovering"
+    },
+    {
+      "id": "A0-004",
+      "type": "single",
+      "tags": [
+        "framework",
+        "deep-dive"
+      ],
+      "difficulty": 2,
+      "prompt": "At 0:20 of a pastebin design, the interviewer says, 'I'm curious what happens with very popular pastes.' What's the best response?",
+      "choices": [
+        "Explain that it's out of scope because analytics were excluded",
+        "Make viral pastes the first deep dive and say so explicitly",
+        "Stop the HLD and answer in full depth immediately",
+        "Note it and continue with your own planned deep dives first"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Correct: a hint is a request for a deep dive on a rubric item, so it goes first, and saying so shows you heard it. Continuing with your own plan risks never reaching it. Answering in full depth at 0:20 breaks the 0:25 checkpoint (finish the skeleton, then dive). Viral reads are a load problem, not analytics, so calling them out of scope is wrong.",
+      "ref": "unit-1-interview-framework.md#6-driving-following-and-recovering"
+    },
+    {
+      "id": "A0-005",
+      "type": "multi",
+      "tags": [
+        "trade-offs"
+      ],
+      "difficulty": 1,
+      "prompt": "Select ALL parts of the four-part trade-off statement taught in this module.",
+      "choices": [
+        "The cost: money, latency, complexity, consistency or ops",
+        "Why here: tied to this system's requirement or number",
+        "When it flips: the condition under which you'd choose differently",
+        "The technology's popularity relative to its alternatives",
+        "The claim: the specific decision",
+        "Which well-known companies use the technology"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        4
+      ],
+      "explanation": "Claim → why here → cost → when it flips. Company adoption and popularity are not reasons that apply to this system. They're the 'it's scalable' failure in another form, and an interviewer will follow up with 'but why here?'.",
+      "ref": "unit-1-interview-framework.md#5-deep-dives-and-defending-trade-offs-025040"
+    },
+    {
+      "id": "A0-006",
+      "type": "single",
+      "tags": [
+        "trade-offs",
+        "deep-dive"
+      ],
+      "difficulty": 3,
+      "prompt": "A notification service takes ≈ 20k events/s at peak, must deliver within ≈ 30 s, and must never lose an accepted event. SMS vendors sometimes slow to 5-10 s per call. The interviewer asks, 'Why Kafka?' Which answer is best?",
+      "choices": [
+        "Kafka is the industry standard for event streaming at large companies",
+        "A durable log absorbs vendor slowdowns at ≈ 20k/s without pushing back on upstream or losing accepted events. It costs an extra system and at-least-once delivery (senders must dedupe). At a few hundred events/s I'd use an outbox table instead",
+        "Kafka is horizontally scalable and replicated, so it can't really go down",
+        "Because a database table can't be used as a queue at any scale"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Correct: it ties the claim to the numbers (20k/s, vendor slowness, the durability requirement), names the cost, and states the flip point. 'Can't go down' is false and invites a failure probe: config pushes, quorum loss and full disks all take replicated clusters down. 'Industry standard' says nothing about this system. 'A table can never be a queue' is wrong: outbox tables work well at modest rates, and that's the flip condition.",
+      "ref": "unit-1-interview-framework.md#5-deep-dives-and-defending-trade-offs-025040"
+    },
+    {
+      "id": "A0-007",
+      "type": "single",
+      "tags": [
+        "requirements"
+      ],
+      "difficulty": 1,
+      "prompt": "Which requirement is stated in a form that can drive design decisions?",
+      "choices": [
+        "The system must be highly available",
+        "p99 read latency ≤ 200 ms measured at the load balancer",
+        "The system must scale to millions",
+        "The system must be fast"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Correct: it has a percentile, a number and a measurement point, so you can check a design against it and decide on caching or locality. 'Fast' and 'highly available' have no numbers, so they can't decide anything. 'Millions' of what (users, requests per day, requests per second)? Without a unit and a rate it can't size anything.",
+      "ref": "unit-1-interview-framework.md#2-requirements-and-scope-000006"
+    },
+    {
+      "id": "A0-008",
+      "type": "single",
+      "tags": [
+        "requirements",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "For a pastebin, the interviewer says, 'You decide the scale.' What's the strongest response?",
+      "choices": [
+        "Skip estimation, since the scale is undefined",
+        "Insist the interviewer gives a number, because estimation needs real inputs",
+        "Pick a realistic number (e.g. 10M DAU, 1M pastes/day), state it, and say what you'd change at 100×",
+        "Choose 1B users so you can demonstrate sharding and global replication"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Correct: you make a reasonable assumption, state it, and show awareness of the sensitivity. That's judgement plus ownership. 1B users for a pastebin signals you want to show off sharding, not solve the problem. Insisting on a number when the interviewer delegated the choice reads as rigid. Skipping estimation loses the quantitative-reasoning signal entirely.",
+      "ref": "unit-1-interview-framework.md#2-requirements-and-scope-000006"
+    },
+    {
+      "id": "A0-009",
+      "type": "multi",
+      "tags": [
+        "deep-dive"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL good sources for choosing which 2-3 deep dives to do.",
+      "choices": [
+        "A topic the interviewer hinted at earlier",
+        "The part of the diagram with the most boxes",
+        "The biggest number on your estimate sheet (where scale breaks first)",
+        "The component you personally know best",
+        "The subtlest correctness property (uniqueness, ordering, consistency during failover)"
+      ],
+      "answer": [
+        0,
+        2,
+        4
+      ],
+      "explanation": "Deep dives go where the risk is: the biggest number, the subtlest correctness property, and whatever the interviewer pointed at. 'What you know best' is the URL-shortener failure: depth where there's no risk. Box count measures drawing, not risk. A single external dependency can be the riskiest part.",
+      "ref": "unit-1-interview-framework.md#5-deep-dives-and-defending-trade-offs-025040"
+    },
+    {
+      "id": "A0-010",
+      "type": "multi",
+      "tags": [
+        "deep-dive",
+        "trade-offs"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL questions that belong to the six-rung probe ladder you prepare for each important decision.",
+      "choices": [
+        "What happens if it fails (crash, slow, partitioned)?",
+        "How do you migrate to it or roll it out?",
+        "How would you know it's working (metrics, alerts)?",
+        "What's the exact configuration file syntax?",
+        "Who originally invented the technology?",
+        "What changes at 10× or 100×?"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        5
+      ],
+      "explanation": "The six rungs are: what if it fails; what at 10×/100×; why not Y; how would you know; what does it cost; how do you migrate. Config syntax and history are trivia. They don't test judgement, and interviewers rarely ask them in a design round.",
+      "ref": "unit-1-interview-framework.md#5-deep-dives-and-defending-trade-offs-025040"
+    },
+    {
+      "id": "A0-011",
+      "type": "single",
+      "tags": [
+        "hld",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "In the pastebin write path, the app stores the paste content in object storage and a metadata row in Postgres. Why write the blob first and the row second?",
+      "choices": [
+        "Postgres requires the blob key to exist before it accepts the row",
+        "Writing the row first would violate the idempotency key",
+        "A crash between the two leaves an orphan blob, which users can't see and a reaper can delete, instead of a row pointing at missing content",
+        "Object storage is faster than Postgres, so doing it first lowers latency"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Correct: ordering decides which partial state a crash can leave. An orphan blob is harmless, and a reaper can find blobs that no row points to. A row without its blob is a user-visible error. The latency of each step doesn't change the total for sequential writes. Postgres knows nothing about the object store, so it enforces no such constraint. Idempotency is about client retries, and it's independent of the internal order.",
+      "ref": "unit-1-interview-framework.md#4-high-level-design-016025"
+    },
+    {
+      "id": "A0-012",
+      "type": "single",
+      "tags": [
+        "hld"
+      ],
+      "difficulty": 2,
+      "prompt": "A candidate's pastebin HLD has: load balancer, app servers, Postgres, object storage, Redis, Kafka and Elasticsearch. Search and analytics were explicitly out of scope, and peak writes are ≈ 35/s with synchronous creates. The interviewer says it's over-engineered. Which box has the weakest justification?",
+      "choices": [
+        "Object storage",
+        "The load balancer",
+        "Elasticsearch",
+        "Postgres"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Correct: search was out of scope, so Elasticsearch serves no requirement. (Kafka is hard to justify at 35 synchronous writes/s too; it would be the next box to question.) Postgres serves the point lookups, the uniqueness check and the expiry scan. Object storage holds ≈ 7.3 TB of content cheaply and durably. The load balancer is needed for ≥ 2 app servers and the 99.9% availability target.",
+      "ref": "unit-1-interview-framework.md#4-high-level-design-016025"
+    },
+    {
+      "id": "A0-013",
+      "type": "single",
+      "tags": [
+        "api",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "Mobile clients retry POST /v1/pastes on timeout, and some users end up with two pastes and two different links. What's the best fix?",
+      "choices": [
+        "Clients send an Idempotency-Key header, and the server returns the original result for a retry with the same key",
+        "Increase the server timeout so clients retry less often",
+        "Deduplicate by hashing the paste content and returning the existing paste for identical content",
+        "Switch to PUT with a server-generated id"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Correct: an idempotency key identifies the logical operation, so a retry returns the first result (Stripe's API uses this pattern). Longer timeouts reduce retries but don't remove them, because networks still drop responses. Content hashing merges different users' identical pastes, which leaks the other paste's metadata and breaks per-paste expiry, and it can't tell a deliberate repeat from a retry. PUT is only idempotent if the client chooses the id. With a server-generated id, the retry problem stays.",
+      "ref": "unit-1-interview-framework.md#3-estimation-api-and-data-model-006016"
+    },
+    {
+      "id": "A0-014",
+      "type": "single",
+      "tags": [
+        "framework"
+      ],
+      "difficulty": 1,
+      "prompt": "What are the three checkpoints of the 45-minute framework?",
+      "choices": [
+        "Numbers on the board by 0:10; a complete end-to-end diagram by 0:25; stop drilling at 0:40",
+        "Requirements done by 0:15; API by 0:20; deep dives start at 0:35",
+        "Data model by 0:05; HLD by 0:15; failure modes by 0:30",
+        "Diagram by 0:10; numbers by 0:25; trade-offs by 0:45"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The checkpoints follow the dependency chain: numbers by 0:10 (so boxes can be justified), a complete diagram by 0:25 (coverage before depth), and stop drilling at 0:40 (leave time for bottlenecks and failure modes). The other options either put requirements too late (15 minutes is a third of the interview), draw before estimating, or squeeze the deep dives to nothing.",
+      "ref": "unit-1-interview-framework.md#1-what-is-being-scored-and-why-the-order-is-forced"
+    },
+    {
+      "id": "A0-015",
+      "type": "single",
+      "tags": [
+        "framework",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Two candidates are at 0:08 of a pastebin interview. Which statement shows the senior bar for the estimation phase?",
+      "choices": [
+        "'Let's assume it's big, so we'll need sharding and a CDN from the start.'",
+        "'I'll skip numbers; experience tells me what's needed.'",
+        "'Peak writes ≈ 35/s, so one Postgres primary with ≈ 100× headroom and no sharding. Content ≈ 7 TB, so object storage. This isn't a scale problem; the risk is in IDs and expiry.'",
+        "'Storage is 3.65 TB per year, 18 TB over 5 years, 36 TB over 10 years, and bandwidth is 1.16 MB/s average...'"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Correct: only decision numbers, each followed by the decision, and a conclusion that steers the deep dives. Computing everything without using it is the mid-level failure: time spent, no decisions. 'Assume it's big' is a guess presented as a conclusion. Skipping numbers loses the quantitative signal and leaves every box unjustified.",
+      "ref": "unit-1-interview-framework.md#7-putting-it-together-pastebin-in-45-minutes"
+    },
+    {
+      "id": "A0-016",
+      "type": "multi",
+      "tags": [
+        "framework",
+        "time-management"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL items you should NEVER cut when you're behind schedule.",
+      "choices": [
+        "A third deep dive",
+        "Detailed request/response fields for every endpoint",
+        "A complete end-to-end happy path",
+        "Final failure modes and bottlenecks",
+        "The numbers that drive decisions"
+      ],
+      "answer": [
+        2,
+        3,
+        4
+      ],
+      "explanation": "Cut in order: API field detail, secondary endpoints, data-model detail beyond keys and indexes, a third deep dive. Never cut decision numbers (they justify the design), the complete happy path (coverage), or the final failure modes (judgement). Field-level API detail and a third dive are exactly what to compress first.",
+      "ref": "unit-1-interview-framework.md#6-driving-following-and-recovering"
+    },
+    {
+      "id": "A0-017",
+      "type": "single",
+      "tags": [
+        "lld",
+        "framework"
+      ],
+      "difficulty": 2,
+      "prompt": "In a 90-minute machine-coding round, what replaces the HLD's 'complete end-to-end diagram by 0:25' checkpoint?",
+      "choices": [
+        "All features coded, untested, by 0:60",
+        "A complete class diagram with all patterns by about 0:40",
+        "A finished UML sequence diagram for every use case by 0:30",
+        "A runnable vertical slice (one command working end to end) by about 0:40"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Correct: in machine coding the working program is the main deliverable, so the coverage checkpoint becomes a walking skeleton that runs. Full class diagrams up front delay the first run and over-design. Coding everything untested risks a demo that doesn't work. Sequence diagrams for every use case are the over-design failure from §8.",
+      "ref": "unit-1-interview-framework.md#8-stretch-the-same-framework-in-lld-and-machine-coding-rounds"
+    },
+    {
+      "id": "A0-018",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "qps"
+      ],
+      "difficulty": 1,
+      "prompt": "A social app has 500M DAU, and each user performs 4 actions per day on average. What's the AVERAGE request rate? Answer in requests/second.",
+      "value": 23148.1,
+      "tolerance": 0.25,
+      "unit": "req/s",
+      "explanation": "Requests/day = 5 × 10^8 × 4 = 2 × 10^9. Divide by 86,400 s/day: 2 × 10^9 / 8.64 × 10^4 ≈ 23,148 req/s. Napkin: 2 × 10^9 / 10^5 = 20,000, plus ≈ 15% ≈ 23,000. A common slip is dividing by 3,600 (per hour, not per day), which gives 24× too much.",
+      "ref": "unit-2-estimation.md#2-qps-average-peak-and-the-readwrite-split"
+    },
+    {
+      "id": "A0-019",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "qps"
+      ],
+      "difficulty": 2,
+      "prompt": "A photo app has 80M DAU, each uploading 3 photos per day, with a peak factor of 3. What's the PEAK upload (write) rate? Answer in writes/second.",
+      "value": 8333.3,
+      "tolerance": 0.25,
+      "unit": "writes/s",
+      "explanation": "Writes/day = 8 × 10^7 × 3 = 2.4 × 10^8. Average = 2.4 × 10^8 / 86,400 ≈ 2,778/s. Peak = × 3 ≈ 8,333/s. That's near the top of one relational primary's ≈ 1k-10k TPS, so you'd plan the partition key now. Forgetting the peak factor gives ≈ 2,800/s, a 3× under-estimate.",
+      "ref": "unit-2-estimation.md#2-qps-average-peak-and-the-readwrite-split"
+    },
+    {
+      "id": "A0-020",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "An event log ingests 20M events/day, each 5 KB. Events are kept for 365 days on a self-managed store with replication factor 3. How much raw storage is needed (no index overhead)? Answer in TB (decimal, 1 TB = 10^12 bytes).",
+      "value": 109.5,
+      "tolerance": 0.25,
+      "unit": "TB",
+      "explanation": "Per day: 2 × 10^7 × 5 × 10^3 B = 10^11 B = 100 GB. × 365 = 36.5 TB. × 3 replicas = 109.5 TB. Forgetting replication gives 36.5 TB (3× under). Forgetting retention gives 0.3 TB, the classic 'per day' answer that's off by 365×.",
+      "ref": "unit-2-estimation.md#3-storage-and-bandwidth"
+    },
+    {
+      "id": "A0-021",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "bandwidth"
+      ],
+      "difficulty": 2,
+      "prompt": "A feed service serves 40,000 reads/s at peak, each response ≈ 50 KB. What's the peak egress in gigabits per second?",
+      "value": 16.0,
+      "tolerance": 0.25,
+      "unit": "Gbps",
+      "explanation": "Bytes/s = 4 × 10^4 × 5 × 10^4 = 2 × 10^9 B/s = 2 GB/s. × 8 bits/byte = 16 Gbps. Answering 2 is the bits-vs-bytes error (8× under). That's more than one 10 Gbps NIC, so you'd plan several origin servers or, more likely, a CDN.",
+      "ref": "unit-2-estimation.md#3-storage-and-bandwidth"
+    },
+    {
+      "id": "A0-022",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "Peak traffic is 18,000 req/s. One app server handles 1,500 req/s (measured). You plan for 60% utilisation at peak and N+2 spares. How many servers?",
+      "value": 22,
+      "tolerance": 0.25,
+      "unit": "servers",
+      "explanation": "Usable per server = 1,500 × 0.6 = 900 req/s. 18,000 / 900 = 20 → 20 servers, + 2 spares = 22. Using 100% utilisation gives 12 + 2 = 14, which leaves no headroom for spikes or a failed peer. Forgetting spares gives 20.",
+      "ref": "unit-2-estimation.md#5-servers-and-littles-law"
+    },
+    {
+      "id": "A0-023",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "concurrency"
+      ],
+      "difficulty": 1,
+      "prompt": "A service receives 3,000 req/s, and each request spends 120 ms in the service on average. How many requests are in flight on average? (Little's law)",
+      "value": 360,
+      "tolerance": 0.25,
+      "unit": "requests",
+      "explanation": "L = λ × W = 3,000/s × 0.12 s = 360. A common slip is using 120 instead of 0.12 (milliseconds vs seconds), which gives 360,000. Keep the units: req/s × s = requests.",
+      "ref": "unit-2-estimation.md#5-servers-and-littles-law"
+    },
+    {
+      "id": "A0-024",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "availability"
+      ],
+      "difficulty": 2,
+      "prompt": "A request must pass through 4 services in series, each with 99.9% availability (independent failures). How many hours of downtime per year does the chain imply? Use a 365-day year.",
+      "value": 34.9875,
+      "tolerance": 0.25,
+      "unit": "hours",
+      "explanation": "Chain availability = 0.999^4 ≈ 0.996006. Unavailability ≈ 0.003994. × 8,760 h ≈ 35 h/year. One service alone is ≈ 8.8 h/year. Serial dependencies multiply availability, so downtime grows roughly with the number of hops. Answering ≈ 8.8 h treats the chain as one service.",
+      "ref": "unit-2-estimation.md#6-latency-budgets-and-availability-math"
+    },
+    {
+      "id": "A0-025",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "availability"
+      ],
+      "difficulty": 2,
+      "prompt": "A lookup can be served by either of two independent replicas, each 99.5% available. Assuming independent failures, how many minutes per year are BOTH down? Use a 365-day year (525,600 minutes).",
+      "value": 13.14,
+      "tolerance": 0.25,
+      "unit": "minutes",
+      "explanation": "P(both down) = 0.005 × 0.005 = 2.5 × 10^-5. × 525,600 min ≈ 13.1 min/year. One replica alone is down 0.005 × 525,600 ≈ 2,628 min ≈ 44 h. In practice, shared deploys, config and region make failures correlated, so the real number is worse than 13 minutes.",
+      "ref": "unit-2-estimation.md#6-latency-budgets-and-availability-math"
+    },
+    {
+      "id": "A0-026",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "caching"
+      ],
+      "difficulty": 1,
+      "prompt": "A service handles 50M reads per day, each returning 4 KB. You size the cache to hold 20% of a day's reads. How much memory? Answer in GB (decimal).",
+      "value": 40.0,
+      "tolerance": 0.25,
+      "unit": "GB",
+      "explanation": "0.2 × 5 × 10^7 × 4 × 10^3 B = 4 × 10^10 B = 40 GB. That fits on one commodity node (≈ 128-512 GB RAM), so the cache doesn't need partitioning. This 'fraction of daily reads' method is an upper bound, because repeated reads of the same object are counted as distinct.",
+      "ref": "unit-2-estimation.md#4-cache-sizing-for-a-hot-set"
+    },
+    {
+      "id": "A0-027",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "An API serves 1,200 req/s. Each request makes 3 sequential database queries of ≈ 4 ms each. On average, how many database connections are busy? (Little's law)",
+      "value": 14.4,
+      "tolerance": 0.25,
+      "unit": "connections",
+      "explanation": "Query arrival rate λ = 1,200 × 3 = 3,600 queries/s. W = 0.004 s. L = 3,600 × 0.004 = 14.4 connections busy on average. Size the pool with headroom for peak (e.g. × 3 for peak, then a margin), and remember the total across all app instances must stay below the database's limit (Postgres defaults max_connections to 100).",
+      "ref": "unit-2-estimation.md#5-servers-and-littles-law"
+    },
+    {
+      "id": "A0-028",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "A consumer group was down and built a backlog of 3.6M events. Events keep arriving at 15,000/s, and the recovered consumers can process 25,000/s. How long until the backlog is drained? Answer in seconds.",
+      "value": 360.0,
+      "tolerance": 0.25,
+      "unit": "s",
+      "explanation": "Net drain rate = capacity − arrivals = 25,000 − 15,000 = 10,000/s. Time = 3.6 × 10^6 / 10^4 = 360 s (6 minutes). Dividing by 25,000 (144 s) ignores the events that keep arriving. Recovery time depends on spare capacity, which is one reason not to plan for 100% utilisation.",
+      "ref": "unit-2-estimation.md#5-servers-and-littles-law"
+    },
+    {
+      "id": "A0-029",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "bandwidth",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "Log collectors must receive 1.5 GB/s in total. Each collector has a 10 Gbps NIC. You plan for 60% NIC utilisation and one spare. How many collectors?",
+      "value": 3,
+      "tolerance": 0.25,
+      "unit": "collectors",
+      "explanation": "Load = 1.5 GB/s × 8 = 12 Gbps. Usable per NIC = 10 × 0.6 = 6 Gbps. 12 / 6 = 2, + 1 spare = 3. Comparing 1.5 GB/s directly with '10 G' gives 1 collector at '15%', the 8× bits-vs-bytes error from the §1 failure story.",
+      "ref": "unit-2-estimation.md#1-napkin-arithmetic-that-survives-powers-of-ten-rounding-units"
+    },
+    {
+      "id": "A0-030",
+      "type": "single",
+      "tags": [
+        "estimation"
+      ],
+      "difficulty": 1,
+      "prompt": "You approximate a day as 10^5 seconds instead of 86,400 when computing QPS from daily totals. What's the effect?",
+      "choices": [
+        "QPS comes out ≈ 16% too high",
+        "QPS comes out ≈ 14% too low",
+        "There is no effect at one significant figure",
+        "QPS comes out ≈ 16% too low"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "10^5 overstates the seconds by a factor of 1.157, so QPS = daily / seconds is multiplied by 86,400 / 100,000 = 0.864: ≈ 14% low. '16% too high' confuses the direction. '16% too low' uses the wrong ratio (1/1.157 = 0.864, i.e. −13.6%, not −15.7%). The effect is small but real, and it compounds with other shortcuts.",
+      "ref": "unit-2-estimation.md#1-napkin-arithmetic-that-survives-powers-of-ten-rounding-units"
+    },
+    {
+      "id": "A0-031",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "partitioning"
+      ],
+      "difficulty": 2,
+      "prompt": "Your estimate shows ≈ 50,000 write QPS at peak for small transactional writes. What does this number most directly decide?",
+      "choices": [
+        "Add read replicas to the existing primary",
+        "Move to larger application servers",
+        "Put a Redis cache in front of the database",
+        "The writes must be partitioned across many primaries (sharded SQL or a partitioned store)"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "One relational primary handles ≈ 1k-10k small TPS, so 50k is ≈ 5-50× over: writes must be partitioned. Read replicas scale reads, not writes, since every replica replays every write. A cache absorbs reads, and a write-back cache doesn't remove the durable write load. App-server size doesn't change the database's write ceiling.",
+      "ref": "unit-2-estimation.md#2-qps-average-peak-and-the-readwrite-split"
+    },
+    {
+      "id": "A0-032",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "storage",
+        "cost"
+      ],
+      "difficulty": 2,
+      "prompt": "You're estimating the monthly cost of 7.3 PB of photos on a managed object store (S3-class) priced per GB-month. A colleague multiplies by 3 'for replication'. Why is that wrong?",
+      "choices": [
+        "You should multiply by 2, not 3, for object storage",
+        "Object storage doesn't replicate data, so durability must be added separately",
+        "The provider's per-GB price already includes its internal redundancy; you pay for logical bytes",
+        "Replication factor only applies to compute, not storage"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Managed object storage prices logical bytes, with redundancy across zones built into the price, so × 3 triples the estimate for no reason. (For self-managed disks such as HDFS or Cassandra, × 3 is right.) Object stores do replicate internally, so 'doesn't replicate' is false. Replication is a storage concept, so the third option is backwards. '× 2' invents a factor.",
+      "ref": "unit-2-estimation.md#3-storage-and-bandwidth"
+    },
+    {
+      "id": "A0-033",
+      "type": "multi",
+      "tags": [
+        "estimation",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL omissions that make a storage estimate for a replicated database too LOW.",
+      "choices": [
+        "Using 10^5 instead of 86,400 seconds per day",
+        "Forgetting to apply the peak factor",
+        "Forgetting the retention period (multiplying only one day's data)",
+        "Forgetting index and metadata overhead",
+        "Forgetting the replication factor"
+      ],
+      "answer": [
+        2,
+        3,
+        4
+      ],
+      "explanation": "Storage = items/day × size × retention × replication × (1 + overhead), so forgetting any of the first three under-estimates it. The peak factor applies to rates (QPS, bandwidth), not to accumulated bytes. Seconds per day doesn't appear in a per-day storage calculation at all.",
+      "ref": "unit-2-estimation.md#3-storage-and-bandwidth"
+    },
+    {
+      "id": "A0-034",
+      "type": "single",
+      "tags": [
+        "caching",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "A cache in front of a database serves 40,000 reads/s. After a config change, the hit ratio drops from 95% to 90%. What happens to database read load?",
+      "choices": [
+        "It doubles, from ≈ 2,000/s to ≈ 4,000/s",
+        "It's unchanged, because the cache still serves most reads",
+        "It rises by about 5%",
+        "It rises from ≈ 38,000/s to ≈ 36,000/s"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "DB load = reads × (1 − hit ratio): 40,000 × 0.05 = 2,000/s before, 40,000 × 0.10 = 4,000/s after. The miss rate doubled, so DB load doubled. '5%' confuses hit-ratio points with load change. The third option computes cache hits, not misses. 'Unchanged' ignores that the database only ever sees misses.",
+      "ref": "unit-2-estimation.md#4-cache-sizing-for-a-hot-set"
+    },
+    {
+      "id": "A0-035",
+      "type": "single",
+      "tags": [
+        "availability"
+      ],
+      "difficulty": 3,
+      "prompt": "Two KYC vendors (each 99.5%) are used with failover, but both depend on the same data bureau, which is 99.8% available. What's the best estimate of the KYC step's availability?",
+      "choices": [
+        "≈ 99.8%: the shared bureau caps it",
+        "≈ 99.9975%: 1 − 0.005²",
+        "≈ 99.5%: the same as one vendor",
+        "≈ 99.0%: 0.995 × 0.995"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Serial(0.998, parallel(0.995, 0.995)) = 0.998 × 0.999975 ≈ 0.99798. The shared dependency is the ceiling. 99.9975% assumes independence, which the shared bureau breaks. 0.995 × 0.995 treats the vendors as serial (both required), which is the opposite of failover. 99.5% ignores the redundancy entirely.",
+      "ref": "unit-2-estimation.md#6-latency-budgets-and-availability-math"
+    },
+    {
+      "id": "A0-036",
+      "type": "numeric",
+      "tags": [
+        "latency",
+        "availability"
+      ],
+      "difficulty": 2,
+      "prompt": "A request fans out to 100 backends in parallel and waits for all of them. Each backend independently exceeds its p99 latency on 1% of calls. What percentage of requests see at least one slow backend?",
+      "value": 63.3968,
+      "tolerance": 0.25,
+      "unit": "%",
+      "explanation": "P(none slow) = 0.99^100 ≈ 0.366. P(at least one slow) ≈ 1 − 0.366 ≈ 63.4%. Answering 1% ignores fan-out. Answering 100% treats 'expected one slow call' as certainty. With wide fan-out, the tail becomes the typical case, which is why hedged requests and partial results exist.",
+      "ref": "unit-2-estimation.md#6-latency-budgets-and-availability-math"
+    },
+    {
+      "id": "A0-037",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "qps"
+      ],
+      "difficulty": 2,
+      "prompt": "A banking app gets 30% of its daily traffic in a 2-hour window on payday mornings. What's the peak factor (peak rate / daily average rate) during that window?",
+      "value": 3.6,
+      "tolerance": 0.25,
+      "unit": "×",
+      "explanation": "Peak rate = 0.3 × daily / 7,200 s. Average = daily / 86,400 s. Ratio = 0.3 × 86,400 / 7,200 = 0.3 × 12 = 3.6. The generic 'consumer 2-3×' rule would under-size this by up to 1.8×. Deriving the peak from concentration is stronger than quoting a rule of thumb.",
+      "ref": "unit-2-estimation.md#2-qps-average-peak-and-the-readwrite-split"
+    },
+    {
+      "id": "A0-038",
+      "type": "single",
+      "tags": [
+        "cost"
+      ],
+      "difficulty": 2,
+      "prompt": "A photo service's monthly estimate shows: storage ≈ $170k, internet egress ≈ $750k, 125 servers ≈ $38k. Leadership asks you to halve the bill. Where do you start?",
+      "choices": [
+        "Cut the server count by running at 90% utilisation",
+        "Reduce bytes served: CDN with committed pricing, thumbnails and modern formats for feeds, long cache lifetimes",
+        "Drop replication on the metadata database",
+        "Move all photos to an archival storage class"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Egress is ≈ 80% of the bill, so that's where to work. Fewer bytes per read and cheaper bytes via CDN commits address it directly. Servers are ≈ 4%, so squeezing them barely moves the total and removes failover headroom. Archival classes have retrieval costs and latency that don't suit photos users actively view. Dropping replication risks data loss and saves very little.",
+      "ref": "unit-2-estimation.md#8-stretch-estimating-cost"
+    },
+    {
+      "id": "A0-039",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "resilience"
+      ],
+      "difficulty": 3,
+      "prompt": "Your adapter calls an image vendor at 200 req/s through a pool of 100 connections. Normal latency is 300 ms. The vendor degrades to 5 s per call, and your whole adapter service becomes unhealthy, including endpoints that don't call this vendor. What's the best fix?",
+      "choices": [
+        "Raise the pool to 1,000 connections so it never runs out",
+        "A per-vendor bounded pool (bulkhead) plus a call timeout of ≈ 2 s, so in-flight calls cap at ≈ 400 and excess requests fail fast",
+        "Add more adapter instances behind the load balancer",
+        "Add automatic retries on vendor timeouts"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Little's law: at 5 s, 200 × 5 = 1,000 requests in flight. A timeout caps W (L ≤ 200 × 2 = 400), and a bulkhead stops the slow vendor from starving other endpoints. A bigger pool moves the pile-up into memory and the vendor. Retries add load to an already-slow dependency. More instances spread the same 1,000 stuck requests around without bounding them.",
+      "ref": "unit-2-estimation.md#5-servers-and-littles-law"
+    },
+    {
+      "id": "A0-040",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "framework"
+      ],
+      "difficulty": 2,
+      "prompt": "You have 4 minutes to estimate a chat app with 200M DAU sending ≈ 20 messages/day each. Which number should you compute FIRST?",
+      "choices": [
+        "Storage over 10 years, broken down per year",
+        "The average size of an emoji in UTF-8",
+        "The number of characters needed for message IDs",
+        "Peak message write QPS: it decides whether one primary is enough or writes must be partitioned"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "≈ 4 × 10^9 messages/day ≈ 46k/s average, ≈ 93k/s at 2× peak: far over one primary, so partitioning is the first design decision and the first deep dive. ID length matters, but it doesn't change the architecture. Year-by-year storage is detail that doesn't change the decision. Emoji size is noise next to message overhead.",
+      "ref": "unit-2-estimation.md#7-the-estimate-sheet-which-numbers-matter-compound-errors-and-the-drill"
+    },
+    {
+      "id": "A0-041",
+      "type": "single",
+      "tags": [
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A teammate's estimator uses 10^5 s/day, divides byte sizes by 8 'to convert bits to bytes' (they were already bytes), and forgets replication (×3). For the PEAK EGRESS line, by roughly what factor is their estimate wrong?",
+      "choices": [
+        "≈ 9× too low (0.864 × 1/8)",
+        "≈ 3× too low",
+        "≈ 8× too high",
+        "≈ 14% too low"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Egress = peak QPS × bytes. The 10^5 shortcut makes QPS 0.864×, and the bogus /8 makes bytes 1/8×, so the product is 0.108×, ≈ 9.3× too low. Replication doesn't affect egress (it affects storage), so '3×' applies to the wrong line. The /8 makes the estimate smaller, not larger. '14%' is only the seconds-per-day part. This compounding is the lesson of the lab's break-it exercise.",
+      "ref": "unit-2-estimation.md#7-the-estimate-sheet-which-numbers-matter-compound-errors-and-the-drill"
+    },
+    {
+      "id": "A0-042",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "A fleet of 7 servers carries 3,500 req/s at peak. One server dies. What's the load on each remaining server, in req/s?",
+      "value": 583.3333,
+      "tolerance": 0.25,
+      "unit": "req/s",
+      "explanation": "3,500 / 6 ≈ 583 req/s per server. If each was measured at 1,000 req/s, that's ≈ 58%, still under the measured limit. That's what the 60% planning target and the +1 spare are for. Answering 500 forgets that the dead server's share moves to the others.",
+      "ref": "unit-2-estimation.md#5-servers-and-littles-law"
+    },
+    {
+      "id": "A0-043",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "bandwidth"
+      ],
+      "difficulty": 1,
+      "prompt": "Network link speeds are usually quoted in ___, while object sizes and disk throughput are quoted in ___.",
+      "choices": [
+        "bits per second; bits",
+        "bytes per second; bytes",
+        "bytes per second; bits",
+        "bits per second; bytes"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "NICs and links are sold in bits per second (10 Gbps ≈ 1.25 GB/s). Storage and payload sizes are in bytes. The other combinations are exactly the confusion behind the 8× error: always multiply bytes/s by 8 before comparing with a link.",
+      "ref": "unit-2-estimation.md#1-napkin-arithmetic-that-survives-powers-of-ten-rounding-units"
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "id": "C9",
+  "slug": "payments-ledger",
+  "title": "Case study: payments and ledger",
+  "track": "C",
+  "status": "written",
+  "core": true,
+  "summary": "Payments and ledger: requirements and estimation, API and data model, double-entry postings with holds and reversals, concurrency and hot accounts, idempotency end to end across the processor boundary, unknown outcomes, reconciliation and audit, with a ledger lab.",
+  "hours": {
+    "core": 7,
+    "stretch": 2,
+    "total": 9
+  },
+  "prerequisites": [
+    "A2",
+    "A5",
+    "A6",
+    "A7",
+    "A9"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/C9-payments-ledger",
+    "readme": "modules/C9-payments-ledger/README.md",
+    "quiz": "modules/C9-payments-ledger/quiz.json",
+    "design_exercise": "modules/C9-payments-ledger/design-exercise.md",
+    "teachback": "modules/C9-payments-ledger/teachback.md",
+    "lab": "labs/c9",
+    "solution": "solutions/c9"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Guided design: requirements, estimation, API and data model, high-level design",
+      "file": "modules/C9-payments-ledger/unit-1-guided-design.md",
+      "hours": {
+        "core": 3.5,
+        "stretch": 0.5
+      },
+      "labs": []
+    },
+    {
+      "n": 2,
+      "title": "Deep dives: the ledger core and concurrency, idempotency across the processor boundary, reconciliation and audit; money, currencies, PCI and sharding (STRETCH)",
+      "file": "modules/C9-payments-ledger/unit-2-deep-dives.md",
+      "hours": {
+        "core": 3.5,
+        "stretch": 1.5
+      },
+      "labs": [
+        "ledger"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "ledger",
+      "title": "Double-entry ledger: balanced idempotent postings, no-negative available balance under concurrency, holds with capture, void and lazy expiry, reversals, audit and reconciliation",
+      "unit": 2,
+      "core": true
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Scope a payments and ledger system in six minutes: the clarifying questions whose answers change the design (money movements, system of record, external parties and settlement, overdraft rules, authorisation budget, volume, currencies, audit and tenancy), non-functional requirements with numbers, and the invariants a nightly job can check.",
+      "core": true
+    },
+    {
+      "text": "Estimate postings per second (average and peak), the write rate on a hot house account against the per-row lock bound, unknown outcomes per day, journal storage with retention and replication, and reconciliation volume, and tie each number to a decision.",
+      "core": true
+    },
+    {
+      "text": "Design the API (an idempotency key per member intent, integer minor units with a currency, 201 for internal transfers and 202 for processor-backed ones, idempotent inbound processor calls and webhooks) and a data model with an append-only journal, a balance projection maintained in the same transaction, holds, and workflow state kept separate from postings.",
+      "core": true
+    },
+    {
+      "text": "Draw the high-level design with the card authorisation, clearing, settlement and withdrawal paths traced, justify every box, and say which state must be strongly consistent and which may be eventual.",
+      "core": true
+    },
+    {
+      "text": "Explain double-entry postings, holds and available balance, reversals instead of edits, and the concurrency control that enforces the no-negative rule (row locks in sorted order, conditional updates, serializable, single writer), and relieve hot accounts with append-only legs, sub-accounts or aggregation.",
+      "core": true
+    },
+    {
+      "text": "Design idempotency end to end: a key per business fact at every hop (request, workflow, posting step, processor call, webhook event, file line), timeouts as unknown outcomes resolved by status query and reconciliation, the outbox, and the withdrawal saga with its pivot.",
+      "core": true
+    },
+    {
+      "text": "Design reconciliation (three-way against the processor report and the bank statement, matching on references, break types, timing differences, suspense with aging) and audit (balances recomputed from the journal, a hash-chained and anchored audit stream, maker-checker for manual postings).",
+      "core": true
+    },
+    {
+      "text": "Implement the ledger (labs/c9/ledger): balanced multi-leg postings, idempotency with replay and key-reuse rejection under concurrent duplicates, no-negative available balance, holds with partial capture, void and lazy expiry, reversals, Audit and Reconcile, passing under -race.",
+      "core": true
+    },
+    {
+      "text": "Represent money correctly (minor units, deterministic allocation, one rounding step), post currency conversions through FX position accounts, keep card data out of most systems with tokenisation, and move money across ledger shards with a clearing-account saga.",
+      "core": false
+    }
+  ]
+}

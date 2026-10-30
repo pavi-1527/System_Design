@@ -1,0 +1,1090 @@
+{
+  "module": "B0",
+  "title": "Go concurrency for interviews",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "B0-001",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "goroutines"
+      ],
+      "difficulty": 1,
+      "prompt": "What does this program print?\n\npackage main\nimport \"fmt\"\nfunc main() {\n\tgo fmt.Println(\"hello\")\n}",
+      "choices": [
+        "Almost always nothing",
+        "Always \"hello\"",
+        "\"hello\" twice",
+        "It fails to compile: go needs a func literal"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "main returning ends the process; it does not wait for other goroutines, and `go` only makes the call runnable. So it almost always prints nothing (in principle it could print, which is worse: schedule-dependent). \"Always hello\" assumes goroutines run immediately or main waits; neither is true. Nothing prints twice. `go f(args)` with any function call is valid syntax, so it compiles.",
+      "ref": "unit-1-primitives.md#1-goroutines-and-the-scheduler"
+    },
+    {
+      "id": "B0-002",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "goroutines",
+        "scheduler"
+      ],
+      "difficulty": 2,
+      "prompt": "Built with Go 1.24:\n\nruntime.GOMAXPROCS(1)\ngo func() { for {} }()\ntime.Sleep(10 * time.Millisecond)\nfmt.Println(\"done\")\n\nWhat happens?",
+      "choices": [
+        "It prints done",
+        "It hangs forever because the spinning goroutine never yields",
+        "It panics: busy loop detected",
+        "fatal error: all goroutines are asleep - deadlock!"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Since Go 1.14 goroutines are asynchronously preemptible: sysmon interrupts a goroutine that has run ≈10 ms without yielding, so main gets the single P back and prints done. Hanging was the pre-1.14 behaviour (no cooperative preemption point in an empty loop). The runtime has no 'busy loop' panic. The deadlock detector needs every goroutine blocked; a spinning goroutine is running, not blocked.",
+      "ref": "unit-1-primitives.md#1-goroutines-and-the-scheduler"
+    },
+    {
+      "id": "B0-003",
+      "type": "numeric",
+      "tags": [
+        "concurrency",
+        "goroutines",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "You start 100,000 goroutines that each block forever on a channel receive (modern Go, 64-bit). Roughly how much extra memory does the process use? Answer in MB.",
+      "value": 250,
+      "tolerance": 0.6,
+      "unit": "MB",
+      "explanation": "Minimum stack is 2,048 bytes, plus the runtime's g struct and bookkeeping: measured ≈ 205 MB of stack and ≈ 267 MB of total Sys for 100k blocked goroutines (≈ 2–2.6 KB each). 100,000 × ≈ 2.5 KB ≈ 250 MB. Answers near 100 GB use the 1 MB-per-thread intuition; answers of a few MB forget that each goroutine has its own stack.",
+      "ref": "unit-1-primitives.md#1-goroutines-and-the-scheduler"
+    },
+    {
+      "id": "B0-004",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "goroutines",
+        "scheduler"
+      ],
+      "difficulty": 3,
+      "prompt": "200 goroutines each call syscall.Nanosleep for 1 s (a blocking syscall). In a second run, they each call time.Sleep(time.Second) instead. On a 4-CPU box, roughly how many OS threads does each run create?",
+      "choices": [
+        "≈ 200 for Nanosleep, ≈ a handful for time.Sleep",
+        "≈ 4 for both: GOMAXPROCS caps threads",
+        "≈ 200 for both: every goroutine needs a thread while sleeping",
+        "≈ a handful for Nanosleep, ≈ 200 for time.Sleep"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A blocking syscall takes its M (thread) into the kernel; the runtime hands the P to another M, creating one per blocked goroutine (measured: 203 threads). time.Sleep parks the goroutine in the runtime, which needs no thread (measured: 6). GOMAXPROCS bounds threads running Go code, not threads blocked in syscalls, so '≈ 4 for both' is wrong. Sleeping goroutines don't hold threads, so '≈ 200 for both' is wrong. The last option reverses the two.",
+      "ref": "unit-1-primitives.md#1-goroutines-and-the-scheduler"
+    },
+    {
+      "id": "B0-005",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "channels"
+      ],
+      "difficulty": 1,
+      "prompt": "What does this print?\n\nch := make(chan int, 2)\nch <- 1\nch <- 2\nclose(ch)\nfor v := range ch { fmt.Print(v) }\nv, ok := <-ch\nfmt.Println(v, ok)",
+      "choices": [
+        "120 false",
+        "12 then panic: receive from closed channel",
+        "0 false (close discards buffered values)",
+        "12 then blocks forever"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Close does not discard buffered values: range yields 1 and 2, then stops because the channel is closed and empty. A receive from a closed, empty channel returns the zero value immediately with ok=false, so the output is '12' + '0 false'. Receiving from a closed channel never panics (sending does). Close keeps the buffer. Nothing blocks, because closed channels are always ready to receive.",
+      "ref": "unit-1-primitives.md#2-channels-and-select"
+    },
+    {
+      "id": "B0-006",
+      "type": "multi",
+      "tags": [
+        "concurrency",
+        "channels",
+        "pitfalls"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL operations that panic at run time.",
+      "choices": [
+        "Sending on a closed channel",
+        "Closing an already-closed channel",
+        "Closing a nil channel",
+        "Receiving from a closed channel",
+        "Sending on a nil channel"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Send on closed, close of closed and close of nil all panic ('send on closed channel', 'close of closed channel', 'close of nil channel'). Receiving from a closed channel returns the zero value with ok=false, which is how range terminates. Sending on (or receiving from) a nil channel blocks forever. It does not panic, and in a select a nil channel's case is simply never chosen.",
+      "ref": "unit-1-primitives.md#2-channels-and-select"
+    },
+    {
+      "id": "B0-007",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "select"
+      ],
+      "difficulty": 2,
+      "prompt": "A worker loop is:\n\nfor {\n\tselect {\n\tcase <-ctx.Done():\n\t\treturn\n\tcase job := <-jobs:\n\t\tprocess(job)\n\t}\n}\n\nctx has been cancelled AND jobs always has a job ready. What happens on each iteration?",
+      "choices": [
+        "One ready case is chosen uniformly at random, so the worker may process a few more jobs before returning",
+        "ctx.Done() wins because it is listed first",
+        "jobs wins because data cases take priority over signals",
+        "The select panics because two cases are ready"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Go's select picks uniformly at random among ready cases. There is no source-order or case-type priority, so after cancellation each iteration is a coin flip, and the worker can process extra jobs. If prompt stop matters, check ctx.Err() first. 'First listed wins' is how some other languages behave, not Go. No priority exists for data cases. Multiple ready cases are normal, not an error.",
+      "ref": "unit-1-primitives.md#2-channels-and-select"
+    },
+    {
+      "id": "B0-008",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "channels",
+        "backpressure"
+      ],
+      "difficulty": 2,
+      "prompt": "Handlers send audit events into make(chan Event, 10000), drained by one DB writer. During a 40 s DB failover at 2,000 events/s, member-facing p99 jumps from 120 ms to 35 s. Which change is the best senior fix?",
+      "choices": [
+        "Have Add block with a short context deadline, return an error/metric when it expires, and make the audit path durable (e.g. outbox) so events are not lost",
+        "Raise the buffer to 1,000,000 so it never fills",
+        "Use select with default to drop events when the buffer is full",
+        "Start a new writer goroutine per event so nothing ever waits"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The buffer filled in ≈ 5 s, and then every handler blocked. You need an explicit full-buffer policy: bounded wait with a deadline, visible failure, and durability for data a regulator cares about. A bigger buffer only delays blocking, holds more data a crash loses, and hides the problem. Silent drops lose audit events, unacceptable for a bank. A goroutine per event moves the queue into unbounded goroutines waiting on the DB pool: memory growth, then OOM.",
+      "ref": "unit-1-primitives.md#2-channels-and-select"
+    },
+    {
+      "id": "B0-009",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "select",
+        "channels"
+      ],
+      "difficulty": 2,
+      "prompt": "In the batcher's run loop, `var timerC <-chan time.Time` is nil until the first item of a batch arrives, and is set back to nil after each flush. Why?",
+      "choices": [
+        "A nil channel is never ready, so the select ignores the timer case while no batch is pending or after a size flush",
+        "Receiving from a nil channel returns immediately, which forces a flush",
+        "It lets the garbage collector stop the timer goroutine",
+        "select requires every channel to be nil-checked first"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Receiving from a nil channel blocks forever, so in a select its case is effectively disabled. That expresses 'no timer running', and after a size-triggered flush it stops a stale tick from flushing the next batch. A nil-channel receive does not return immediately (that is a closed channel). Timers don't run in their own goroutines. select works fine with nil channels; that's the point.",
+      "ref": "unit-1-primitives.md#2-channels-and-select"
+    },
+    {
+      "id": "B0-010",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "mutex",
+        "pitfalls"
+      ],
+      "difficulty": 2,
+      "prompt": "What does this print?\n\ntype Counter struct { mu sync.Mutex; n int }\nfunc (c Counter) Inc() { c.mu.Lock(); c.n++; c.mu.Unlock() }\n\nvar c Counter\nc.Inc(); c.Inc()\nfmt.Println(c.n)",
+      "choices": [
+        "0, and go vet reports that Inc passes lock by value",
+        "2",
+        "fatal error: copied mutex",
+        "1, because the second Inc deadlocks and is skipped"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Inc has a value receiver, so it increments a copy (mutex included). c.n stays 0. go vet's copylocks check flags 'Inc passes lock by value'. '2' needs a pointer receiver. The runtime doesn't detect copied mutexes. Nothing deadlocks: each copy's mutex is a separate, unlocked lock.",
+      "ref": "unit-1-primitives.md#3-locks-and-the-sync-toolbox"
+    },
+    {
+      "id": "B0-011",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "mutex",
+        "deadlock"
+      ],
+      "difficulty": 3,
+      "prompt": "var mu sync.RWMutex\nmu.RLock()\ngo func() { mu.Lock(); mu.Unlock() }()\ntime.Sleep(10 * time.Millisecond)\nmu.RLock()\nfmt.Println(\"second read lock\")\n\nWhat happens?",
+      "choices": [
+        "fatal error: all goroutines are asleep - deadlock!",
+        "Prints \"second read lock\": read locks are shared",
+        "The writer acquires the lock first, then the program prints",
+        "panic: recursive RLock"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "RWMutex is writer-preferring: once Lock is waiting, new RLock calls block until the writer has acquired and released. The writer waits for the first read lock, which main still holds, so both block, and the runtime reports a global deadlock. 'Read locks are shared' is true only when no writer waits, which is why this passes light tests. The writer cannot acquire while a reader holds the lock. There is no recursion panic; the docs simply prohibit recursive read locking.",
+      "ref": "unit-1-primitives.md#3-locks-and-the-sync-toolbox"
+    },
+    {
+      "id": "B0-012",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "sync"
+      ],
+      "difficulty": 2,
+      "prompt": "A vendor client is initialised lazily with once.Do(initClient). On the first call the vendor is unreachable and initClient panics; the panic is recovered by the HTTP handler. What happens on later calls to once.Do(initClient)?",
+      "choices": [
+        "initClient is never called again, so the client stays uninitialised",
+        "initClient is retried on the next call because it never completed",
+        "once.Do panics again on every call",
+        "once.Do blocks forever waiting for the first call"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Per the sync.Once docs, if f panics, Do considers it to have returned; future calls return without calling f. So one startup blip leaves a nil client forever. Use sync.OnceValues to keep the error, or a mutex plus a success flag to allow retries. It does not retry, does not re-panic, and does not block.",
+      "ref": "unit-1-primitives.md#3-locks-and-the-sync-toolbox"
+    },
+    {
+      "id": "B0-013",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "mutex",
+        "race-detector"
+      ],
+      "difficulty": 3,
+      "prompt": "A ShardedMap.Update is implemented as `old, ok := m.Get(k); nv, keep := fn(old, ok); m.Set(k, nv)`, where Get and Set each lock the shard correctly. 32 goroutines × 500 increments lose ≈ 8% of updates, yet `go test -race` reports nothing. Why?",
+      "choices": [
+        "There is no data race (every access is locked); the bug is a check-then-act race condition across two critical sections, which the race detector does not look for",
+        "The race detector only instruments the main goroutine",
+        "Increments are lost because maphash sends the same key to different shards",
+        "-race was disabled because the test uses generics"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Each memory access is protected by the shard lock, so there is no unsynchronised access for TSan to report. The lost updates come from interleaving between the Get and the Set: two goroutines read the same old value. The fix is to do the read-modify-write under one Lock. The race detector instruments all goroutines. A per-map seed is fixed, so equal keys always hash the same. Generics don't affect -race.",
+      "ref": "unit-1-primitives.md#3-locks-and-the-sync-toolbox"
+    },
+    {
+      "id": "B0-014",
+      "type": "multi",
+      "tags": [
+        "concurrency",
+        "sync-map"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL workloads that sync.Map's documentation says it is optimised for.",
+      "choices": [
+        "Entries written once and read many times, as in caches that only grow",
+        "Multiple goroutines reading, writing and overwriting disjoint sets of keys",
+        "Frequent iteration with a consistent snapshot and an exact Len",
+        "Heavy churn where all goroutines overwrite the same few hot keys"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "The doc names exactly two cases: grow-only caches, and goroutines working on disjoint key sets. sync.Map has no Len and its Range is not a consistent snapshot. Heavy contended overwrites of the same keys are the case where a plain map with a mutex (or sharding) is usually recommended instead.",
+      "ref": "unit-1-primitives.md#3-locks-and-the-sync-toolbox"
+    },
+    {
+      "id": "B0-015",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "mutex",
+        "pitfalls"
+      ],
+      "difficulty": 2,
+      "prompt": "Your SSO token cache (a plain map shared by request goroutines) crashes the pod with `fatal error: concurrent map writes`. A teammate proposes wrapping the handler in defer/recover so one bad write doesn't kill the process. Will that work?",
+      "choices": [
+        "No: it is a fatal runtime error, not a panic, so recover cannot catch it; the map needs synchronisation",
+        "Yes, recover catches every runtime error in the same goroutine",
+        "Yes, but only if recover is in the goroutine that did the second write",
+        "No, but setting GODEBUG=mapcheck=0 disables the check"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Concurrent map writes are reported with fatal() in the runtime, which bypasses panic/recover and kills the process. That is why every in-flight request died. Recover only stops panics. No GODEBUG switch makes unsynchronised map access safe; the check is best-effort detection of real memory corruption. Fix with a mutex or a sharded map.",
+      "ref": "unit-1-primitives.md#3-locks-and-the-sync-toolbox"
+    },
+    {
+      "id": "B0-016",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "memory-model"
+      ],
+      "difficulty": 3,
+      "prompt": "var data int\nvar ready bool\n\ngo func() { data = 42; ready = true }()\nfor !ready {}\nfmt.Println(data)\n\nWhich statement is correct?",
+      "choices": [
+        "It is a data race; printing 42, printing 0 and looping forever are all possible",
+        "It always prints 42 because writes happen in program order",
+        "It always prints 0 because main reads data before the goroutine starts",
+        "It is safe on amd64 because bool writes are atomic there"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Unsynchronised write and read of ready (and data) is a data race, so the program loses DRF-SC guarantees: the compiler may hoist the ready load (infinite loop), and the data write need not be visible when ready is seen (prints 0). It printed 42 on our run, which proves nothing. Program order holds within a goroutine, but other goroutines only see it through synchronisation. Main can't print before the loop exits. 'Atomic on amd64' ignores compiler reordering and other architectures; Go defines behaviour by the memory model, not the CPU.",
+      "ref": "unit-1-primitives.md#4-the-memory-model-and-the-race-detector"
+    },
+    {
+      "id": "B0-017",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "race-detector",
+        "testing"
+      ],
+      "difficulty": 2,
+      "prompt": "Your team's `go test -race ./...` has been green on every CI run for a year. What does that prove?",
+      "choices": [
+        "That no data race occurred on the code paths the tests executed concurrently; races on unexercised paths can still exist",
+        "That the code is free of data races",
+        "That the code is free of data races and deadlocks",
+        "Nothing at all, because the race detector has many false negatives on executed paths"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The race detector reports races that actually happen during the run; its docs say it cannot find races in code that isn't executed. So green CI is evidence for the paths exercised, not proof for all code. It doesn't detect deadlocks. On paths it does observe it is reliable (effectively no false positives, and it tracks happens-before precisely), so 'proves nothing' is too strong.",
+      "ref": "unit-1-primitives.md#4-the-memory-model-and-the-race-detector"
+    },
+    {
+      "id": "B0-018",
+      "type": "numeric",
+      "tags": [
+        "concurrency",
+        "race-detector",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Your CI unit-test stage takes 4 minutes without -race. Using the upper end of the Go documentation's typical execution-time overhead for the race detector, what is the worst case you should plan for? Answer in minutes.",
+      "value": 80,
+      "tolerance": 0.25,
+      "unit": "minutes",
+      "explanation": "The Go race-detector docs give typical overheads of 5–10× memory and 2–20× execution time. Worst case 4 × 20 = 80 min; typical is closer to 8–40 min. That is why teams often run -race on concurrency-heavy packages every build and the full suite nightly. Using the memory multiplier (×10 = 40) confuses the two figures.",
+      "ref": "unit-1-primitives.md#4-the-memory-model-and-the-race-detector"
+    },
+    {
+      "id": "B0-019",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "memory-model",
+        "atomics"
+      ],
+      "difficulty": 2,
+      "prompt": "A refresher goroutine does `limits = fresh` (limits is a package-level *Limits) and handlers read limits.PerSecond. On new ARM nodes, handlers occasionally see zeroed fields. What is the correct fix?",
+      "choices": [
+        "Store and load through an atomic.Pointer[Limits] and never mutate a Limits after storing it",
+        "Mark the variable volatile",
+        "Add runtime.Gosched() after the assignment",
+        "Run the refresher with GOMAXPROCS=1"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "atomic.Pointer gives a happens-before edge: everything written to the new Limits before Store is visible to a Load that observes it. Go has no volatile keyword. Gosched only yields the processor and creates no ordering guarantee. GOMAXPROCS=1 doesn't make racy code correct (preemption still interleaves goroutines) and it cripples the service.",
+      "ref": "unit-1-primitives.md#4-the-memory-model-and-the-race-detector"
+    },
+    {
+      "id": "B0-020",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "memory-model",
+        "bounded-concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "Which Go memory-model rule is what makes `sem := make(chan struct{}, n)` a correct counting semaphore (acquire = send, release = receive)?",
+      "choices": [
+        "The k-th receive on a channel with capacity C happens before the (k+C)-th send completes",
+        "A send happens before the corresponding receive completes",
+        "The closing of a channel happens before a receive that returns because it is closed",
+        "The go statement happens before the goroutine starts"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The capacity rule means the (k+C)-th send (acquire) cannot complete until the k-th receive (release) happened, so at most C holders exist, with ordering. Send-before-receive explains hand-off, not counting. Close-before-receive is for broadcast signals. The go-statement rule orders goroutine creation, not admission.",
+      "ref": "unit-1-primitives.md#4-the-memory-model-and-the-race-detector"
+    },
+    {
+      "id": "B0-021",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "channels",
+        "mutex"
+      ],
+      "difficulty": 2,
+      "prompt": "Which tool fits best: an LRU cache whose Get moves the entry to the front of a linked list, called by every request goroutine?",
+      "choices": [
+        "A mutex around the map + list",
+        "An owner goroutine serving Get/Set over channels",
+        "Two atomics: one for the map, one for the list head",
+        "sync.Map, since it is optimised for reads"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Get mutates shared structure (map + list) under one invariant, and the critical section is a few pointer swaps: a mutex is the textbook fit. An owner goroutine serialises every Get through channel hops (hundreds of ns) and blocks everyone if it stalls. Two atomics can't keep a multi-field invariant. sync.Map can't express 'move to front'; every Get is a write here.",
+      "ref": "unit-1-primitives.md#5-channels-or-mutexes-choosing-the-tool"
+    },
+    {
+      "id": "B0-022",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "benchmarking",
+        "mutex"
+      ],
+      "difficulty": 3,
+      "prompt": "On a 4-vCPU box, under a 90% read / 10% write mix with a ≈ 20 ns critical section, measured ns/op at -cpu 4 were: single RWMutex map ≈ 28, 32-shard map ≈ 70, 1,024-shard map ≈ 49, sync.Map ≈ 16. What is the right conclusion for choosing the SSO token cache's implementation?",
+      "choices": [
+        "Sharding is not automatically faster and shard count matters non-linearly; benchmark the real read/write mix at several -cpu values, check mutex/block profiles, and consider sync.Map or an atomic snapshot for read-heavy data",
+        "Always use 1,024 shards, since more shards is always faster",
+        "Sharding is always slower than one lock, so never shard",
+        "The benchmark must be wrong, because more locks always means less contention"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The numbers don't follow a one-line model: 32 shards lost to one RWMutex, 1,024 shards beat it, and sync.Map beat all of them on this read-heavy mix (its reads write no shared memory). The senior move is to measure the real workload and look at profiles rather than reason from slogans. '1,024 always' over-fits one benchmark: with real work under the lock and a different mix the ranking moves, and more shards cost memory and slower Len/Range. 'Never shard' ignores the Update-with-work benchmark, where sharding nearly halved ns/op. Dismissing a measurement because it contradicts a belief is the opposite of the lesson.",
+      "ref": "unit-1-primitives.md#6-stretch--measuring-contention"
+    },
+    {
+      "id": "B0-023",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "context",
+        "timeouts"
+      ],
+      "difficulty": 2,
+      "prompt": "parent, c1 := context.WithTimeout(context.Background(), 50*time.Millisecond)\nchild, c2 := context.WithTimeout(parent, time.Hour)\ndl, _ := child.Deadline()\nfmt.Println(time.Until(dl) < time.Second)\n<-child.Done()\nfmt.Println(child.Err())\n\nWhat is printed?",
+      "choices": [
+        "true, then (after ≈ 50 ms) context deadline exceeded",
+        "false, then (after an hour) context deadline exceeded",
+        "true, then context canceled",
+        "false, then (after ≈ 50 ms) context canceled"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A derived deadline is the earlier of parent's and requested, so Deadline() is the parent's (≈ 50 ms away) and the child is done when the parent expires, with DeadlineExceeded. A child cannot extend its parent. The error is DeadlineExceeded, not Canceled, because a deadline passed; nobody called cancel.",
+      "ref": "unit-2-cancellation.md#1-context-cancellation-trees-and-deadlines"
+    },
+    {
+      "id": "B0-024",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "context"
+      ],
+      "difficulty": 2,
+      "prompt": "ctx, cancel := context.WithCancelCause(context.Background())\ncancel(errors.New(\"vendor down\"))\nfmt.Println(ctx.Err(), \"|\", context.Cause(ctx))\n\nWhat is printed?",
+      "choices": [
+        "context canceled | vendor down",
+        "vendor down | vendor down",
+        "context canceled | context canceled",
+        "vendor down | context canceled"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Err() still returns the sentinel context.Canceled so existing errors.Is checks keep working; Cause returns the reason passed to the cancel func (Go 1.20+). If no cause was given, Cause equals Err(), which is the third option and doesn't apply here. Err never returns the custom cause.",
+      "ref": "unit-2-cancellation.md#1-context-cancellation-trees-and-deadlines"
+    },
+    {
+      "id": "B0-025",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "context",
+        "cancellation"
+      ],
+      "difficulty": 2,
+      "prompt": "Members abandon ≈ 30% of FX-quote requests (they navigate away). The adapter calls the vendor with http.Get(url) using a client without Timeout. What happens to abandoned requests, and what is the fix?",
+      "choices": [
+        "The vendor call keeps running until the vendor answers; build the request with http.NewRequestWithContext(r.Context(), ...) so the disconnect cancels it",
+        "net/http cancels all outbound calls made inside a handler automatically",
+        "The handler goroutine is killed when the client disconnects, which aborts the call",
+        "Nothing can be done in Go: an HTTP call cannot be interrupted"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Cancellation is cooperative: the server cancels r.Context() when the client goes away, but http.Get uses context.Background(), so nothing stops the call. Passing the request context through cancels dial, TLS and the read. net/http does not track outbound calls made by handlers. Go never kills goroutines from outside. HTTP calls are interruptible through their context.",
+      "ref": "unit-2-cancellation.md#1-context-cancellation-trees-and-deadlines"
+    },
+    {
+      "id": "B0-026",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "errgroup",
+        "context"
+      ],
+      "difficulty": 3,
+      "prompt": "g, ctx := group.WithContext(parent)\ng.Go(func() (err error) { a, err = fetchA(ctx); return })\ng.Go(func() (err error) { b, err = fetchB(ctx); return })\nif err := g.Wait(); err != nil { return err }\nreturn save(ctx, merge(a, b))\n\nBoth fetches succeed. What does save see?",
+      "choices": [
+        "A cancelled context: the group's ctx is cancelled when Wait returns, so save should use parent",
+        "A live context, since no function returned an error",
+        "A data race on a and b, reported by -race",
+        "A deadlock: Wait cannot return while ctx is still referenced"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "errgroup semantics (and the lab's): the derived context is cancelled on the first error or when Wait returns, whichever comes first. After a successful Wait it is Canceled, so save fails every time. 'Live' misses that rule. a and b each have one writer and Wait provides the happens-before edge to the reads: no race. Contexts don't affect when Wait returns.",
+      "ref": "unit-2-cancellation.md#2-bounded-concurrency-semaphores-worker-pools-and-errgroup"
+    },
+    {
+      "id": "B0-027",
+      "type": "numeric",
+      "tags": [
+        "concurrency",
+        "bounded-concurrency",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "An imaging vendor allows at most 50 concurrent connections. Its p50 latency is 300 ms. Ignoring other limits, what is the maximum sustained throughput you can get from it? Answer in requests/second.",
+      "value": 166,
+      "tolerance": 0.15,
+      "unit": "req/s",
+      "explanation": "Little's law: throughput = concurrency / latency = 50 / 0.3 s ≈ 166 req/s. If you need 200 req/s you need ≈ 60 in flight, which the contract forbids, so the cap binds first. Answers like 50 forget latency. 15 multiplies instead of dividing. 166 per pod must be shared across pods if they share the contract.",
+      "ref": "unit-2-cancellation.md#2-bounded-concurrency-semaphores-worker-pools-and-errgroup"
+    },
+    {
+      "id": "B0-028",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "bounded-concurrency",
+        "errgroup"
+      ],
+      "difficulty": 2,
+      "prompt": "10,000 items, at most 50 vendor calls in flight.\n\n(a) for _, it := range items {\n\tgo func() { sem <- struct{}{}; defer func() { <-sem }(); call(it) }()\n}\n\n(b) g.SetLimit(50)\nfor _, it := range items {\n\tg.Go(func() error { return call(it) })\n}   // errgroup semantics\n\nRoughly how many goroutines exist at peak in each?",
+      "choices": [
+        "(a) up to ≈ 10,000, most parked on the semaphore; (b) ≈ 51, because Go blocks before starting a goroutine",
+        "(a) ≈ 51; (b) up to ≈ 10,000",
+        "Both ≈ 51",
+        "Both ≈ 10,000"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "In (a) every goroutine is created immediately and acquires inside itself, so up to 10,000 exist (≈ 2.6 KB each), but only 50 call the vendor. In (b), SetLimit makes Go acquire the slot BEFORE starting the goroutine, so the loop blocks and peak is ≈ 50 workers + the caller. Both bound calls in flight to 50; where you acquire decides how many goroutines wait. The other options swap or merge these behaviours.",
+      "ref": "unit-2-cancellation.md#2-bounded-concurrency-semaphores-worker-pools-and-errgroup"
+    },
+    {
+      "id": "B0-029",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "errgroup",
+        "pitfalls"
+      ],
+      "difficulty": 2,
+      "prompt": "In an errgroup clone, Go is implemented as `go func() { g.wg.Add(1); defer g.wg.Done(); run(f) }()`. What can go wrong?",
+      "choices": [
+        "Wait can see a zero counter and return before some functions have started, so results are read early (and -race may report it)",
+        "Nothing: Add and Done are balanced",
+        "Add panics when called from a goroutine other than the one that calls Wait",
+        "Done is called twice, giving a negative counter panic"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Add must happen before the go statement, in the goroutine that will call Wait; otherwise Wait may observe the counter before the new goroutine increments it. Balanced Add/Done doesn't help if they happen after Wait returned. Add from any goroutine is legal, just mis-ordered here. Done is called once per goroutine, so the counter never goes negative. Go 1.25's vet adds a waitgroup analyzer for this pattern.",
+      "ref": "unit-2-cancellation.md#2-bounded-concurrency-semaphores-worker-pools-and-errgroup"
+    },
+    {
+      "id": "B0-030",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "errgroup",
+        "bounded-concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "Your API is at its vendor concurrency limit. For latency-sensitive requests you prefer to reject immediately with 429 + Retry-After rather than queue. Which group method expresses that?",
+      "choices": [
+        "TryGo: start only if a slot is free, otherwise return false so you can shed load",
+        "Go: it returns an error when the limit is reached",
+        "SetLimit(0) on every request",
+        "Wait with a context deadline"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "TryGo is the non-blocking acquire: it reports whether it started the function, so you can reject. Go blocks until a slot frees; it never errors. SetLimit(0) prevents all new goroutines and must not be changed while goroutines are active. Wait doesn't take a context and doesn't affect admission.",
+      "ref": "unit-2-cancellation.md#2-bounded-concurrency-semaphores-worker-pools-and-errgroup"
+    },
+    {
+      "id": "B0-031",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "leaks"
+      ],
+      "difficulty": 2,
+      "prompt": "func fetch(timeout time.Duration) (string, error) {\n\tch := make(chan string)\n\tgo func() { time.Sleep(50 * time.Millisecond); ch <- \"quote\" }()\n\tselect {\n\tcase q := <-ch: return q, nil\n\tcase <-time.After(timeout): return \"\", errors.New(\"timeout\")\n\t}\n}\n\nfor i := 0; i < 1000; i++ { fetch(time.Millisecond) }\ntime.Sleep(200 * time.Millisecond)\nfmt.Println(runtime.NumGoroutine())\n\nWhat is printed (roughly)?",
+      "choices": [
+        "≈ 1001: every sender is blocked forever on the unbuffered channel",
+        "1: the goroutines finish after 50 ms",
+        "1: unreachable channels and their goroutines are garbage-collected",
+        "It panics: send on closed channel"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Each fetch returns after 1 ms; 49 ms later its goroutine tries to send on an unbuffered channel nobody will ever receive from, and blocks forever: 1,000 leaks + main. They finish sleeping, not sending. Blocked goroutines are never garbage-collected, even if the channel is otherwise unreachable. Nobody closes ch, so there is no panic.",
+      "ref": "unit-2-cancellation.md#3-pipelines-fan-outfan-in-and-goroutine-leaks"
+    },
+    {
+      "id": "B0-032",
+      "type": "multi",
+      "tags": [
+        "concurrency",
+        "leaks",
+        "channels"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL changes that eliminate the leak in general. The code: fetch starts a goroutine that sleeps 50 ms and then sends on an unbuffered channel ch; fetch itself returns after a 1 ms time.After timeout, so nobody ever receives.",
+      "choices": [
+        "Make the channel buffered with capacity 1",
+        "Pass a ctx that fetch cancels on return, and have the sender select on ctx.Done() vs the send",
+        "close(ch) in fetch before returning on timeout",
+        "Call runtime.GC() after each fetch"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "A buffer of 1 lets the single send complete and the goroutine exit. A cancellable select lets the sender give up. Closing ch from the receiver side makes the late sender panic with 'send on closed channel', which crashes rather than leaks. runtime.GC never frees blocked goroutines.",
+      "ref": "unit-2-cancellation.md#3-pipelines-fan-outfan-in-and-goroutine-leaks"
+    },
+    {
+      "id": "B0-033",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "pipelines",
+        "leaks"
+      ],
+      "difficulty": 2,
+      "prompt": "A consumer ranges over Generate → Map(4 workers) → MapOrdered(4), reads 10 results and returns WITHOUT cancelling ctx. A minute later, which pipeline goroutines are alive?",
+      "choices": [
+        "All of them, each blocked on a send to the next stage (or on its output)",
+        "Only the generator; the other stages finished their current item and exited",
+        "None: when the consumer returns, the output channel is garbage-collected and stages exit",
+        "Only the 4 MapOrdered workers"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "With nobody receiving, the last stage blocks on its output send, the stage before blocks sending to it, and so on back to the generator: every goroutine leaks. Stages can't exit mid-stream without either input exhaustion or ctx cancellation. Channels referenced by blocked goroutines aren't collected, and goroutines never exit because a channel became unreachable. The fix: consumers that stop early cancel, and every send selects on ctx.Done().",
+      "ref": "unit-2-cancellation.md#3-pipelines-fan-outfan-in-and-goroutine-leaks"
+    },
+    {
+      "id": "B0-034",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "pipelines",
+        "channels"
+      ],
+      "difficulty": 2,
+      "prompt": "In Map with N worker goroutines all sending on one output channel, who should close the output, and when?",
+      "choices": [
+        "A separate closer goroutine, after a WaitGroup reports that all N workers have returned",
+        "Each worker, when its input loop ends",
+        "The consumer, when it has read enough",
+        "Nobody: output channels never need closing"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Only the sending side closes, and only when no more sends can happen. With N senders, a coordinator does wg.Wait(); close(out). If a worker closes it, the other workers panic on send. A consumer closing a data channel races with senders (panic). Without close, a consumer's range never ends.",
+      "ref": "unit-2-cancellation.md#3-pipelines-fan-outfan-in-and-goroutine-leaks"
+    },
+    {
+      "id": "B0-035",
+      "type": "numeric",
+      "tags": [
+        "concurrency",
+        "fanout",
+        "timeouts"
+      ],
+      "difficulty": 3,
+      "prompt": "QuoteAll: 5 vendors, each takes 600 ms. MaxConcurrency 2, per-vendor timeout 1 s measured from when each CALL starts, overall deadline 1.5 s. How many vendors return a quote?",
+      "value": 4,
+      "tolerance": 0.1,
+      "unit": "vendors",
+      "explanation": "Waves of 2: vendors 1–2 run 0–600 ms (ok), vendors 3–4 run 600–1200 ms (each well inside its own 1 s: ok), vendor 5 starts at 1200 ms and is cut off by the overall 1.5 s deadline at 1500 ms. That is 4. If the per-vendor timeout had started when QuoteAll started, every vendor would hit it at 1 s and only 2 would succeed. That's why the timeout must be created when the call starts.",
+      "ref": "unit-2-cancellation.md#4-capstone-fanning-out-to-vendors-under-budgets"
+    },
+    {
+      "id": "B0-036",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "fanout",
+        "leaks"
+      ],
+      "difficulty": 3,
+      "prompt": "A vendor adapter ignores ctx and blocks 30 s. The wrapper runs v.Quote in a goroutine that sends its result on ch, and selects on ch vs vctx.Done(); the 1 s timeout fires and QuoteAll returns. ch is unbuffered. What happens at 30 s, and what is the minimal fix?",
+      "choices": [
+        "The goroutine blocks forever on the send (a leak per stuck call); make ch buffered with capacity 1",
+        "The goroutine panics: send on a channel nobody listens to",
+        "Nothing: the goroutine was cancelled when vctx expired",
+        "The result is delivered to the next QuoteAll call"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Nobody receives from ch any more, so the unbuffered send blocks forever. A buffer of 1 lets it complete, and the goroutine exits. Sending with no receiver blocks, it doesn't panic. Contexts can't kill goroutines; the adapter ignores vctx. Each call creates its own ch, so results never cross calls. Also fix the adapter (ctx or socket deadlines) and count abandoned calls.",
+      "ref": "unit-2-cancellation.md#4-capstone-fanning-out-to-vendors-under-budgets"
+    },
+    {
+      "id": "B0-037",
+      "type": "numeric",
+      "tags": [
+        "concurrency",
+        "fanout",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "An endpoint fans out to 5 independent vendors and waits for all. Each vendor's latency exceeds its own p99 on 1% of calls. On what percentage of endpoint requests is at least one vendor slower than its p99? Answer in %.",
+      "value": 4.9,
+      "tolerance": 0.2,
+      "unit": "%",
+      "explanation": "P(at least one slow) = 1 − 0.99^5 ≈ 1 − 0.951 = 4.9%. So the endpoint's p95 is roughly the vendors' p99: tail amplification. With 100 vendors it would be ≈ 63%. Answering 1% ignores fan-out; 5% is the linear approximation, close but not exact.",
+      "ref": "unit-2-cancellation.md#4-capstone-fanning-out-to-vendors-under-budgets"
+    },
+    {
+      "id": "B0-038",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "fanout"
+      ],
+      "difficulty": 2,
+      "prompt": "Two flows call several providers concurrently: (1) KYC onboarding, where every provider's check must pass before an account opens; (2) FX rate shopping, where the best of the available quotes is shown. Which policies fit?",
+      "choices": [
+        "(1) FailFast, (2) BestEffort with a MinSuccesses threshold",
+        "(1) BestEffort, (2) FailFast",
+        "FailFast for both, to save vendor calls",
+        "BestEffort for both, and retry failures until they succeed"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "KYC is all-or-nothing: the first failure decides the outcome, so cancel the rest (FailFast saves calls and latency). Rate shopping benefits from any good quote, so return partial results above a threshold. Reversing them either opens accounts on partial checks or fails member requests whenever one FX vendor is flaky. Unbounded retries ignore deadlines and amplify load.",
+      "ref": "unit-2-cancellation.md#4-capstone-fanning-out-to-vendors-under-budgets"
+    },
+    {
+      "id": "B0-039",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "graceful-shutdown"
+      ],
+      "difficulty": 3,
+      "prompt": "A handler is 200 ms into 2 s of work. main calls srv.Shutdown(ctx) with a 500 ms timeout. Which is true?",
+      "choices": [
+        "Shutdown returns context deadline exceeded after ≈ 500 ms and the handler's r.Context() is NOT cancelled; if main exits now, the request is cut off",
+        "Shutdown cancels r.Context() immediately so the handler can stop",
+        "Shutdown waits the full 2 s for the handler regardless of its ctx",
+        "Shutdown returns nil immediately and the handler keeps running in the background"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Shutdown closes listeners and idle conns, then waits for active requests until its ctx expires, then returns ctx's error. It never cancels request contexts (verified with Go 1.24: the handler finished its 2 s after Shutdown returned). Use BaseContext and cancel it yourself if you want stragglers to stop. It does not wait past its ctx. ListenAndServe, not Shutdown, returns immediately (with ErrServerClosed).",
+      "ref": "unit-2-cancellation.md#5-graceful-shutdown"
+    },
+    {
+      "id": "B0-040",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "graceful-shutdown"
+      ],
+      "difficulty": 2,
+      "prompt": "Kubernetes pod, default terminationGracePeriodSeconds. Which shutdown sequence after SIGTERM is best?",
+      "choices": [
+        "Fail readiness and wait ≈ 5 s for endpoints/LB to update → srv.Shutdown with ≈ 20 s budget → cancel stragglers if exceeded → close the audit batcher → exit",
+        "Close the audit batcher → srv.Shutdown with a 60 s budget → exit",
+        "os.Exit(0) immediately; Kubernetes retries in-flight requests",
+        "srv.Shutdown immediately with no deadline, then fail readiness"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Endpoint removal is concurrent with SIGTERM, so drain first. Shutdown must fit in the 30 s default grace period with margin before SIGKILL. The batcher closes last so late handlers can still enqueue and the final flush includes them. Closing the batcher first makes in-flight handlers get ErrClosed, and 60 s exceeds the grace period. Kubernetes does not retry your in-flight requests. Shutdown without a deadline can run into SIGKILL, and failing readiness after the listener is closed is too late.",
+      "ref": "unit-2-cancellation.md#5-graceful-shutdown"
+    },
+    {
+      "id": "B0-041",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "deadlock",
+        "pitfalls"
+      ],
+      "difficulty": 2,
+      "prompt": "results := make(chan int)\nvar wg sync.WaitGroup\nfor i := 0; i < 3; i++ {\n\twg.Add(1)\n\tgo func() { defer wg.Done(); results <- i }()\n}\nwg.Wait()\nclose(results)\nfor r := range results { fmt.Println(r) }\n\nWhat happens?",
+      "choices": [
+        "fatal error: all goroutines are asleep - deadlock!",
+        "Prints 0, 1, 2 in some order",
+        "Prints 3 three times",
+        "panic: send on closed channel"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Senders block on the unbuffered channel until someone receives; nobody receives until Wait returns; Wait needs the senders' Done: circular wait, and with every goroutine blocked the runtime reports deadlock. Moving 'wg.Wait(); close(results)' into its own goroutine prints 0 1 2 in some order. With go 1.22 semantics each closure has its own i, so 3 3 3 is wrong. close happens only after Wait, which never returns, so no send-on-closed panic.",
+      "ref": "unit-2-cancellation.md#6-the-pitfall-catalogue-deadlocks-panics-and-footguns"
+    },
+    {
+      "id": "B0-042",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "pitfalls",
+        "timeouts"
+      ],
+      "difficulty": 3,
+      "prompt": "A module's go.mod says `go 1.22`; it is built with the Go 1.24 toolchain. A poller runs 2 M iterations of `select { case <-ch: case <-time.After(time.Minute): }` where ch is always ready. Approximately how much heap is in use afterwards?",
+      "choices": [
+        "Hundreds of MB (≈ 540 MB measured): the go 1.22 line keeps pre-1.23 timer semantics, so unexpired timers can't be collected",
+        "≈ 0 MB: the 1.24 toolchain always collects unreferenced timers",
+        "≈ 0 MB: time.After timers are stopped automatically when the select picks another case",
+        "The program panics: too many timers"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Timer GC and synchronous timer channels changed in Go 1.23, but GODEBUG defaults follow the main module's go line: a go 1.22 module gets asynctimerchan=1, which restores both old behaviours, so 2 M one-minute timers stay live (≈ 538 MB measured; ≈ 0 with go 1.23). The toolchain version alone doesn't decide. select never stops timers it didn't choose. There is no timer-count panic. Fix: one reused timer, or ctx deadlines.",
+      "ref": "unit-2-cancellation.md#6-the-pitfall-catalogue-deadlocks-panics-and-footguns"
+    },
+    {
+      "id": "B0-043",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "pitfalls"
+      ],
+      "difficulty": 2,
+      "prompt": "A file starts with `//go:build go1.21` (inside a module whose go.mod says go 1.22):\n\nvar ps []func()\nfor i := 0; i < 3; i++ { ps = append(ps, func() { fmt.Print(i, \" \") }) }\nfor _, p := range ps { p() }\n\nWhat is printed?",
+      "choices": [
+        "3 3 3",
+        "0 1 2",
+        "2 2 2",
+        "It fails to compile: build constraints can't lower the language version"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A go1.21 build constraint sets that file's language version to 1.21, which uses pre-1.22 loop semantics: one i shared by all iterations, and the closures run after the loop, when i == 3. Without the constraint (go 1.22 semantics) it prints 0 1 2. i reaches 3, not 2, before the loop exits. File-level downgrades are allowed (the breakit loopvar program does exactly this).",
+      "ref": "unit-2-cancellation.md#6-the-pitfall-catalogue-deadlocks-panics-and-footguns"
+    },
+    {
+      "id": "B0-044",
+      "type": "multi",
+      "tags": [
+        "concurrency",
+        "pitfalls"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL failures that are fatal errors which recover() cannot catch.",
+      "choices": [
+        "fatal error: concurrent map writes",
+        "fatal error: sync: unlock of unlocked mutex",
+        "panic: close of closed channel",
+        "panic: sync: negative WaitGroup counter"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "Concurrent map writes and unlocking an unlocked mutex are reported via the runtime's fatal path: no recover, the process dies. Close of closed channel and a negative WaitGroup counter are ordinary panics, recoverable in principle, though you should fix the bug rather than recover.",
+      "ref": "unit-2-cancellation.md#6-the-pitfall-catalogue-deadlocks-panics-and-footguns"
+    },
+    {
+      "id": "B0-045",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "channels",
+        "pitfalls"
+      ],
+      "difficulty": 2,
+      "prompt": "A service has a `done` channel closed by both the SIGTERM handler and a deploy hook. About once per 50 deploys it crashes with `panic: close of closed channel`. Best fix?",
+      "choices": [
+        "Make one owner responsible for closing (or guard the close with sync.Once), or replace done with a context whose cancel func is idempotent",
+        "Recover the panic in both callers",
+        "Check `if done != nil` before closing",
+        "Use a buffered done channel so close is idempotent"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Close is not idempotent; cancel funcs are, and sync.Once makes close effectively so. A single owner is cleanest. Recovering hides a design bug and still runs shutdown logic twice. A nil check doesn't detect 'already closed' (there is no way to test that without receiving). Buffering doesn't change close semantics: closing a buffered channel twice still panics.",
+      "ref": "unit-2-cancellation.md#6-the-pitfall-catalogue-deadlocks-panics-and-footguns"
+    },
+    {
+      "id": "B0-046",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "testing"
+      ],
+      "difficulty": 2,
+      "prompt": "Which test of 'the worker stops when ctx is cancelled' is most reliable on a loaded CI machine?",
+      "choices": [
+        "Cancel, then wait on a stopped channel the worker closes on exit, failing after a 5 s timeout",
+        "Cancel, time.Sleep(10 * time.Millisecond), then assert an atomic stopped flag",
+        "Cancel and immediately assert runtime.NumGoroutine() == baseline",
+        "Run the test 1,000 times without -race and assert it never fails"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Waiting for the event is deterministic; the timeout only matters when the code is broken. The sleep version is flaky (10 ms may not suffice under load). An immediate goroutine-count check is flaky too: goroutines take time to exit, so use a settle loop and ≤ baseline. Repetition without -race and without event-based waits proves little.",
+      "ref": "unit-2-cancellation.md#7-testing-concurrent-code-and-talking-about-it-in-a-machine-coding-round"
+    },
+    {
+      "id": "B0-047",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "testing",
+        "leaks"
+      ],
+      "difficulty": 2,
+      "prompt": "In a machine-coding round the interviewer asks: \"How do you know your pipeline doesn't leak goroutines?\" Which answer best meets the senior bar?",
+      "choices": [
+        "By construction (each stage owns and closes its output; every send/receive selects on ctx), by a test that cancels mid-stream without draining and polls NumGoroutine back to baseline with a timeout and a goroutine dump on failure, and by a goroutine-count gauge plus pprof in production",
+        "I ran it a few times and memory looked stable",
+        "Go's garbage collector frees goroutines that are no longer reachable",
+        "-race would report a leak"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The senior answer has three layers: design invariant, a deterministic test of the abandoned-consumer case, and production telemetry. 'Looked stable' isn't evidence; slow leaks take days. The GC never frees blocked goroutines. The race detector doesn't detect leaks at all.",
+      "ref": "unit-2-cancellation.md#7-testing-concurrent-code-and-talking-about-it-in-a-machine-coding-round"
+    },
+    {
+      "id": "B0-048",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "channels",
+        "testing"
+      ],
+      "difficulty": 3,
+      "prompt": "A batcher's Add sends items to its run loop over make(chan T, 64) (buffered). Close closes quit; the run loop flushes and exits when it sees quit. Under a test with 8 goroutines calling Add while Close runs, '616 Adds returned nil but 566 items were flushed'. Why does an UNBUFFERED hand-off fix it without a drain loop?",
+      "choices": [
+        "With an unbuffered channel, Add returns nil only when the run loop has received the item, and closing quit wakes every parked Add before the run loop can see quit, so no accepted item can be stranded",
+        "Unbuffered channels are faster, so the race window is smaller",
+        "Unbuffered channels are automatically drained on close",
+        "It doesn't; you still need a drain loop with an unbuffered channel"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Buffered: a send can succeed into the buffer after the run loop's last receive, so Add returned nil and the item is lost. Unbuffered: a send completes only at the instant of the receive, and an Add parked when quit closes is woken via the quit case (ErrClosed). The outcomes are exactly 'received by a live loop' or 'ErrClosed'. It's a semantic guarantee, not a speed effect. Channels are not drained on close. The reference solution passes all tests with no drain loop.",
+      "ref": "unit-1-primitives.md#2-channels-and-select"
+    },
+    {
+      "id": "B0-049",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "channels"
+      ],
+      "difficulty": 2,
+      "prompt": "Several producer goroutines send into one results channel that a consumer ranges over. Who should close the channel?",
+      "choices": [
+        "A coordinator goroutine that does wg.Wait() for all producers and then close(results)",
+        "The first producer to finish",
+        "The consumer, once it has received the expected count",
+        "Each producer, inside a recover() in case it is already closed"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Close means 'no more values', and only a party that knows all senders are done can say that: wait on a WaitGroup, then close. The first finisher would make later sends panic. A consumer closing races with in-flight sends (panic), and data channels should never be closed by receivers. Recovering from double closes hides a design bug and still panics the other senders' sends.",
+      "ref": "unit-2-cancellation.md#6-the-pitfall-catalogue-deadlocks-panics-and-footguns"
+    },
+    {
+      "id": "B0-050",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "context",
+        "cancellation"
+      ],
+      "difficulty": 2,
+      "prompt": "Writing the audit record must complete even if the member's request was cancelled (client disconnected), but should keep the request's trace ID. Which context should the audit write use?",
+      "choices": [
+        "context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)",
+        "r.Context() directly",
+        "context.Background()",
+        "context.WithCancel(r.Context())"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "WithoutCancel (Go 1.21) keeps values (trace ID, tenant) but drops cancellation, and the extra timeout keeps the write bounded. r.Context() is cancelled on disconnect, so the write would be abandoned. Background loses the request-scoped values. WithCancel of a cancelled parent is already cancelled.",
+      "ref": "unit-2-cancellation.md#1-context-cancellation-trees-and-deadlines"
+    },
+    {
+      "id": "B0-051",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "goroutines",
+        "bounded-concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "Audit writes are made async with `go audit.Write(ctx, e)` at 2,000 req/s. Normally inserts take 5 ms. During a DB incident they take 3 s. Roughly how many audit goroutines are alive during the incident, and what is the real risk?",
+      "choices": [
+        "≈ 6,000; the risk is what they hold (queued connection attempts, events, buffers) growing until OOM, not their stacks",
+        "≈ 10; goroutines finish quickly",
+        "≈ 2,000; one per request per second",
+        "≈ 6,000; the risk is the 6,000 OS threads they occupy"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Little's law: 2,000/s × 3 s ≈ 6,000 in flight (≈ 10 normally, the second option). Their stacks are only ≈ 15 MB; the memory goes to what they hold and to work queued behind a 50-connection pool, ending in an OOM kill that also loses every queued event. 2,000 ignores latency. Goroutines waiting on the pool are parked and hold no threads.",
+      "ref": "unit-1-primitives.md#1-goroutines-and-the-scheduler"
+    }
+  ]
+}

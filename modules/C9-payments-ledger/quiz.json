@@ -1,0 +1,1226 @@
+{
+  "module": "C9",
+  "title": "Case study: payments and ledger",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "C9-001",
+      "type": "single",
+      "tags": [
+        "design",
+        "requirements",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "You're designing the payments and ledger system for a credit-union digital-banking platform. You have time for one more clarifying question. Which answer changes the design the most?",
+      "choices": [
+        "Whether our ledger is the system of record for balances, or the credit union's core banking system is and we keep a sub-ledger",
+        "Whether members want to attach a photo to a P2P transfer",
+        "Which charting library finance uses for its month-end reports",
+        "How many engineers will be on call for the service"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Who owns the official balance decides whether our journal is authoritative or a sub-ledger reconciled with the core, who answers card authorisations, and whether every transfer becomes a saga with an idempotent call to the core plus a third reconciliation source. Photos on transfers are a product feature with no effect on the money design. The reporting tool is downstream of the ledger. On-call staffing matters operationally but doesn't change the architecture.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions-that-change-the-design"
+    },
+    {
+      "id": "C9-002",
+      "type": "multi",
+      "tags": [
+        "design",
+        "requirements",
+        "invariants"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the statements that are invariants a nightly job can check from the ledger's journal alone.",
+      "choices": [
+        "Every posting's debits equal its credits",
+        "Every account's balance equals the sum of its journal entries",
+        "The sum of all account balances in one currency is zero",
+        "No idempotency key appears on more than one posting",
+        "Card authorisations are answered in under 100 ms at p99",
+        "Every processor webhook is received within one minute of the event"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "Balanced postings, balances equal to journal sums, a zero sum across a closed double-entry system, and one posting per key are all properties of the journal and can be recomputed by a job. The authorisation latency is a non-functional target measured by monitoring, not a journal invariant. Webhook timeliness depends on the processor and is checked by reconciliation and lag metrics, not by reading the journal.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions-that-change-the-design"
+    },
+    {
+      "id": "C9-003",
+      "type": "single",
+      "tags": [
+        "design",
+        "money",
+        "banking"
+      ],
+      "difficulty": 1,
+      "prompt": "In the platform's own books, what is a member's wallet account, and what increases it?",
+      "choices": [
+        "A liability (the platform owes the member); a credit increases it",
+        "An asset (the platform owns the money); a debit increases it",
+        "Income; a credit increases it",
+        "An expense; a debit increases it"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The platform holds the member's money and owes it back, so the wallet is a liability, and liabilities are credit-normal. Calling it an asset confuses the member's view (their money) with the platform's; the platform's cash at its settlement bank is the asset. Income and expense accounts record revenue (fees) and costs (losses), not customer balances.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions-that-change-the-design"
+    },
+    {
+      "id": "C9-004",
+      "type": "single",
+      "tags": [
+        "design",
+        "requirements",
+        "multitenancy"
+      ],
+      "difficulty": 2,
+      "prompt": "The platform goes from one wallet product to forty credit unions, each with its own settlement bank account and processor credentials. Which change to the ledger design follows?",
+      "choices": [
+        "Every account carries a tenant id, each tenant gets its own house accounts, the ledger rejects postings that span tenants, and reconciliation runs per tenant per processor",
+        "One shared set of house accounts, with a tenant column on postings for reporting",
+        "A separate ledger technology per credit union",
+        "No change: tenancy is handled by the API gateway's routing"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Each credit union's books must balance on their own, so house accounts (cash, settlement payable, suspense, revenue) are per tenant, postings may not mix tenants (a validation rule like the currency rule), and each tenant's processor statement is reconciled separately. Shared house accounts mix tenants' money, so no tenant's books can be proven. A separate technology per tenant multiplies operations for no benefit. Gateway routing doesn't stop a posting from crossing tenants inside the ledger.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions-that-change-the-design"
+    },
+    {
+      "id": "C9-005",
+      "type": "single",
+      "tags": [
+        "design",
+        "requirements",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "The interviewer asks which requirements have no tolerance at all, unlike latency or availability targets. Which answer is best?",
+      "choices": [
+        "Conservation of money (balanced postings), at most one effect per idempotency key, and the no-negative rule on member accounts",
+        "p99 latency for transfers and 99.99% availability for authorisations",
+        "Reconciliation completed before 08:00 every day",
+        "Exactly-once delivery of every event on the bus"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Conservation, at-most-once effect per key and the floor on member balances are invariants: a single violation is a loss or an audit finding. Latency and availability have targets with error budgets. Reconciliation timeliness is a target too (a late file is a timing break, not corruption). Exactly-once delivery isn't something you require; the effect is made exactly once with at-least-once delivery plus idempotent applies.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions-that-change-the-design"
+    },
+    {
+      "id": "C9-006",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "The ledger writes ≈ 12 M postings a day and the peak hour runs at ≈ 5× the daily average rate. How many postings per second must it handle in the peak hour?",
+      "value": 700,
+      "tolerance": 0.2,
+      "unit": "postings/s",
+      "explanation": "12,000,000 / 86,400 s ≈ 139 postings/s on average; × 5 ≈ 694, so ≈ 700/s. Each posting is one transaction of ≈ 8 row writes, well within one relational primary's ≈ 1k–10k small transactions per second, so the design doesn't need sharding at this scale.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C9-007",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "hot-key",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "Every card capture credits the same house account, and each posting holds that account's balance-row lock for ≈ 4 ms (statement work plus commit). Ignoring everything else, what's the most postings per second that account can take?",
+      "value": 250,
+      "tolerance": 0.2,
+      "unit": "postings/s",
+      "explanation": "Postings to one row serialise, so the bound is 1 / 0.004 s = 250 per second. At 2 ms it would be 500/s. With ≈ 420 capture postings/s at peak, that row is the platform's bottleneck while the database CPU looks idle.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C9-008",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "idempotency",
+        "timeouts"
+      ],
+      "difficulty": 1,
+      "prompt": "The platform makes ≈ 2 M processor calls a day (top-ups and withdrawals) and ≈ 0.2% of them time out or fail ambiguously. How many payments a day have an unknown outcome?",
+      "value": 4000,
+      "tolerance": 0.15,
+      "unit": "payments",
+      "explanation": "2,000,000 × 0.002 = 4,000 a day. That's too many for people to decide by hand, so the design needs an unknown state, money parked in an in-transit account, an automated resolver that queries by reference, and reconciliation as the final word.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C9-009",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "The ledger writes ≈ 12 M postings a day; a posting stored with its entries and indexes takes ≈ 700 B. How much journal storage is written per day, before replication? Answer in GB.",
+      "value": 8.4,
+      "tolerance": 0.2,
+      "unit": "GB",
+      "explanation": "12,000,000 × 700 B = 8.4 × 10^9 B ≈ 8.4 GB per day, ≈ 3 TB a year, ≈ 9 TB a year with 3 replicas. That drives monthly partitions with tiering; the balances table (≈ 10 M accounts × ≈ 100 B ≈ 1 GB) stays in memory.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C9-010",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "storage",
+        "compliance"
+      ],
+      "difficulty": 2,
+      "prompt": "The journal grows by ≈ 3 TB a year before replication, is replicated 3 times, and must be retained for ≈ 7 years. How much storage does the retention period need, in TB?",
+      "value": 63,
+      "tolerance": 0.2,
+      "unit": "TB",
+      "explanation": "3 TB × 3 replicas = 9 TB a year; × 7 years = 63 TB. This is why older partitions move to cheaper storage after the hot window you actually query (≈ 13 months for statements and disputes), with a columnar copy for audit queries.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C9-011",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "hot-key",
+        "databases"
+      ],
+      "difficulty": 2,
+      "prompt": "At a holiday peak, card authorisation latency rises from 15 ms to 4 s while the ledger database sits at 20% CPU. Postings are ≈ 700/s. What is the most likely cause?",
+      "choices": [
+        "Every capture locks the same house account's balance row, so postings serialise on one row lock",
+        "The database primary is out of CPU",
+        "The network between the API and the database is saturated",
+        "Too many read replicas are lagging"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Low CPU with high latency on writes points to contention, and the house account that every capture credits is a single row locked by each posting: ≈ 1 / lock time caps the whole platform. CPU exhaustion would show high CPU. A saturated network would affect every query, not just postings. Replica lag affects reads from replicas, not authorisation writes on the primary.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C9-012",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "consistency",
+        "multi-region"
+      ],
+      "difficulty": 3,
+      "prompt": "An architect proposes running the ledger in two regions with synchronous cross-region commits (≈ 70 ms each). What happens to a hot house account?",
+      "choices": [
+        "Its throughput falls to ≈ 14 postings per second, because postings to it serialise and each waits a cross-region commit",
+        "Nothing: synchronous replication only adds latency, not a throughput limit",
+        "Its throughput doubles because two regions accept writes",
+        "It becomes eventually consistent"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Single-writer-per-account throughput is ≈ 1 / commit latency: 1 / 0.07 s ≈ 14 per second. Latency is the throughput limit for a serialised resource, so 'only latency' is wrong. Two regions don't both accept writes to one account without conflicts; synchronous replication still has one writer. Synchronous commits make it more strongly consistent, not less. The usual answer is a home region per account with a nearby synchronous standby.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C9-013",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "money"
+      ],
+      "difficulty": 1,
+      "prompt": "How should the transfers API represent an amount?",
+      "choices": [
+        "An integer in the currency's minor units plus an ISO 4217 currency code, e.g. {\"value\": 2510, \"currency\": \"USD\"}",
+        "A JSON number in major units, e.g. 25.10",
+        "A float64 in major units, rounded to two decimals by each service",
+        "A string such as \"$25.10\" parsed by each service"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Integer minor units with a currency avoid binary floating-point drift and make the exponent explicit per currency (JPY has none, most have two, a few three). A JSON number is parsed as a float by many clients, so 25.10 becomes 25.099999…; rounding in each service is how sub-cent differences accumulate. A formatted string pushes parsing and locale problems onto every consumer.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C9-014",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "A client retries POST /v1/transfers with the same Idempotency-Key but a different amount. What should the API return?",
+      "choices": [
+        "422 idempotency_key_reused, posting and replaying nothing",
+        "The original 201 response, replayed",
+        "A new 201: the different body makes it a new transfer",
+        "409 Conflict with Retry-After"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The key names one intent; a different body under it is a client bug or an attack, so reject it (A1's rule, the lab's ErrKeyReused) and keep a request fingerprint with the key to detect it. Replaying the original would tell the client its new request succeeded. Executing it as new defeats the key. 409 with Retry-After is for a duplicate still in flight, not for a mismatched body.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C9-015",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "async"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does the API return 201 for a P2P transfer but 202 for a withdrawal to an external bank?",
+      "choices": [
+        "A P2P transfer is one local ledger transaction that completes in the request; a withdrawal depends on a processor whose outcome may take hours or come back days later",
+        "Withdrawals are larger amounts and need manual approval",
+        "201 is for internal clients and 202 for external ones",
+        "202 lets the client retry without an idempotency key"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "P2P needs only the ledger, so the request can return the committed result. A withdrawal's money is reserved immediately but its outcome is decided by the processor (and can be reversed by a return), so the API accepts it and exposes status. Amount and approval aren't the reason. Status codes describe the operation, not the caller. Every money-moving request needs an idempotency key regardless of status code.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C9-016",
+      "type": "multi",
+      "tags": [
+        "data-model",
+        "audit"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the tables that should be append-only in this design.",
+      "choices": [
+        "postings",
+        "entries",
+        "withdrawal_events",
+        "inbound_events (processed webhooks)",
+        "balances",
+        "withdrawals.state"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "Postings and entries are the journal; withdrawal events and processed webhooks are logs of what happened, and all four are only ever inserted. balances is a projection of entries, updated in the same transaction and recomputable, so it's mutable but derived. A withdrawal's state is a summary of its events that changes as they arrive; the events are the record.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C9-017",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "api-design"
+      ],
+      "difficulty": 2,
+      "prompt": "The mobile app generates a new Idempotency-Key for every HTTP attempt, including retries after a network error. What happens?",
+      "choices": [
+        "The key dedupes nothing: a retry after a lost response carries a new key and executes the transfer again",
+        "It's fine, because the server also dedupes by amount and recipient",
+        "It's safer, because each attempt is tracked separately",
+        "The server rejects the second attempt with 422"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A key must be generated once per member intent (the tap) and reused on every retry; a fresh key per attempt makes each retry a new request. Deduping by amount and recipient would block legitimate repeated payments (two identical rent shares). Tracking attempts separately is exactly what makes duplicates. 422 is for the same key with a different body, which isn't this case.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C9-018",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "After a successful transfer, the app showed the old balance, and some members tapped Send again. What's the best fix in the API?",
+      "choices": [
+        "Return the new balance from the write transaction in the response (and an as_of_seq for later reads)",
+        "Add a 2-second sleep before the app refreshes the balance",
+        "Serve all balance reads from the primary forever",
+        "Disable the Send button for 10 seconds after a transfer"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The write knows the new balance exactly, so returning it gives read-your-writes without a replica race; a sequence number lets later reads ask for at least that version. A sleep guesses at replica lag. Moving every read to the primary works but spends primary capacity on display paths that don't need it. Disabling the button hides the symptom; the idempotency key handles double taps, and the stale display remains.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C9-019",
+      "type": "single",
+      "tags": [
+        "data-model",
+        "saga"
+      ],
+      "difficulty": 2,
+      "prompt": "Where should a withdrawal's status (reserved, submitted, unknown, paid, failed, returned) live?",
+      "choices": [
+        "In the withdrawal workflow (a state plus an append-only event list); the ledger holds only postings keyed by withdrawal id and step",
+        "In a status column on the reserve posting, updated as webhooks arrive",
+        "In the processor only; we query it when needed",
+        "In the notification service, which already receives every event"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Status changes many times and is driven by an external party; postings are immutable accounting facts. Keeping them apart, linked by keys like wd_123:reserve and wd_123:settle, lets each step retry safely without editing the books. A status column on a posting turns the journal mutable. The processor is not your system of record for your own workflow, and querying it for every read couples you to its availability. Notifications consume events; they don't own state.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C9-020",
+      "type": "single",
+      "tags": [
+        "design",
+        "latency",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "A card processor sends an authorisation to your endpoint and needs an answer fast. What does the authorisation path do?",
+      "choices": [
+        "Applies local risk rules, then one ledger transaction that checks available balance and places a hold keyed by the processor's auth id; no money moves and no remote calls are made",
+        "Posts a debit to the member and a credit to the settlement account immediately",
+        "Calls the payout processor to confirm funds, then answers",
+        "Queues the request and answers asynchronously with a webhook"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Authorisation reserves funds (a hold) and clearing moves them later; the budget is ≈ 100 ms with very high availability, so the path avoids remote dependencies. Posting the debit at authorisation breaks when clearing differs or never arrives. Calling another processor puts a second vendor's latency in the path. The network needs a synchronous decision; answering late means a stand-in decision you didn't make.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-the-money-paths-traced"
+    },
+    {
+      "id": "C9-021",
+      "type": "multi",
+      "tags": [
+        "consistency",
+        "design"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL the state in this design that must be strongly consistent (a decision reads it and then writes).",
+      "choices": [
+        "A member's available balance",
+        "Idempotency keys",
+        "Hold state transitions (active to captured or voided)",
+        "The balance shown on the app's home screen",
+        "Events delivered to the notification service",
+        "The hash-chained audit stream's replica in another account"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Available balance, idempotency keys and hold transitions are read and written as one decision, so they live in the ledger database's transactions. The home-screen balance is a display and can come from a replica with an as-of marker. Notifications are eventual by nature. The audit stream is append-only and ordered by sequence; its replicas can lag without breaking an invariant.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-the-money-paths-traced"
+    },
+    {
+      "id": "C9-022",
+      "type": "single",
+      "tags": [
+        "reliability",
+        "bulkhead",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "The payout processor is down for 40 minutes. Why do P2P transfers keep working in the reference design?",
+      "choices": [
+        "P2P needs only the ledger database, and processor calls happen in workers behind a bulkhead and breaker, never in the API's request path",
+        "P2P transfers are queued until the processor recovers",
+        "The API fails over P2P traffic to a second processor",
+        "P2P transfers are processed by the processor too, but with higher priority"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Isolation is the point: P2P is one local transaction, and the processor sits behind workers with their own pools, timeouts and breaker, so its outage can't consume the API's threads. Queuing P2P would make a working path wait for an unrelated vendor. P2P doesn't use a processor at all, so neither failover nor priority applies.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-the-money-paths-traced"
+    },
+    {
+      "id": "C9-023",
+      "type": "single",
+      "tags": [
+        "webhooks",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "A webhook arrives for a payout id you don't have yet; your transaction creating the payout probably hasn't committed. What's the right handling?",
+      "choices": [
+        "Record the event (unique on the processor's event id), acknowledge, park it as unmatched and retry the match for a few minutes; if it still doesn't match, raise a break",
+        "Return 404 so the processor retries later",
+        "Drop it: a payout we don't know about isn't ours",
+        "Create a payout record from the webhook's contents"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Recording before acknowledging means nothing is lost, and parking covers the common race where the processor is faster than your commit. A 404 relies on the processor's retry schedule, which can run out. Dropping it loses a real event (or hides a real break such as a second environment on the same account). Creating a payout from a webhook lets an external message invent money movements in your books.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-the-money-paths-traced"
+    },
+    {
+      "id": "C9-024",
+      "type": "single",
+      "tags": [
+        "design",
+        "holds",
+        "banking"
+      ],
+      "difficulty": 3,
+      "prompt": "A teammate wants to reserve a member's funds for a withdrawal with an expiring hold (TTL 24 h) instead of posting to payout_in_transit. What's the main problem?",
+      "choices": [
+        "The processor's outcome can arrive after the TTL; the hold expires and frees money that has actually left, so the member can spend it twice",
+        "Holds can't be captured, so the withdrawal can never complete",
+        "Holds are slower to write than postings",
+        "Holds don't support idempotency keys"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Holds fit reservations whose lifetime an external party defines, like card authorisations. A payout's outcome can take days (or come back as a return), so the reservation must not lapse on a timer; posting to an in-transit account keeps the money out of reach until the outcome is known. Holds can be captured. Write cost is similar. Holds in the lab are idempotent per key.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-the-money-paths-traced"
+    },
+    {
+      "id": "C9-025",
+      "type": "single",
+      "tags": [
+        "double-entry",
+        "money",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "A member sends a $25.00 P2P transfer and pays a $0.30 fee. Which single posting is correct (amounts in cents)?",
+      "choices": [
+        "debit member:A 2,530; credit member:B 2,500; credit fee_revenue 30",
+        "debit member:A 2,500; credit member:B 2,500; then a separate posting debit member:A 30 / credit fee_revenue 30",
+        "debit member:A 2,530; credit member:B 2,530; debit fee_revenue 30",
+        "credit member:A 2,530; debit member:B 2,500; debit fee_revenue 30"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "One multi-leg posting with debits = credits = 2,530 keeps the transfer and its fee atomic. Two postings are balanced individually but a crash between them splits the transfer from its fee and needs two keys to line up on replay. Crediting B 2,530 and debiting fee revenue is unbalanced (2,560 vs 2,530) and pays the fee to the recipient. Swapping all sides moves money from B to A.",
+      "ref": "unit-2-deep-dives.md#5-the-ledger-core-balanced-postings-holds-reversals-and-concurrency"
+    },
+    {
+      "id": "C9-026",
+      "type": "single",
+      "tags": [
+        "double-entry",
+        "audit"
+      ],
+      "difficulty": 2,
+      "prompt": "A posting of $400 should have been $340. What's the correct fix?",
+      "choices": [
+        "Reverse the original (a mirror posting linked to it) and post a new $340 posting, leaving the original in the journal",
+        "UPDATE both entries of the original posting to 34,000; it stays balanced",
+        "DELETE the original posting and insert a corrected one with the same sequence number",
+        "Adjust the member's balance column by 6,000 and leave the entries alone"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Corrections are new postings: reverse-and-repost (or a linked difference posting) keeps the history, and every posting still means one real-world event, which reconciliation and disputes rely on. An update keeps the posting balanced but destroys the evidence and contradicts the network's settled amount. Deleting breaks the append-only journal and its sequence. A balance adjustment without entries makes balances disagree with the journal, which the audit job flags.",
+      "ref": "unit-2-deep-dives.md#5-the-ledger-core-balanced-postings-holds-reversals-and-concurrency"
+    },
+    {
+      "id": "C9-027",
+      "type": "multi",
+      "tags": [
+        "concurrency",
+        "transactions",
+        "isolation"
+      ],
+      "difficulty": 3,
+      "prompt": "Fifty card authorisations for the same member arrive at once. Select ALL the mechanisms that correctly prevent the available balance from going below zero in a relational ledger.",
+      "choices": [
+        "SELECT ... FOR UPDATE on the member's balance row (accounts locked in sorted order), check, then write in the same transaction",
+        "A single conditional UPDATE ... SET held = held + :amt WHERE account_id = :a AND balance - held >= :amt, then check the row count",
+        "SERIALIZABLE isolation with a bounded retry on serialization failures",
+        "REPEATABLE READ with a SELECT of the balance as a separate statement before inserting the hold",
+        "Caching the balance in Redis and checking the cache before the insert"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "A row lock, a single-statement conditional update and serializable isolation each make the check and the write atomic per account. Under snapshot-based REPEATABLE READ, both transactions read the same snapshot and both pass; a hold insert doesn't conflict on the balance row, so nothing aborts. A cache check is a separate, non-atomic read of possibly stale data.",
+      "ref": "unit-2-deep-dives.md#5-the-ledger-core-balanced-postings-holds-reversals-and-concurrency"
+    },
+    {
+      "id": "C9-028",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "transactions"
+      ],
+      "difficulty": 2,
+      "prompt": "Two transfers, A to B and B to A, run at the same moment, and each locks its source account first. What happens, and what's the fix?",
+      "choices": [
+        "They can deadlock (each holds one lock and waits for the other); lock accounts in a fixed global order such as sorted ids",
+        "One transfer is silently lost; use last-write-wins",
+        "Both succeed and money is created; add a CHECK constraint",
+        "Nothing: row locks never deadlock"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Locking in request order lets each transaction hold the lock the other needs; the database kills one, and under load that's latency and noise. Sorted lock order removes the cycle. No write is silently lost with row locks; last-write-wins on money would be wrong anyway. Postings are balanced, so money isn't created. Row locks can absolutely deadlock.",
+      "ref": "unit-2-deep-dives.md#5-the-ledger-core-balanced-postings-holds-reversals-and-concurrency"
+    },
+    {
+      "id": "C9-029",
+      "type": "single",
+      "tags": [
+        "holds",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "A $900 hold on a member's $1,000 account passed its expiry an hour ago, but the hourly sweeper has failed and hasn't marked it expired. The member tries to spend $1,000. What should happen?",
+      "choices": [
+        "Succeed: expiry is evaluated at read time, so the lapsed hold no longer counts against available balance",
+        "Fail with insufficient funds until the sweeper marks the hold expired",
+        "Succeed, and the hold is captured for $900 at the same time",
+        "Fail, because expired holds must be voided by an operator"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Lazy expiry makes correctness independent of the sweeper: available = balance minus holds whose expiry is still in the future. Waiting for the sweeper is the failure story (members told money is missing). Capturing an expired hold is not allowed; late clearings take a separate path. Requiring an operator turns a timer into a support queue.",
+      "ref": "unit-2-deep-dives.md#5-the-ledger-core-balanced-postings-holds-reversals-and-concurrency"
+    },
+    {
+      "id": "C9-030",
+      "type": "numeric",
+      "tags": [
+        "holds",
+        "double-entry"
+      ],
+      "difficulty": 2,
+      "prompt": "A member's balance is 1,000 cents. A hold of 600 is placed, then captured for 450 to a merchant (the remainder is released). What is the member's available balance after the capture, in cents?",
+      "value": 550,
+      "tolerance": 0.01,
+      "unit": "cents",
+      "explanation": "The capture posts debit member 450 / credit merchant 450, so the balance is 550; the hold closes and its remaining 150 is released in the same step, so no hold reduces available: available = 550. This is TestHold_PartialCaptureReleasesRemainderAndIsIdempotent.",
+      "ref": "unit-2-deep-dives.md#5-the-ledger-core-balanced-postings-holds-reversals-and-concurrency"
+    },
+    {
+      "id": "C9-031",
+      "type": "single",
+      "tags": [
+        "double-entry",
+        "reversals",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "Alice sent Bob $400; Bob has already spent it. Support tries to reverse Alice's transfer, and the ledger rejects the reversal with insufficient funds. What does this mean?",
+      "choices": [
+        "The rule is working: a reversal is an ordinary posting, and undoing a completed transfer after the money moved on is a recovery workflow, not a ledger operation",
+        "A bug: reversals should bypass the no-negative rule",
+        "The ledger should reverse it partially, up to Bob's balance",
+        "Support should edit Bob's balance and then retry"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Reversals obey the same rules as every posting; failing tells the business the money is gone, so recovery means asking Bob, collections, or a policy-approved loss. Bypassing the rule drives a member negative by operator action (the lab's break-it). Partial reversal invents a business rule silently. Editing a balance breaks the journal and the audit.",
+      "ref": "unit-2-deep-dives.md#5-the-ledger-core-balanced-postings-holds-reversals-and-concurrency"
+    },
+    {
+      "id": "C9-032",
+      "type": "multi",
+      "tags": [
+        "hot-key",
+        "double-entry",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "fee_revenue takes a leg of every posting and its balance row is the bottleneck. Select ALL the changes that relieve it without breaking the ledger's invariants.",
+      "choices": [
+        "Append its entries without updating a balance row in the posting transaction, and maintain its balance asynchronously",
+        "Split it into N sub-accounts chosen by hash of the posting id, summed for reports",
+        "Aggregate fee legs into one posting per batch where flows are batched",
+        "Add read replicas for the ledger database",
+        "Drop the fee legs and compute fees at month end from transaction counts"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "fee_revenue may go negative and no decision reads it, so its legs can be appended with an async balance, spread across sub-accounts, or aggregated; every posting still balances and balances still equal journal sums. Read replicas don't help a write bottleneck. Dropping legs makes postings unbalanced and loses the audit trail of each fee.",
+      "ref": "unit-2-deep-dives.md#5-the-ledger-core-balanced-postings-holds-reversals-and-concurrency"
+    },
+    {
+      "id": "C9-033",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "machine-coding",
+        "testing"
+      ],
+      "difficulty": 3,
+      "prompt": "In labs/c9/ledger, you move the available-funds check outside the critical section (read the balance under the lock, unlock, lock again, then write). What do you expect when you run the concurrency tests with -race?",
+      "choices": [
+        "The race detector may stay silent, but TestHold_ConcurrentHoldsNeverOverReserve grants more than 3 holds of 300 against 1,000 (the transfer test, which checks only final balances, catches it only sometimes)",
+        "The race detector reports a data race on the balances map and the tests pass",
+        "Money is created: the members' total exceeds 8,000",
+        "The tests deadlock and time out"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Every access is still under a lock, so there's no data race to detect, only a broken invariant: several requests pass the check before any writes, the READ COMMITTED double-spend in Go. The hold test starts 50 goroutines together and fails reliably; the transfer test checks balances only at the end, so an overdraft that later incoming transfers refill goes unseen. Postings stay balanced, so money isn't created; members are overdrawn. Releasing and re-acquiring one mutex can't deadlock.",
+      "ref": "unit-2-deep-dives.md#5-the-ledger-core-balanced-postings-holds-reversals-and-concurrency"
+    },
+    {
+      "id": "C9-034",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "concurrency",
+        "banking"
+      ],
+      "difficulty": 3,
+      "prompt": "A huge marketplace merchant's account receives thousands of credits per second and is debited by refunds and payouts. Which statement is right?",
+      "choices": [
+        "Credits to it can be appended safely; debits must still serialise (or its floor must be split into budgets), because each debit must see the previous one's effect",
+        "Both credits and debits can be appended without locks, like a house account",
+        "Sub-accounts solve it completely, with no change to how the floor is checked",
+        "It must move to a separate database per merchant"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Credits can't violate a floor, so they don't need the check; debits against a floor do. Unlike house accounts, the merchant account has a floor, so appending its debits without the check risks overdraft. Sub-accounts help only if each has its own floor (an escrow budget), which changes the rule. A database per merchant doesn't remove the per-account serialisation.",
+      "ref": "unit-2-deep-dives.md#5-the-ledger-core-balanced-postings-holds-reversals-and-concurrency"
+    },
+    {
+      "id": "C9-035",
+      "type": "single",
+      "tags": [
+        "timeouts",
+        "idempotency",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "A withdrawal worker's call to the processor times out after 10 s. What should happen next?",
+      "choices": [
+        "Mark the withdrawal unknown, leave the money in payout_in_transit, and let a resolver query the processor by our reference after a backoff",
+        "Mark it failed and reverse the reserve so the member can retry",
+        "Retry immediately with a new request id",
+        "Mark it paid, since most calls succeed"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A timeout is an unknown outcome: the processor may have accepted it. Parking the money and asking by reference resolves it without guessing. Treating it as failed lets the member retry and get paid twice if the first went through. A new request id makes the retry a second payout. Treating it as paid loses money when it actually failed.",
+      "ref": "unit-2-deep-dives.md#6-idempotency-end-to-end-and-the-processor-boundary"
+    },
+    {
+      "id": "C9-036",
+      "type": "single",
+      "tags": [
+        "webhooks",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "After an incident, the processor re-sends three hours of topup.settled webhooks. Each re-send has a new delivery id and the same event id. Your handler dedupes on the delivery id. What happens?",
+      "choices": [
+        "Every re-sent event is processed again and top-ups are credited twice",
+        "Nothing: dedupe by delivery id catches re-sends",
+        "The signature check rejects the re-sends",
+        "The processor's own idempotency prevents double credits"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The delivery id names an attempt; the event id names the fact. Deduping on the attempt lets every re-send through. Re-sends are legitimately signed, so the signature check passes. The processor's idempotency protects calls you make to it, not webhooks it sends you. Dedupe on the event id, and key the ledger posting by the business step so even a new event id for the same fact replays.",
+      "ref": "unit-2-deep-dives.md#6-idempotency-end-to-end-and-the-processor-boundary"
+    },
+    {
+      "id": "C9-037",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "retries",
+        "timeouts"
+      ],
+      "difficulty": 3,
+      "prompt": "Your processor retains idempotency keys for 24 hours. A stuck withdrawal's resolver wants to resubmit it after 30 hours with the same key. What's the risk, and what should it do?",
+      "choices": [
+        "The processor has forgotten the key, so the resubmission is a new payout and may duplicate one that was accepted; query by reference first and decide with the settlement report",
+        "No risk: the same key always dedupes",
+        "No risk: after 24 hours the first attempt has certainly failed",
+        "Generate a new key, because the old one expired"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The far side's key retention bounds how long blind retries are safe. After it, the key protects nothing, so the resolver must look the payout up by our reference and use the settlement report when in doubt. 'Same key always dedupes' ignores retention. A long-running processor job may still be in flight. A new key guarantees a second payout if the first succeeded.",
+      "ref": "unit-2-deep-dives.md#6-idempotency-end-to-end-and-the-processor-boundary"
+    },
+    {
+      "id": "C9-038",
+      "type": "multi",
+      "tags": [
+        "idempotency",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the keys that should protect a withdrawal end to end.",
+      "choices": [
+        "The member's Idempotency-Key, generated once per tap and reused on retries",
+        "The withdrawal id sent to the processor as its idempotency key and reference",
+        "Step keys for each ledger posting, such as wd_123:reserve and wd_123:settle",
+        "The processor's event id for each webhook",
+        "A fresh UUID for every processor call attempt",
+        "The webhook's received-at timestamp"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "Each hop's key names a business fact: the member's intent, the withdrawal, the posting step, the processor's event. A fresh UUID per attempt makes each retry a new payout. A received-at timestamp differs for every delivery and dedupes nothing.",
+      "ref": "unit-2-deep-dives.md#6-idempotency-end-to-end-and-the-processor-boundary"
+    },
+    {
+      "id": "C9-039",
+      "type": "single",
+      "tags": [
+        "webhooks",
+        "saga",
+        "banking"
+      ],
+      "difficulty": 3,
+      "prompt": "A webhook says a payout failed; you reverse the reserve. An hour later another webhook says it was paid. What should the system do?",
+      "choices": [
+        "Treat it as a contradiction: don't apply it automatically, put it in the break queue, query the processor and check the settlement report",
+        "Apply the latest webhook: post the settlement and ignore the reversal",
+        "Ignore the second webhook because the withdrawal is already final",
+        "Delete the reversal posting and post the settlement"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A state machine that rejects contradictory transitions keeps guesses out of the books; a human with the processor's authoritative status and the settlement file decides, and any fix is a new keyed posting. Last-writer-wins lets the processor's message order move money. Ignoring it may hide a real payout of money already returned to the member. Deleting a posting breaks the append-only journal.",
+      "ref": "unit-2-deep-dives.md#6-idempotency-end-to-end-and-the-processor-boundary"
+    },
+    {
+      "id": "C9-040",
+      "type": "single",
+      "tags": [
+        "saga",
+        "patterns"
+      ],
+      "difficulty": 2,
+      "prompt": "A withdrawal is a saga: reserve funds, submit to the processor, settle. Which step is the pivot?",
+      "choices": [
+        "Submitting to the processor: once it sends the money, our system can't compensate it, only recover it",
+        "Reserving funds",
+        "Settling the posting",
+        "Sending the member a notification"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Steps before the pivot are compensatable (the reserve can be reversed), steps after it must be retriable (settle), and the pivot is the point of no return, here the processor executing the payout. Reserve is compensatable by a reversal. Settle is retriable with its step key. Notifications are side effects, not part of the money saga.",
+      "ref": "unit-2-deep-dives.md#6-idempotency-end-to-end-and-the-processor-boundary"
+    },
+    {
+      "id": "C9-041",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "concurrency",
+        "machine-coding"
+      ],
+      "difficulty": 2,
+      "prompt": "In labs/c9/ledger, 100 goroutines call Post with the same Request at the same moment. What must the result be?",
+      "choices": [
+        "Exactly one fresh posting, 99 replays returning that same posting, no errors, and the member debited once",
+        "100 postings, deduplicated later by Audit",
+        "One posting and 99 ErrKeyReused errors",
+        "Some calls may fail with a timeout, which is acceptable"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Same key and same request means replay: the key check and the write happen under the same lock, so only one executes and the rest get the original posting with replayed = true (TestPost_ConcurrentDuplicatesExecuteOnce). Audit doesn't remove duplicates; it checks invariants. ErrKeyReused is for the same key with a different request. A correct implementation has no reason to time out here.",
+      "ref": "unit-2-deep-dives.md#6-idempotency-end-to-end-and-the-processor-boundary"
+    },
+    {
+      "id": "C9-042",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "machine-coding"
+      ],
+      "difficulty": 2,
+      "prompt": "In labs/c9/ledger, a Post with key k8 is rejected for insufficient funds. The client then sends a corrected request (a smaller amount) with the same key k8. What happens?",
+      "choices": [
+        "It succeeds: a rejected request records nothing, so its key isn't consumed",
+        "ErrKeyReused, because the key was already used",
+        "The original rejection is replayed",
+        "It succeeds and also posts the original amount"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The ledger records the key only when it applies a posting, so a rejected request leaves no trace and the corrected request may reuse the key (TestPost_RejectsInvalidRequestsWithoutPartialEffects). An HTTP layer may choose to cache and replay declines instead; both are defensible if consistent. ErrKeyReused applies when a key already has a posting. Posting the original amount would be a partial effect from a rejected request.",
+      "ref": "unit-2-deep-dives.md#6-idempotency-end-to-end-and-the-processor-boundary"
+    },
+    {
+      "id": "C9-043",
+      "type": "single",
+      "tags": [
+        "saga",
+        "idempotency",
+        "double-entry"
+      ],
+      "difficulty": 3,
+      "prompt": "A saga's compensation reversed a withdrawal's reserve; the orchestrator crashed before recording that, restarted, and ran the compensation again with a new key. The member was credited twice. What's the fix?",
+      "choices": [
+        "Key the compensation by the business step (wd_123:reverse), so the rerun replays the first reversal; the ledger also refuses a second reversal of the same posting",
+        "Make the orchestrator never crash",
+        "Run compensations only from a manual queue",
+        "Dedupe compensations by the time they ran"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Compensations are retriable steps and need step keys like any other posting; the lab adds a second guard by returning ErrAlreadyReversed for a new key on an already reversed posting. Crashes can't be ruled out. A manual queue doesn't make the step idempotent, it just slows it. Timestamps differ between runs and dedupe nothing.",
+      "ref": "unit-2-deep-dives.md#6-idempotency-end-to-end-and-the-processor-boundary"
+    },
+    {
+      "id": "C9-044",
+      "type": "single",
+      "tags": [
+        "exactly-once",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "What makes a payout's effect exactly once when no hop delivers exactly once?",
+      "choices": [
+        "At-least-once delivery at each hop, an idempotent apply keyed by the business fact at each hop, and reconciliation to catch hops whose guarantee was weaker than advertised",
+        "Enabling exactly-once semantics on the message broker",
+        "A distributed transaction spanning the ledger and the processor",
+        "Retrying until the processor returns 200"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Exactly-once is an end-to-end property built from retries plus idempotent applies, with reconciliation as the backstop. Broker exactly-once stops at the broker's boundary; the processor call is outside it. Processors don't take part in your distributed transactions. Retrying until 200 without a stable key is how duplicates happen.",
+      "ref": "unit-2-deep-dives.md#6-idempotency-end-to-end-and-the-processor-boundary"
+    },
+    {
+      "id": "C9-045",
+      "type": "multi",
+      "tags": [
+        "reconciliation",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "Reconciling today's statement with the journal: ref-2 is 200 in the ledger and 250 on the statement; ref-9 is on the statement only; posting tx_3 has ref-3, which the statement lacks; ref-5 appears twice on the statement. Select ALL the correct classifications.",
+      "choices": [
+        "ref-2 is Mismatched (ledger 200, statement 250)",
+        "ref-9 is MissingInLedger",
+        "tx_3 is MissingOnStatement",
+        "ref-5 is a DuplicateRef and neither copy is matched",
+        "ref-5 is Matched twice to one posting",
+        "A posting with no external reference is MissingOnStatement"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "These are the lab's Report fields (TestReconcile_ReportsEveryKindOfDiscrepancy). A duplicated statement line must be flagged, never matched twice, or the processor's double settlement is hidden. Postings without an external reference are internal transfers that never appear on a statement, so they're never reported.",
+      "ref": "unit-2-deep-dives.md#7-reconciliation-and-audit"
+    },
+    {
+      "id": "C9-046",
+      "type": "single",
+      "tags": [
+        "reconciliation",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "The processor's SFTP job re-ran and today's settlement report contains yesterday's file again. What should the reconciliation system do?",
+      "choices": [
+        "Refuse a file id it has already processed, check control totals, and flag duplicate references loudly; never match or post both copies",
+        "Match each line to the existing postings; duplicates are harmless if they match",
+        "Post the second copy, since the processor says it happened",
+        "Ignore the whole report until the processor apologises"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "File identity and control totals catch the duplicate before line matching, and duplicate references are a break: they may mean the processor will settle twice, and an import that posts them would credit twice. Matching both hides the problem. Posting from a duplicated file doubles money. Ignoring the report means today's real lines go unreconciled.",
+      "ref": "unit-2-deep-dives.md#7-reconciliation-and-audit"
+    },
+    {
+      "id": "C9-047",
+      "type": "single",
+      "tags": [
+        "reconciliation",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "What are the three sources in a three-way reconciliation for the platform?",
+      "choices": [
+        "Our ledger, the processor's settlement report, and the bank statement for our settlement account",
+        "The primary database, a read replica, and a backup",
+        "The API logs, the webhook logs and the ledger",
+        "The member's app, the processor's dashboard and the ledger"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Three-way compares what we recorded, what the processor says it did and will settle, and what money actually moved in the bank. A database and its copies agree by construction and prove nothing about the outside world. Logs are useful for investigating breaks but aren't independent statements of money movement. Apps and dashboards are views, not sources.",
+      "ref": "unit-2-deep-dives.md#7-reconciliation-and-audit"
+    },
+    {
+      "id": "C9-048",
+      "type": "single",
+      "tags": [
+        "reconciliation",
+        "security"
+      ],
+      "difficulty": 3,
+      "prompt": "A break exists between the ledger and the bank statement that the processor's report doesn't explain. Why is this the most urgent kind?",
+      "choices": [
+        "Money moved in the bank account that neither our records nor the processor's explain: possible fraud or misrouted settlement",
+        "It's always a timing difference that clears tomorrow",
+        "It means the processor's report is late",
+        "It only affects reporting, not member balances"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Ledger-processor breaks usually trace to a missed webhook or an import bug, and processor-bank breaks to fees or settlement timing; an unexplained ledger-bank difference means real money moved outside every record. Assuming timing hides a loss. A late report produces processor-side breaks, not this. Unexplained cash is a balance-sheet problem, and may involve member funds.",
+      "ref": "unit-2-deep-dives.md#7-reconciliation-and-audit"
+    },
+    {
+      "id": "C9-049",
+      "type": "single",
+      "tags": [
+        "audit",
+        "invariants"
+      ],
+      "difficulty": 2,
+      "prompt": "During an incident a DBA adds 1 cent to an account's balance row directly, with no posting. Which check catches it?",
+      "choices": [
+        "Recomputing every balance from the journal and comparing it with the stored balance",
+        "Checking that every posting's debits equal its credits",
+        "Comparing today's total posting count with yesterday's",
+        "Reconciling with the processor's settlement report"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The edit changes a balance without any entry, so every posting still balances; only recomputing balances from entries exposes it (the lab's Audit: 'balance ... but journal sums to ...'). Posting-level checks pass. Counts are unaffected. The processor's report knows nothing about an internal balance row.",
+      "ref": "unit-2-deep-dives.md#7-reconciliation-and-audit"
+    },
+    {
+      "id": "C9-050",
+      "type": "single",
+      "tags": [
+        "reconciliation",
+        "operations"
+      ],
+      "difficulty": 2,
+      "prompt": "The suspense account shows a net balance of $47k, but it holds $2.1 M of items in each direction, some over a year old. What's wrong, and what's the fix?",
+      "choices": [
+        "Suspense became a dumping ground; track gross balances by age with owners and SLAs, escalate stale items, and resolve each with a posting",
+        "Nothing: a small net balance means the books are nearly right",
+        "Write off the net $47k and close the account",
+        "Move the items to a second suspense account to start fresh"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Suspense is a to-do list: opposite items netting to a small number can hide large individual breaks, including money owed to members. Aging, ownership and escalation make it shrink. A small net isn't evidence of correctness. Writing off the net loses track of 9,000 individual items. Moving them resets the age and hides them.",
+      "ref": "unit-2-deep-dives.md#7-reconciliation-and-audit"
+    },
+    {
+      "id": "C9-051",
+      "type": "multi",
+      "tags": [
+        "audit",
+        "security",
+        "compliance"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the measures that help prove to an auditor that no journal row was edited or deleted since the quarter close.",
+      "choices": [
+        "No role, including the application's, has UPDATE or DELETE rights on postings and entries",
+        "Every posting is appended to a hash-chained audit stream",
+        "The chain's head hash is anchored periodically somewhere the operators can't rewrite",
+        "A nightly job recomputes balances from the journal and checks the invariants",
+        "A nightly database backup alone",
+        "A report comparing the total number of postings month over month"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "Revoked grants prevent edits, the hash chain makes edits and deletions detectable, the external anchor catches a rewrite of the whole chain, and the audit job catches balance tampering. A backup shows a past state but proves nothing about edits since; it can be rewritten too. Posting counts don't change when a row is edited.",
+      "ref": "unit-2-deep-dives.md#7-reconciliation-and-audit"
+    },
+    {
+      "id": "C9-052",
+      "type": "single",
+      "tags": [
+        "reconciliation",
+        "banking"
+      ],
+      "difficulty": 1,
+      "prompt": "A posting made at 23:58 isn't on today's processor settlement file. What's the most likely classification and action?",
+      "choices": [
+        "A timing difference: age it with an expected resolution date (the next file) and escalate only if it doesn't appear",
+        "A lost payment: reverse it immediately",
+        "A duplicate: delete the posting",
+        "Fraud: freeze the member's account"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Cut-offs mean late postings land on the next file; most breaks are timing and clear on their own, so they carry an expected date and become incidents only if they don't. Reversing immediately would undo a real payment. Nothing suggests a duplicate, and deleting violates the append-only journal. Freezing an account for a cut-off difference punishes the member for a timing artefact.",
+      "ref": "unit-2-deep-dives.md#7-reconciliation-and-audit"
+    },
+    {
+      "id": "C9-053",
+      "type": "numeric",
+      "tags": [
+        "money",
+        "stretch"
+      ],
+      "difficulty": 2,
+      "prompt": "Using a largest-remainder allocation in minor units, $100.00 is split three ways so the legs sum exactly to the total. What is the largest leg, in cents?",
+      "value": 3334,
+      "tolerance": 0.001,
+      "unit": "cents",
+      "explanation": "10,000 / 3 = 3,333 each with 1 cent left over, which goes to one leg by a fixed rule: 3,334 + 3,333 + 3,333 = 10,000. Rounding each share and rounding the balancing leg to fit (99.99) loses a cent per split. The rule must be deterministic so a replay produces identical entries.",
+      "ref": "unit-2-deep-dives.md#8-stretch-money-representation-multi-currency-pci-scope-and-scaling-past-one-primary"
+    },
+    {
+      "id": "C9-054",
+      "type": "single",
+      "tags": [
+        "money",
+        "double-entry",
+        "stretch"
+      ],
+      "difficulty": 2,
+      "prompt": "A member converts $110.00 to €100.00. How should it be posted?",
+      "choices": [
+        "Two linked postings, one per currency, through FX position accounts: debit member:usd / credit fx_position:usd, and debit fx_position:eur / credit member:eur",
+        "One posting: debit member:usd 11,000 / credit member:eur 10,000",
+        "One posting in USD with the euro amount converted at today's rate",
+        "No posting: update both balances in one transaction"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A posting must balance in one currency, so a conversion is a pair of postings, and the FX position accounts show the platform's open position for treasury. A single cross-currency posting doesn't balance in any meaningful sense and breaks the per-currency zero-sum invariant. Recording euros as converted dollars loses the euro balance. Balance updates without postings break the journal.",
+      "ref": "unit-2-deep-dives.md#8-stretch-money-representation-multi-currency-pci-scope-and-scaling-past-one-primary"
+    },
+    {
+      "id": "C9-055",
+      "type": "single",
+      "tags": [
+        "security",
+        "compliance",
+        "stretch"
+      ],
+      "difficulty": 2,
+      "prompt": "How do you keep the ledger, the authorisation service and the support tools out of PCI scope?",
+      "choices": [
+        "Tokenise card data at the edge (the processor or a vault holds card numbers); everything else stores tokens and the last four digits, and logs redact at the source",
+        "Encrypt card numbers in the ledger database with a key in the same database",
+        "Store card numbers only in logs, not tables",
+        "Hash card numbers with SHA-256 and store the hash everywhere"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Scope follows where cardholder data can appear, so keep it in one sealed component and pass tokens elsewhere. Encryption with a co-located key still leaves the database handling card data. Logs are systems too; a PAN in a log puts the pipeline in scope. Unsalted hashes of card numbers can be brute-forced because the space of valid card numbers is small, so a hash is not a token.",
+      "ref": "unit-2-deep-dives.md#8-stretch-money-representation-multi-currency-pci-scope-and-scaling-past-one-primary"
+    },
+    {
+      "id": "C9-056",
+      "type": "single",
+      "tags": [
+        "sharding",
+        "saga",
+        "stretch"
+      ],
+      "difficulty": 3,
+      "prompt": "The ledger is sharded by account; A is on shard 1 and B on shard 2. How should a transfer from A to B work?",
+      "choices": [
+        "A keyed saga through per-shard clearing accounts: debit A / credit clearing on shard 1, then via an outbox event debit clearing / credit B on shard 2, with a keyed compensation if the second step fails permanently",
+        "A two-phase commit coordinator holding locks on both rows until both shards agree",
+        "Debit A on shard 1 and credit B on shard 2 in parallel with no link between them",
+        "Move B's account to shard 1 for the duration of the transfer"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Two local transactions with step keys, an outbox to drive the second, visible in-flight money in clearing accounts and an audit check that every out has an in or a compensation: no cross-shard locks. A coordinator crash can hold locks on both rows for minutes. Unlinked parallel writes can leave one side applied and nothing to detect it. Moving accounts per transfer is a migration, not a transfer protocol.",
+      "ref": "unit-2-deep-dives.md#8-stretch-money-representation-multi-currency-pci-scope-and-scaling-past-one-primary"
+    },
+    {
+      "id": "C9-057",
+      "type": "single",
+      "tags": [
+        "pitfalls",
+        "reliability",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "In an interview, a candidate's payments design calls the payout processor inside the withdrawal request and returns 200 when the processor answers. Which senior move fixes it?",
+      "choices": [
+        "Return 202 after reserving funds, and call the processor from workers behind a timeout, breaker and bulkhead, with the withdrawal id as the processor's idempotency key",
+        "Increase the request timeout to 60 seconds",
+        "Retry the processor call three times inside the request",
+        "Cache the processor's last response and return it on timeout"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Moving the processor out of the request path stops its latency and outages from becoming the API's, and the stable key makes the worker's retries safe. A longer timeout makes threads wait longer and still leaves the unknown outcome. Retries inside the request multiply duplicates and latency. A cached response for a different request is simply wrong.",
+      "ref": "unit-2-deep-dives.md#common-mistakes"
+    }
+  ]
+}

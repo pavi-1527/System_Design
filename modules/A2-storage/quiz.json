@@ -1,0 +1,1527 @@
+{
+  "module": "A2",
+  "title": "Storage: data models, indexes, B-tree vs LSM, WAL, transactions, schema evolution",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "A2-001",
+      "type": "single",
+      "tags": [
+        "storage",
+        "nosql"
+      ],
+      "difficulty": 2,
+      "prompt": "A fraud team wants, every hour, all transfers above $5,000 to payees added in the last 7 days, across every credit union. The ledger lives in a key-value store keyed by (account_id, time). What is the best fix?",
+      "choices": [
+        "Add more partitions to the key-value store so the scan runs in parallel on the primary data store",
+        "Raise the replication factor so reads spread across more copies of the same keyed data layout",
+        "Loop over every account's key range from the application tier and filter the results client-side in code",
+        "Replicate the ledger into an analytics copy that supports ad-hoc filters, and scan there"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The query filters on columns (amount, payee age) that the key does not cover, so it is a scan, and a scan belongs in an engine or copy built for ad-hoc queries (CDC or a replica feeding an analytics store). More partitions and more replicas do not add an index on the filter columns; they just spread the same full scan. A client-side loop pays a network round trip per key range (tens of minutes to over an hour at this size) and moves all the data to the application to throw most of it away.",
+      "ref": "unit-1-access-patterns-indexes.md#1-choosing-a-data-model-by-access-pattern"
+    },
+    {
+      "id": "A2-002",
+      "type": "multi",
+      "tags": [
+        "storage",
+        "schema"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the properties that are expensive to retrofit after a storage choice is in production (the 'one-way doors').",
+      "choices": [
+        "Spreading one table's data over more machines by partitioning it",
+        "Adding a read replica to serve reports",
+        "Ad-hoc queryability by columns nobody planned to key on",
+        "Multi-row atomic transactions (committing a debit and a credit together)"
+      ],
+      "answer": [
+        2,
+        3
+      ],
+      "explanation": "Atomicity across rows and ad-hoc queries are properties of the engine's data model; switching later means a migration of every writer and reader. Partitioning is hard work but is a known path (A4) and a read replica is routine, so they are doors you can open later. The unit's rule: choose atomicity and queryability deliberately on day one, add scale when the numbers demand it.",
+      "ref": "unit-1-access-patterns-indexes.md#1-choosing-a-data-model-by-access-pattern"
+    },
+    {
+      "id": "A2-003",
+      "type": "single",
+      "tags": [
+        "storage",
+        "nosql",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "The ledger sees ≈ 175 writes/s and ≈ 1,400 total operations/s at peak, and needs atomic two-account transfers and ad-hoc audit queries. A teammate proposes a wide-column NoSQL store 'because we are a bank with millions of members'. Best assessment?",
+      "choices": [
+        "A relational database cannot serve 1,400 operations per second, so a distributed store is required from day one",
+        "Millions of members means millions of rows, which is more than any single relational database can realistically index or serve, even on well-tuned modern hardware",
+        "Rates are far inside one primary's envelope, so choose for correctness and keep the ledger relational",
+        "Wide-column stores give stronger multi-row atomicity than relational databases, so they are the safer choice for transfers"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "One Postgres or MySQL primary handles on the order of 10k-50k point reads/s and 1k-10k write TPS, so 1,400 ops/s and 175 writes/s are far inside the envelope, and millions of rows are routine for a B-tree. The wide-column store would give up multi-row atomicity and ad-hoc queries (the one-way doors) to buy scale this workload does not need. The claims that relational cannot index millions of rows, that wide-column has stronger atomicity, or that 1,400 ops/s is too much are all false.",
+      "ref": "unit-1-access-patterns-indexes.md#1-choosing-a-data-model-by-access-pattern"
+    },
+    {
+      "id": "A2-004",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "storage"
+      ],
+      "difficulty": 1,
+      "prompt": "The platform posts 5 million ledger entries a day. Assuming the daily peak is 3x the average, what is the peak write rate in entries per second? (Use 86,400 seconds per day.)",
+      "value": 174,
+      "tolerance": 0.15,
+      "unit": "entries/s",
+      "explanation": "5,000,000 / 86,400 = 57.9 entries/s on average; times the 3x peak factor = 173.6, so about 174 entries/s. Using 10^5 seconds per day gives 150, which is also within tolerance. The trap is forgetting the peak factor (58/s) or dividing by 3,600.",
+      "ref": "unit-1-access-patterns-indexes.md#1-choosing-a-data-model-by-access-pattern"
+    },
+    {
+      "id": "A2-005",
+      "type": "single",
+      "tags": [
+        "storage",
+        "nosql"
+      ],
+      "difficulty": 2,
+      "prompt": "A wide-column ledger is modelled with partition key (account_id, month) and clustering column posted_at DESC. The audit team now needs 'everything about transfer tr_8f2k' without knowing the account. What does the wide-column approach imply?",
+      "choices": [
+        "Switch the partition key to transfer_id; the account and month queries will remain just as efficient",
+        "Keep a second table keyed by transfer_id, written by the application (not atomic with the first)",
+        "Add a global secondary index that is always updated atomically with the base table, at no extra write cost",
+        "Run the lookup against the existing table; the engine finds the row through its clustering order within partitions"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Wide-column modelling is 'one table per query': a lookup works efficiently only through the partition key, so a second access path needs a second table that the application must write and keep consistent (outbox or reconciliation, A6). The clustering order only helps within a partition, secondary indexes in these systems are typically maintained asynchronously or scatter-gather, and re-keying by transfer_id would break the account and month queries it was designed for.",
+      "ref": "unit-1-access-patterns-indexes.md#1-choosing-a-data-model-by-access-pattern"
+    },
+    {
+      "id": "A2-006",
+      "type": "single",
+      "tags": [
+        "storage",
+        "schema"
+      ],
+      "difficulty": 2,
+      "prompt": "A balance endpoint computes SELECT SUM(amount_cents) over the account's ledger entries. A payroll account has 40,000 entries and the endpoint is called 600 times a second. What is the best fix?",
+      "choices": [
+        "Cache the SUM result for 60 seconds in the service, since a balance rarely changes within a minute",
+        "Move the ledger to a key-value store, which can read 40,000 entries per account faster than SQL can",
+        "Add an index on amount_cents so the database can answer the SUM with an index-only scan of all entries, avoiding any visit to the table heap",
+        "Keep a denormalised balance column updated in the same transaction as each entry, and reconcile it on a schedule"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The cost is 600 x 40,000 = 24 million rows/s read; storing the running balance moves the work to the write path (one extra UPDATE per posting, inside the transaction that already exists) and a reconciliation job catches drift. A 60-second cache returns stale balances after a transfer, which a bank cannot show. An index on amount_cents does not shorten the scan of one account's entries, and a KV store does not make summing 40,000 rows cheaper.",
+      "ref": "unit-1-access-patterns-indexes.md#1-choosing-a-data-model-by-access-pattern"
+    },
+    {
+      "id": "A2-007",
+      "type": "numeric",
+      "tags": [
+        "btree",
+        "estimation",
+        "indexing"
+      ],
+      "difficulty": 2,
+      "prompt": "A B-tree index has a fan-out of 300: every page, leaf or internal, references about 300 entries or children. How many levels does it need to index 2 billion rows?",
+      "value": 4,
+      "tolerance": 0.2,
+      "unit": "levels",
+      "explanation": "300^3 = 27 million is too few and 300^4 = 8.1 billion is enough, so 4 levels (root, two internal levels, leaf). Three levels would cover only 27 M rows; five levels would only be needed beyond 8.1 B rows.",
+      "ref": "unit-1-access-patterns-indexes.md#2-how-a-b-tree-index-works"
+    },
+    {
+      "id": "A2-008",
+      "type": "single",
+      "tags": [
+        "btree",
+        "indexing"
+      ],
+      "difficulty": 2,
+      "prompt": "An index over a billion rows is 4 levels tall, yet a point lookup typically costs about one or two disk reads on a warm database. Why?",
+      "choices": [
+        "The top levels are tiny and always cached, so only the leaf (and the heap row) is likely read from disk",
+        "Pages on the path are read in parallel, so four levels cost about the same as one level of reads",
+        "Fan-out grows toward the leaves, so the lower levels of the tree need far fewer page reads than the top",
+        "The database stores a hash of each key in the root page and jumps straight to the right leaf from there, so the extra levels cost nothing"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Each level multiplies reach by about 300, so the top levels are tiny and hot: root plus second level is under 40 pages, the third level about 90 MB. A lookup is strictly sequential (each page tells you which page to read next), so it cannot be parallelised, and B-trees do not use a hash shortcut. Fan-out is roughly constant per level rather than growing toward the leaves.",
+      "ref": "unit-1-access-patterns-indexes.md#2-how-a-b-tree-index-works"
+    },
+    {
+      "id": "A2-009",
+      "type": "single",
+      "tags": [
+        "btree",
+        "indexing",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "The transfers table has a random UUID (v4) primary key and 400 million rows. The PK index is about 16 GB and the database has 8 GB of memory for it. Inserts slowed from 2 ms to 200 ms with no code change. What is the most likely cause?",
+      "choices": [
+        "The B-tree has become unbalanced because random keys skew one side of the tree, deepening the path",
+        "Each insert lands on a random, often uncached leaf, causing random reads and later page writes",
+        "Comparing 16-byte UUIDs costs far more CPU than comparing 8-byte integers, and the CPU is saturated",
+        "Every insert now splits pages all the way up to the root, rewriting the whole path each time, which is what makes each insert so much slower than before"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The hot set of a random-key insert is the whole index; once it exceeds memory, inserts miss the cache and cost a random read plus a dirty-page write. B-trees stay balanced by construction whatever the key order, a split reaches the root only occasionally (a rare event per insert), and UUID comparison is nanoseconds, not milliseconds. Time-ordered ids restore the right-edge insert pattern.",
+      "ref": "unit-1-access-patterns-indexes.md#2-how-a-b-tree-index-works"
+    },
+    {
+      "id": "A2-010",
+      "type": "single",
+      "tags": [
+        "btree",
+        "indexing"
+      ],
+      "difficulty": 2,
+      "prompt": "A B-tree leaf has capacity 4 and holds [10 20 30 40]. Using the 'left keeps n/2 keys, right gets the rest, first key of the right page is copied up' rule, what happens when 25 is inserted?",
+      "choices": [
+        "Leaves [10 20] and [25 30 40]; the separator 20 is copied into the parent",
+        "Leaves [10 20] and [25 30 40]; the separator 25 is copied into the parent",
+        "No split: the leaf grows to 5 keys and a separator is added later",
+        "Leaves [10 20 25] and [30 40]; the separator 30 is moved into the parent"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The overflowing leaf [10 20 25 30 40] has n=5 keys; the left page keeps the first n/2 = 2 and the right page gets 25 30 40. The separator is the right page's first key, 25, copied (the key still lives in the leaf). The 3/2 split and 'moved' separator would be an internal-node rule, the separator 20 would not separate the two pages (25 belongs on the right), and a leaf never exceeds its capacity.",
+      "ref": "unit-1-access-patterns-indexes.md#2-how-a-b-tree-index-works"
+    },
+    {
+      "id": "A2-011",
+      "type": "multi",
+      "tags": [
+        "btree",
+        "indexing"
+      ],
+      "difficulty": 2,
+      "prompt": "Keys are inserted in ascending order into a textbook B+tree that splits full pages 50/50. Select ALL statements that are true.",
+      "choices": [
+        "Each insert causes a split of every internal page above the leaf",
+        "The tree becomes unbalanced toward the right and lookups get slower",
+        "The leaf pages end up about half full, so the index is roughly 1.4x larger than one built by random inserts",
+        "Inserts keep landing on the same rightmost leaf, so the set of pages being written is tiny and stays cached"
+      ],
+      "answer": [
+        2,
+        3
+      ],
+      "explanation": "Splitting 50/50 leaves each left page half full and nothing ever inserts there again (about 50% fill versus about 69% for random keys). The hot set is one leaf plus a few internal pages, which is the best case for caching. The tree remains perfectly balanced because it only grows by splitting the root, and internal pages split only when they overflow, once in many thousands of inserts.",
+      "ref": "unit-1-access-patterns-indexes.md#2-how-a-b-tree-index-works"
+    },
+    {
+      "id": "A2-012",
+      "type": "numeric",
+      "tags": [
+        "btree",
+        "estimation",
+        "indexing"
+      ],
+      "difficulty": 2,
+      "prompt": "An index will hold 300 million entries of 24 bytes each (key, header and pointer), and random inserts settle at about 70% page fill. Roughly how large is the index on disk, in GB (10^9 bytes)?",
+      "value": 10.3,
+      "tolerance": 0.15,
+      "unit": "GB",
+      "explanation": "Payload = 300 M x 24 B = 7.2 GB; dividing by the 0.7 fill factor gives about 10.3 GB. Forgetting the fill factor gives 7.2 GB, and treating 70% as the overhead (x1.7) gives 12.2 GB; the correct adjustment is division.",
+      "ref": "unit-1-access-patterns-indexes.md#2-how-a-b-tree-index-works"
+    },
+    {
+      "id": "A2-013",
+      "type": "single",
+      "tags": [
+        "btree",
+        "storage",
+        "schema"
+      ],
+      "difficulty": 3,
+      "prompt": "A team moves a table with a random UUID primary key from PostgreSQL to MySQL/InnoDB and finds inserts degrade even worse. What explains this?",
+      "choices": [
+        "InnoDB cannot split pages, so random keys fill pages one after another and block further inserts into them and force the engine to wait for a background reorganisation before continuing",
+        "InnoDB's table is itself a B+tree on the primary key, so a random PK scatters inserts across the data; the PK also repeats in every secondary index",
+        "InnoDB writes its log synchronously for every secondary index, which random keys multiply many times over",
+        "InnoDB uses hash indexes by default, which cannot handle random keys and fall back to full table scans"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "In a clustered engine the primary-key tree is the table, so a random PK makes every insert land in a random place in the data itself, and secondary index entries carry the PK value, so a 16-byte UUID is repeated in each index. PostgreSQL keeps rows in a separate heap, so only the indexes see the randomness. InnoDB uses B+trees (it does split pages), and the log-flush behaviour is not per secondary index.",
+      "ref": "unit-1-access-patterns-indexes.md#2-how-a-b-tree-index-works"
+    },
+    {
+      "id": "A2-014",
+      "type": "single",
+      "tags": [
+        "btree",
+        "indexing"
+      ],
+      "difficulty": 2,
+      "prompt": "Compare reading 200 consecutive index entries with doing 200 separate point lookups on a B+tree of height 3. Which statement is correct?",
+      "choices": [
+        "Both cost about 200 x height page reads, because every entry in the range needs its own descent from the root",
+        "The point lookups are cheaper, because internal pages are cached and leaf pages are not needed for a lookup",
+        "One descent plus leaf links, about height + leaves - 1 page reads; each lookup re-descends (200 x height)",
+        "The scan costs about 200 page reads, one per entry, because the leaf chain links entries rather than whole pages, and each lookup still ends in a separate leaf"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Leaf pages hold hundreds of entries and are linked left to right, so after one descent a range scan reads each further leaf once (a couple of pages for 200 entries). Point lookups pay the descent every time. The leaf chain is per page, not per entry, and every lookup needs its leaf regardless of how well the internal levels are cached.",
+      "ref": "unit-1-access-patterns-indexes.md#2-how-a-b-tree-index-works"
+    },
+    {
+      "id": "A2-015",
+      "type": "single",
+      "tags": [
+        "btree",
+        "storage"
+      ],
+      "difficulty": 3,
+      "prompt": "After a job deletes 90% of the rows in a big table, the primary-key index file is the same size as before and scans are no faster. Why, and what is the usual remedy?",
+      "choices": [
+        "Engines remove entries from leaves but do not eagerly merge partly empty pages, so the index stays bloated until rebuilt (for example by a concurrent reindex)",
+        "The deleted keys remain in internal pages as separators, so leaves cannot be freed even by a full index rebuild, and the only remedy is to dump and reload the whole table",
+        "The tree height must be reduced first, which needs a full table rewrite while holding an exclusive lock on it",
+        "B-tree deletes only mark entries as dead, and the index file shrinks on its own at the next checkpoint"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Lazy deletion is a deliberate engineering choice: merging pages is complex and contended, so pages stay sparse (fully empty pages can be reclaimed later). Checkpoints flush dirty pages; they do not compact an index. Height is not the issue, and a rebuild creates a fresh, dense tree whatever the old separators were. The lab's Delete behaves the same way.",
+      "ref": "unit-1-access-patterns-indexes.md#2-how-a-b-tree-index-works"
+    },
+    {
+      "id": "A2-016",
+      "type": "single",
+      "tags": [
+        "indexing",
+        "btree"
+      ],
+      "difficulty": 2,
+      "prompt": "An index exists on (account_id, posted_at DESC, id DESC). A dashboard runs WHERE posted_at > now() - interval '1 hour' for all accounts. Can the database seek into the index for this query?",
+      "choices": [
+        "Yes, because the DESC ordering on posted_at lets it jump to the newest entries first across every account",
+        "Yes, but only if the index also INCLUDEs the posted_at column as a payload column in the index entries",
+        "No: posted_at is the second column, so matches are scattered across every account's section",
+        "Yes: any column in a composite index can be used for a seek on its own, whatever its position in the key, which is why leading columns rarely matter for seeks"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A composite index orders entries by the first column, then the second within it, so a constraint on the second column alone selects one run per distinct first-column value, not one contiguous range (the leftmost-prefix rule). The DESC option sets the direction within each account, and INCLUDE adds payload columns without changing the key order. The fix is an index whose leading column is posted_at.",
+      "ref": "unit-1-access-patterns-indexes.md#3-composite-covering-and-partial-indexes"
+    },
+    {
+      "id": "A2-017",
+      "type": "single",
+      "tags": [
+        "indexing"
+      ],
+      "difficulty": 2,
+      "prompt": "The hot query is WHERE tenant_id = ? AND status = 'pending' ORDER BY created_at LIMIT 100. Which index is best?",
+      "choices": [
+        "Three separate single-column indexes on tenant_id, status and created_at",
+        "(status) alone",
+        "(tenant_id, status, created_at)",
+        "(created_at, tenant_id, status)"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Equality columns first, then the sort column: the index narrows to one contiguous slice (the tenant's pending rows) already in created_at order, so the engine reads 100 entries and stops. Leading with created_at turns the equalities into filters over the whole time order; three separate indexes force the planner to pick one and filter or merge the others; a lone low-cardinality status index selects a huge share of the table.",
+      "ref": "unit-1-access-patterns-indexes.md#3-composite-covering-and-partial-indexes"
+    },
+    {
+      "id": "A2-018",
+      "type": "single",
+      "tags": [
+        "indexing",
+        "schema"
+      ],
+      "difficulty": 2,
+      "prompt": "A transfers table has 400 million rows; 99.9% are 'posted' and a worker polls the 0.1% that are 'pending'. What is the best index for the polling query?",
+      "choices": [
+        "A partial index on (created_at) WHERE status = 'pending', containing only the pending rows",
+        "A plain index on status, since the polling query filters on the status column and nothing else",
+        "A covering index on (status) that INCLUDEs every column of the table so no heap fetch is needed",
+        "A hash index on status for fast equality lookups of the 'pending' value without ordering overhead"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The partial index contains only about 400,000 entries (tens of MB) and rows leave it as they stop being pending, so it stays tiny and cheap to maintain. A plain status index holds all 400 M entries (about 16 GB), 99.9% of which share one value, and still costs a leaf update on every insert. A covering index on status is even larger, and a hash index does the same duplicate-heavy work without an ordering for created_at.",
+      "ref": "unit-1-access-patterns-indexes.md#3-composite-covering-and-partial-indexes"
+    },
+    {
+      "id": "A2-019",
+      "type": "multi",
+      "tags": [
+        "indexing",
+        "btree"
+      ],
+      "difficulty": 3,
+      "prompt": "An index exists on (a, b, c). Select ALL the queries for which the index can narrow the scan to a contiguous slice using the constraint on column b as well as a.",
+      "choices": [
+        "WHERE a = 1 AND b > 5",
+        "WHERE a = 1 AND c = 3",
+        "WHERE a = 1 AND b = 2",
+        "WHERE c = 3",
+        "WHERE b = 2 AND c = 3"
+      ],
+      "answer": [
+        0,
+        2
+      ],
+      "explanation": "A seek can use equality on a prefix of columns plus one range on the next column, so (a=1, b=2) and (a=1, b>5) both select a contiguous slice. Without a constraint on a, b and c are scattered. With a=1 AND c=3 the index narrows only by a, because b is skipped, so c is just a filter over that slice; c alone has no prefix at all.",
+      "ref": "unit-1-access-patterns-indexes.md#3-composite-covering-and-partial-indexes"
+    },
+    {
+      "id": "A2-020",
+      "type": "single",
+      "tags": [
+        "indexing"
+      ],
+      "difficulty": 2,
+      "prompt": "The ledger table has nine indexes added over time for individual tickets, and inserts have become five times slower than with two indexes. What is the best first step?",
+      "choices": [
+        "Move all nine indexes onto the same disk as the heap, so that index writes become sequential I/O",
+        "Add a tenth index that covers all the columns, so that reads never need to touch the table heap again",
+        "Check index usage statistics, then drop indexes that are unused or are redundant prefixes of another",
+        "Convert every B-tree index to a hash index, because hash index maintenance is cheaper per insert"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Every insert updates the heap and every index, each a random leaf change and a log record, so the write cost is proportional to the index count; unused and prefix-redundant indexes buy nothing. An extra covering index adds yet another write. Hash indexes give up ordering and do not make writes cheaper, and co-locating files does not make index leaf updates sequential.",
+      "ref": "unit-1-access-patterns-indexes.md#3-composite-covering-and-partial-indexes"
+    },
+    {
+      "id": "A2-021",
+      "type": "single",
+      "tags": [
+        "indexing"
+      ],
+      "difficulty": 3,
+      "prompt": "EXPLAIN ANALYZE of the 'last 50 entries for an account' query shows an Index Scan on the posted_at index with 'Rows Removed by Filter: 250,000,000' and a LIMIT 50 on top. What is going on?",
+      "choices": [
+        "Statistics are fine; removed rows are normal and show that the filter is cheap compared with the scan itself, and the 250 million figure is just the planner's estimate",
+        "The index orders only by posted_at, so it walks newest-first discarding other accounts' rows until 50 match",
+        "The LIMIT forces a full sort of the whole table before any row is returned, and the sort is what is slow",
+        "The index is covering, so the removed rows were never read from the heap and cost essentially nothing here"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "'Rows Removed by Filter' is the signature of a wasted scan: the index condition does not narrow to the account, so the filter discards most of what it reads. The fix is a composite index (account_id, posted_at DESC, ...). A sort would show as a Sort node, not a filter count; a quarter of a billion discarded rows is never cheap; and a covering index would have no filter on an uncovered column.",
+      "ref": "unit-1-access-patterns-indexes.md#3-composite-covering-and-partial-indexes"
+    },
+    {
+      "id": "A2-022",
+      "type": "single",
+      "tags": [
+        "indexing",
+        "lsm"
+      ],
+      "difficulty": 3,
+      "prompt": "A store can only iterate keys in ascending order (an LSM or a wide-column clustering order), and the app needs each account's newest entries first. How should the timestamp be encoded in the key?",
+      "choices": [
+        "As a random suffix, so that entries spread evenly across pages",
+        "As the plain ascending timestamp, then scan to the end of the account's prefix and read backwards",
+        "As a variable-length decimal string, because shorter numbers sort first",
+        "Fixed-width and inverted (max_timestamp - ts), so that ascending key order is newest first"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Byte order must equal the desired tuple order, so numbers are encoded fixed-width, and a forward-only iterator gets 'newest first' by inverting the timestamp. Variable-length decimals sort wrongly ('9' > '10'), scanning a whole 40,000-entry prefix to reach the end is hundreds of page reads versus a handful, and a random suffix destroys the time order the query relies on.",
+      "ref": "unit-1-access-patterns-indexes.md#3-composite-covering-and-partial-indexes"
+    },
+    {
+      "id": "A2-023",
+      "type": "single",
+      "tags": [
+        "indexing",
+        "partitioning"
+      ],
+      "difficulty": 3,
+      "prompt": "A table is hash-partitioned by account_id across 16 nodes, and a query looks up entries by transfer_id using a per-node (local) secondary index. What does each lookup cost?",
+      "choices": [
+        "No network cost at all, because local indexes are replicated to every client application instance",
+        "One node, chosen by hashing transfer_id with the same function that is used to place account_id",
+        "It must be sent to every partition (scatter-gather), because the entry could be on any node",
+        "One node only, because a secondary index is global by definition and always points at a single place"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A local index covers only its own partition's rows, so a query by a non-partition-key column asks all partitions and merges the answers. A global index would answer from one place but needs cross-partition (usually asynchronous) maintenance on writes. Hashing transfer_id the same way would route by transfer_id only if the table were partitioned by it. Indexes are not replicated to clients.",
+      "ref": "unit-1-access-patterns-indexes.md#3-composite-covering-and-partial-indexes"
+    },
+    {
+      "id": "A2-024",
+      "type": "single",
+      "tags": [
+        "wal",
+        "durability"
+      ],
+      "difficulty": 1,
+      "prompt": "What does the write-ahead rule require?",
+      "choices": [
+        "The log must be flushed to disk once per day, with checkpoints following it to bound the amount of log kept",
+        "Data pages must be written to disk before the log, so that the log only ever records changes that completed",
+        "Log records must be durable before the data pages they describe are written, and before a commit is acknowledged",
+        "Every change must be written to both the log and its data page before the commit call is allowed to return"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The log leads the data: if a page reached disk before its log record, a crash could leave a change that recovery could neither redo nor properly undo. Writing pages first is the opposite order; writing both synchronously at commit is the slow design the WAL exists to avoid (random page writes); and a daily flush would lose a day of commits.",
+      "ref": "unit-2-write-paths.md#4-durability-and-the-write-ahead-log"
+    },
+    {
+      "id": "A2-025",
+      "type": "numeric",
+      "tags": [
+        "wal",
+        "durability",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "An fsync takes 2 ms. 40 connections commit concurrently, and the database lets every commit that arrives during a flush wait for the next flush, which makes all of them durable together. Ignoring CPU, what is the maximum commit throughput in commits per second?",
+      "value": 20000,
+      "tolerance": 0.25,
+      "unit": "commits/s",
+      "explanation": "Each fsync takes 2 ms, so there are at most 500 per second, and each covers up to 40 waiting commits: 500 x 40 = 20,000 commits/s. One connection committing serially would manage only 500/s. Real systems land below the ceiling because of CPU, locking and log bandwidth.",
+      "ref": "unit-2-write-paths.md#4-durability-and-the-write-ahead-log"
+    },
+    {
+      "id": "A2-026",
+      "type": "single",
+      "tags": [
+        "wal",
+        "durability"
+      ],
+      "difficulty": 2,
+      "prompt": "The database crashes while a transaction's commit record is half written to the log; the client's COMMIT call had not yet returned. After restart, what is the state of that transaction?",
+      "choices": [
+        "It is partly committed; recovery replays the valid half of the record and discards the remainder",
+        "It is not committed: recovery stops at the incomplete record, and the client was never told 'committed'",
+        "The database refuses to start until an operator decides whether to keep or discard the transaction",
+        "It is committed, because its changes were already applied to the data pages in memory and on disk"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The commit record is the atomic switch: a torn or checksum-failing commit record means the commit never happened, and because acknowledgement follows the durable flush, the client was not told otherwise. Pages written early do not make a transaction committed (their effects are ignored or undone), a record is all or nothing, and a torn tail is a routine recovery case, not a decision for an operator (mid-log corruption is different).",
+      "ref": "unit-2-write-paths.md#4-durability-and-the-write-ahead-log"
+    },
+    {
+      "id": "A2-027",
+      "type": "single",
+      "tags": [
+        "wal",
+        "durability"
+      ],
+      "difficulty": 2,
+      "prompt": "To speed up a data load, an engineer sets fsync = off and forgets to revert it. After a power loss, the database will not start. Which statement about durability settings is correct?",
+      "choices": [
+        "Neither setting can ever cause corruption, since the WAL is simply replayed again at the next startup",
+        "Asynchronous commit is the more dangerous setting, because it skips writing the log entirely until later",
+        "Both settings only lose the last second or so of commits, so the database would still have started normally",
+        "fsync = off can leave files no log can repair; asynchronous commit risks only recent commits and stays consistent"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "With fsync off nothing forces log or pages to disk in any order, so recovery's ordering assumptions fail and corruption is possible. Asynchronous commit still writes the log in order and flushes it shortly after, so a crash loses recent acknowledged transactions but leaves a consistent database. Replaying the WAL cannot repair a log that never reached the disk.",
+      "ref": "unit-2-write-paths.md#4-durability-and-the-write-ahead-log"
+    },
+    {
+      "id": "A2-028",
+      "type": "single",
+      "tags": [
+        "wal",
+        "durability"
+      ],
+      "difficulty": 3,
+      "prompt": "During recovery you scan a write-ahead log of 10 records. Record 7 fails its checksum, but records 8, 9 and 10 are intact. What is the right behaviour?",
+      "choices": [
+        "Report corruption and refuse to proceed, leaving files untouched; torn writes only damage the tail",
+        "Skip record 7 and replay records 8 to 10, because they are intact and independent of the damaged record",
+        "Truncate the log at record 7 and continue, because a bad checksum always means a torn tail record at the end, so the remaining records 8 to 10 can safely be discarded as well",
+        "Replay records 1 to 10 as if nothing happened, trusting the data pages on disk to already be correct"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A torn write can only affect the end of an append-only log. Damage with valid records after it is corruption (bit rot, misdirected write); truncating would silently discard committed records 8-10, and skipping record 7 would apply later changes without an earlier one they may depend on. Replaying everything ignores the failed checksum. The safe stance is to stop, preserve the evidence, and recover from backup or to a chosen point.",
+      "ref": "unit-2-write-paths.md#4-durability-and-the-write-ahead-log"
+    },
+    {
+      "id": "A2-029",
+      "type": "multi",
+      "tags": [
+        "wal",
+        "durability",
+        "replication"
+      ],
+      "difficulty": 3,
+      "prompt": "A member saw 'transfer complete', yet after a node crash the transfer is missing. Select ALL plausible causes.",
+      "choices": [
+        "Recovery truncated a torn record belonging to a transaction whose commit had not been acknowledged",
+        "The commit was acknowledged before the log was flushed (asynchronous commit)",
+        "fsync was disabled in the configuration",
+        "The primary failed over to a replica that had not yet received the transfer's log (asynchronous replication lag)",
+        "The virtual disk acknowledged flushes while keeping data in a volatile write cache",
+        "Group commit batched several commits into one fsync"
+      ],
+      "answer": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "explanation": "The first four all allow an acknowledgement to precede true durability. Group commit shares one fsync among several commits but each commit still waits until that fsync completes, so it does not acknowledge early. Truncating a torn tail removes only a record whose commit was never acknowledged, which is exactly the correct outcome.",
+      "ref": "unit-2-write-paths.md#4-durability-and-the-write-ahead-log"
+    },
+    {
+      "id": "A2-030",
+      "type": "single",
+      "tags": [
+        "wal",
+        "durability",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "Why do PostgreSQL (full-page writes) and InnoDB (doublewrite buffer) pay extra write volume for torn-page protection?",
+      "choices": [
+        "Because log records are too small to describe a change to a page, so whole pages must be logged anyway, and so a torn page could never occur in the first place",
+        "To let replicas read pages without taking locks while the primary is concurrently modifying the same page",
+        "To speed up checkpoints by writing each page twice in parallel so that the checkpointer finishes sooner",
+        "A torn 8 or 16 KB page write leaves half-old, half-new data that redo cannot fix without a clean copy"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A page spans several sectors, and a crash mid-write can persist only some of them; redo assumes a consistent starting page, so the engine keeps a full copy to restore it (a full image in the log, or a scratch area). It is a safety cost, not a checkpoint speedup, log records are small by design (that is why the log is cheap), and replica reads are unrelated.",
+      "ref": "unit-2-write-paths.md#4-durability-and-the-write-ahead-log"
+    },
+    {
+      "id": "A2-031",
+      "type": "single",
+      "tags": [
+        "wal",
+        "durability"
+      ],
+      "difficulty": 3,
+      "prompt": "An fsync on the WAL returns an I/O error. The application retries the fsync and the retry succeeds. What should a storage engine do?",
+      "choices": [
+        "Treat it as fatal: stop acknowledging commits and recover from the log, since the retry's success proves nothing",
+        "Accept the retry and carry on normally, since the fsync did eventually succeed on the second attempt",
+        "Retry in a loop until it succeeds three times in a row, then continue as if no error had ever occurred",
+        "Delete the affected log segment and recreate it so that the next write starts from a clean file"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "After a failed fsync the operating system may have discarded the unflushed data and cleared the error, so a later success says nothing about the earlier writes. Engines such as PostgreSQL moved to treating fsync failure as fatal and recovering via crash recovery. Looping until success repeats the false assumption, and deleting the segment destroys committed records.",
+      "ref": "unit-2-write-paths.md#4-durability-and-the-write-ahead-log"
+    },
+    {
+      "id": "A2-032",
+      "type": "single",
+      "tags": [
+        "wal",
+        "durability",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A loader inserts 5 million rows with one transaction per row on storage where each commit's fsync takes 1.2 ms, taking about 100 minutes. What is the best way to speed it up without weakening durability?",
+      "choices": [
+        "Increase the checkpoint interval so that the database issues fsyncs less often during the whole load",
+        "Raise the page size so that each fsync covers more data than before and therefore needs fewer calls",
+        "Turn fsync off for the duration of the load and trust that the process will finish without a crash",
+        "Insert thousands of rows per transaction (or use bulk COPY), so there are thousands of fsyncs, not millions"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Commit latency is dominated by the per-commit fsync, so fewer, larger transactions cut it from 5 M flushes to a few thousand (seconds instead of an hour and a half). Turning fsync off removes the safety the system relies on. Checkpoints and page size do not change how many commits force the log.",
+      "ref": "unit-2-write-paths.md#4-durability-and-the-write-ahead-log"
+    },
+    {
+      "id": "A2-033",
+      "type": "numeric",
+      "tags": [
+        "lsm",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A tiered LSM tree has fanout 4 and merges 4 same-sized tables into one at the next level. It has flushed 256 equal-sized tables of distinct keys. Counting the initial flush as one write, how many times has each entry been written to table files?",
+      "value": 5,
+      "tolerance": 0.1,
+      "unit": "x",
+      "explanation": "256 = 4^4, so entries went through the flush and four merge levels: 1 + 4 = 5 writes per entry (write amplification 5, not counting the WAL). The common mistake is to count only the merges (4) or the levels of a leveled design (tens).",
+      "ref": "unit-2-write-paths.md#5-lsm-trees"
+    },
+    {
+      "id": "A2-034",
+      "type": "numeric",
+      "tags": [
+        "lsm",
+        "estimation",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "Bloom filters at 10 bits per key guard 2 billion keys across an LSM tree's tables. How much memory do the filters need, in GB (10^9 bytes)?",
+      "value": 2.5,
+      "tolerance": 0.15,
+      "unit": "GB",
+      "explanation": "2 x 10^9 keys x 10 bits = 2 x 10^10 bits = 2.5 x 10^9 bytes = 2.5 GB. Confusing bits with bytes gives 20 GB. At 10 bits per key the false-positive rate is about 0.8%.",
+      "ref": "unit-2-write-paths.md#5-lsm-trees"
+    },
+    {
+      "id": "A2-035",
+      "type": "single",
+      "tags": [
+        "lsm",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "An account is deleted. Compaction merges its tombstone with newer tables, but an older table at a deeper level still holds the account's last value. If the compaction drops the tombstone, what happens?",
+      "choices": [
+        "Nothing: the old table is immutable and is ignored once the tombstone exists in any table",
+        "The read path returns an error for that key until an operator-run repair has completed",
+        "The next compaction of the old table notices the missing tombstone and deletes the value",
+        "The old value in the deeper table becomes visible again, and the deleted account reappears"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A tombstone works only by shadowing older versions at read time; remove it while an older version exists and nothing shadows that version. Immutable files do not 'know' about deletions elsewhere, compaction cannot detect a tombstone that no longer exists, and reads return the old value rather than an error. The rule is to keep a tombstone until the merge covers everything older that may contain the key.",
+      "ref": "unit-2-write-paths.md#5-lsm-trees"
+    },
+    {
+      "id": "A2-036",
+      "type": "single",
+      "tags": [
+        "lsm",
+        "indexing"
+      ],
+      "difficulty": 2,
+      "prompt": "Which reads does a per-table bloom filter speed up in an LSM tree?",
+      "choices": [
+        "Writes, because the filter lets the memtable skip the WAL",
+        "Range scans, because the filter tells the iterator where each range begins",
+        "Reads of keys that live in the newest table, because the filter promotes them to the memtable, which is why they are rebuilt after each flush",
+        "Point lookups of keys that are not in a given table (including keys that do not exist at all)"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A bloom filter answers 'definitely not here' in memory, avoiding a block read from every table that lacks the key; it does nothing for range scans, which must merge iterators over every overlapping table. It is built at flush time and plays no role in writes or in promoting data.",
+      "ref": "unit-2-write-paths.md#5-lsm-trees"
+    },
+    {
+      "id": "A2-037",
+      "type": "multi",
+      "tags": [
+        "lsm",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL statements that are true about a typical LSM tree.",
+      "choices": [
+        "A write is appended to a log for durability and inserted into an in-memory sorted memtable",
+        "A delete reclaims the key's disk space immediately",
+        "An update overwrites the old value in place inside its table file",
+        "A read checks the memtable and then tables from newest to oldest, and the first version found wins",
+        "Flushed tables are immutable and sorted, so updates and deletes are written as new entries"
+      ],
+      "answer": [
+        0,
+        3,
+        4
+      ],
+      "explanation": "The first three describe the write and read paths. Because files are immutable, an update is a new version and a delete is a tombstone; space is only reclaimed when compaction merges those entries with the data they shadow, so deletes can increase disk usage in the short term.",
+      "ref": "unit-2-write-paths.md#5-lsm-trees"
+    },
+    {
+      "id": "A2-038",
+      "type": "single",
+      "tags": [
+        "lsm",
+        "storage",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "At 10x ingest an LSM-based event store shows p99 write latency jumping from 5 ms to 2 s in waves, while level-0 file counts climb. What is happening and what are sensible responses?",
+      "choices": [
+        "Compaction cannot keep up, so writes are throttled; reduce write amplification, add I/O or shed load",
+        "Bloom filters have become saturated; disabling them will remove the stalls and restore write latency",
+        "The memtable is too small; making it smaller will flush more often and thereby remove the stalls entirely, since smaller tables are cheaper to merge",
+        "The WAL fsync is failing intermittently; switching to asynchronous commit will remove the latency waves"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Stalls are backpressure: unmerged files accumulate faster than compaction retires them, so reads would degrade without them. The remedies address compaction capacity or demand. A smaller memtable creates more small files (worse), bloom filters help reads and do not cause write stalls, and asynchronous commit does not change the compaction backlog.",
+      "ref": "unit-2-write-paths.md#5-lsm-trees"
+    },
+    {
+      "id": "A2-039",
+      "type": "single",
+      "tags": [
+        "lsm",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "Compared with leveled compaction, tiered (size-tiered) compaction generally has which profile?",
+      "choices": [
+        "Higher write amplification and higher read amplification, because it merges whole tables",
+        "Higher write amplification and lower space amplification, as it rewrites data more often",
+        "Lower write amplification but higher read and space amplification",
+        "Lower write amplification and lower read amplification, as fewer tables exist at any time"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Tiered merges same-size tables only when there are enough of them, so each byte is rewritten about once per level, but several overlapping tables per level mean more files to check and old versions that linger (up to 2x or more space). Leveled keeps non-overlapping files per level, giving lower read and space amplification at the price of rewriting data against ~10 neighbours per level.",
+      "ref": "unit-2-write-paths.md#5-lsm-trees"
+    },
+    {
+      "id": "A2-040",
+      "type": "single",
+      "tags": [
+        "lsm",
+        "storage"
+      ],
+      "difficulty": 3,
+      "prompt": "A retention job deletes yesterday's rows from an LSM-based store by issuing DELETE for each key. Later, scans that cross that key range time out after stepping over 200,000 tombstones. What is the better design?",
+      "choices": [
+        "Lower the memtable size so that tombstones are flushed sooner and compacted into the older tables",
+        "Add more bloom filter bits per key so that scans can skip over the tombstones using the filter alone",
+        "Use TTLs with time-window compaction or time partitions, so whole expired files are dropped with no tombstones",
+        "Run the delete job more often, so that fewer tombstones accumulate between runs and scans cross fewer"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Deleting by key is itself a write workload; tombstones stay until compaction merges them with all older data, and scans must read past them. Dropping expired windows removes data without writing anything. Running the job more often just changes the batch size, bloom filters do not help range scans, and a smaller memtable only produces more files.",
+      "ref": "unit-2-write-paths.md#5-lsm-trees"
+    },
+    {
+      "id": "A2-041",
+      "type": "single",
+      "tags": [
+        "lsm",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A tiered policy with fanout 3 has performed 11 flushes of distinct keys with eager merging when a level reaches 3 tables. How many tables are at levels 0, 1 and 2?",
+      "choices": [
+        "Level 0: 1, level 1: 2, level 2: 1",
+        "Level 0: 2, level 1: 0, level 2: 1",
+        "Level 0: 2, level 1: 1, level 2: 0",
+        "Level 0: 3, level 1: 3, level 2: 5 (total 11)"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The table counts per level are the base-3 digits of the flush count, least significant first. 11 = 1x9 + 0x3 + 2, so two tables at level 0, none at level 1 and one at level 2. The other options either exceed the fanout (a level holding 3 tables would have merged) or do not add up to a valid base-3 representation of 11.",
+      "ref": "unit-2-write-paths.md#5-lsm-trees"
+    },
+    {
+      "id": "A2-042",
+      "type": "numeric",
+      "tags": [
+        "lsm",
+        "storage",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "An event store receives 5 MB/s of user data. Its LSM engine has a write amplification of 20. How many TB per day does the SSD actually have to absorb? (1 TB = 10^6 MB; 86,400 s per day.)",
+      "value": 8.64,
+      "tolerance": 0.15,
+      "unit": "TB",
+      "explanation": "Device write rate = 5 MB/s x 20 = 100 MB/s; x 86,400 s = 8,640,000 MB = 8.64 TB per day. Compared with a drive rated for 1 drive-write-per-day of 3.84 TB, that is more than two drives' endurance burned each day, which is why write amplification is a cost line.",
+      "ref": "unit-2-write-paths.md#6-b-tree-or-lsm-the-amplification-decision"
+    },
+    {
+      "id": "A2-043",
+      "type": "numeric",
+      "tags": [
+        "btree",
+        "storage",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A B-tree engine changes a 200-byte row and writes the whole 8 KB (8,192-byte) page to disk, and that is the only change to the page before it is flushed. Ignoring the log, what is the write amplification?",
+      "value": 41,
+      "tolerance": 0.1,
+      "unit": "x",
+      "explanation": "8,192 / 200 = 41 bytes written per byte changed. In practice several changes to a page between flushes share one write (coalescing), which is why hot pages are cheap and random-leaf updates on indexes that exceed memory are expensive.",
+      "ref": "unit-2-write-paths.md#6-b-tree-or-lsm-the-amplification-decision"
+    },
+    {
+      "id": "A2-044",
+      "type": "single",
+      "tags": [
+        "btree",
+        "lsm",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "A ledger does 1,000 writes/s and 20,000 reads/s, mostly point lookups and short ranges with a p99 read target of 10 ms, and needs multi-row transactions. Which engine family fits best?",
+      "choices": [
+        "An in-memory cache as the system of record, since reads dominate",
+        "An LSM engine with leveled compaction, because LSM writes are always faster than B-tree writes whatever the read mix",
+        "A tiered-compaction LSM, because it has the lowest write amplification, which keeps the whole system cheapest to operate",
+        "A B-tree based relational engine: about one I/O per point read, predictable tails, ordered ranges and mature transactions"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Reads dominate, latency tails matter and transactions are required, which is the B-tree engine's home ground; the 1,000 writes/s do not stress it. An LSM trades read latency and background-compaction jitter for write throughput this workload does not need, tiered compaction worsens read and space amplification, and a cache is not a durable system of record for money.",
+      "ref": "unit-2-write-paths.md#6-b-tree-or-lsm-the-amplification-decision"
+    },
+    {
+      "id": "A2-045",
+      "type": "single",
+      "tags": [
+        "lsm",
+        "storage",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A metrics pipeline writes 200,000 immutable points/s, keeps them 7 days, and reads them by time range. What storage approach fits best?",
+      "choices": [
+        "A leveled LSM with a DELETE issued per expired point",
+        "A single-node relational database with five secondary indexes on the metric attributes, so queries by attribute stay fast",
+        "A B-tree table with a random UUID primary key and a nightly DELETE of expired rows",
+        "An LSM with time-window compaction and TTL, so that expired windows are dropped as whole files"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Immutable, write-heavy, time-ranged data with TTL is the textbook case for time-window compaction: sequential writes, ranges by time, and retention that costs nothing. Random-UUID B-tree inserts and nightly deletes create cache thrash and bloat; per-point deletes create billions of tombstones; five secondary indexes multiply a 200,000/s write load.",
+      "ref": "unit-2-write-paths.md#6-b-tree-or-lsm-the-amplification-decision"
+    },
+    {
+      "id": "A2-046",
+      "type": "single",
+      "tags": [
+        "btree",
+        "lsm",
+        "storage"
+      ],
+      "difficulty": 3,
+      "prompt": "What does the RUM conjecture say about access methods?",
+      "choices": [
+        "Reads and writes always cost the same, so only memory differs between engines",
+        "Update overhead is always lowest for B-trees and highest for LSM trees",
+        "An access method can optimise two of read overhead, update overhead and memory/space overhead only at the expense of the third",
+        "Read, update and memory costs can all be minimised together by combining a B-tree with an LSM tree, provided the cache is large enough"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "RUM (read, update, memory) says the three overheads trade off against one another: B-trees favour reads, LSMs favour updates, bloom filters buy back read cost with memory, and compaction trades update cost for space. It does not claim a free combination, equal read and write costs, or a fixed ranking independent of workload.",
+      "ref": "unit-2-write-paths.md#6-b-tree-or-lsm-the-amplification-decision"
+    },
+    {
+      "id": "A2-047",
+      "type": "single",
+      "tags": [
+        "storage",
+        "lsm",
+        "btree"
+      ],
+      "difficulty": 3,
+      "prompt": "A team says 'we know CockroachDB's failure modes because it is a SQL database like PostgreSQL, so B-tree bloat and vacuum are what to watch'. What is the best correction?",
+      "choices": [
+        "It is correct, since every SQL database stores its tables in B-trees and so shares PostgreSQL's failure modes",
+        "It stores data in an LSM engine (Pebble), so watch compaction, write stalls, tombstone scans and space headroom",
+        "CockroachDB keeps all data in memory, so it has no storage-engine failure modes of its own to monitor",
+        "It uses an append-only log with no compaction, so only the size of the write-ahead log needs watching"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A SQL interface does not determine the storage engine: CockroachDB (Pebble), TiDB (RocksDB) and MyRocks sit on LSM trees, while PostgreSQL and InnoDB use B-trees. The engine's amplification and latency shape leak through the product, so operators must watch the LSM metrics. It is not in-memory and it does compact.",
+      "ref": "unit-2-write-paths.md#6-b-tree-or-lsm-the-amplification-decision"
+    },
+    {
+      "id": "A2-048",
+      "type": "single",
+      "tags": [
+        "btree",
+        "lsm",
+        "storage",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "An event store with three secondary indexes on a B-tree database writes about 720 MB/s of pages for only ~9 MB/s of data, wearing SSDs out several times faster than an LSM design would. What explains the B-tree figure?",
+      "choices": [
+        "The B-tree writes every record three times for redundancy, once per secondary index it maintains, which is why SSD wear rises by exactly a factor of three",
+        "B-trees rewrite the whole of every index on each checkpoint, regardless of how many pages changed",
+        "WAL records are padded to 8 KB each, and that padding dominates the total volume that is written",
+        "Each event dirties a random leaf in every index, and those pages are flushed before they can coalesce"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Page-granular random updates multiply write volume: three index leaves x 8 KB x 30,000 events/s is about 720 MB/s when nothing coalesces. The log is a smaller, sequential contributor (plus full-page images after checkpoints), indexes are not redundant copies, and checkpoints flush dirty pages rather than rewriting the entire index.",
+      "ref": "unit-2-write-paths.md#6-b-tree-or-lsm-the-amplification-decision"
+    },
+    {
+      "id": "A2-049",
+      "type": "single",
+      "tags": [
+        "isolation",
+        "transactions",
+        "concurrency"
+      ],
+      "difficulty": 1,
+      "prompt": "Two concurrent $700 withdrawals each read a balance of $300 with a $500 overdraft limit, both pass the application's check, and both write a computed balance of -$400 under READ COMMITTED. Which anomaly is this?",
+      "choices": [
+        "Phantom read",
+        "Dirty read",
+        "Non-repeatable read",
+        "Lost update"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Two transactions read the same row, compute from the stale value and write the same row, so the later write overwrites the earlier (and both pass a check that only one should). A dirty read would read uncommitted data; a phantom is a changing set of rows matching a predicate; a non-repeatable read is the same row read twice with different values, which also happens here but is not the harmful anomaly.",
+      "ref": "unit-3-transactions-schema.md#7-acid-in-practice-and-the-isolation-anomalies"
+    },
+    {
+      "id": "A2-050",
+      "type": "single",
+      "tags": [
+        "isolation",
+        "transactions",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "At READ COMMITTED in PostgreSQL, why is UPDATE accounts SET balance = balance - 70000 WHERE id = 42 AND balance + overdraft >= 70000 (checking the affected row count) safe against concurrent withdrawals?",
+      "choices": [
+        "A concurrent updater waits for the row lock, then re-evaluates the WHERE clause on the new row version and affects zero rows",
+        "The statement runs outside any transaction, and a statement outside a transaction is atomic by default",
+        "The database serialises all transactions that touch the accounts table, so two never run at the same time",
+        "READ COMMITTED takes one snapshot at transaction start, so the second transaction sees the first one's write, which is how the re-check sees the new balance"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Check and write are one statement: the row lock serialises the two updates, and PostgreSQL re-checks the predicate against the latest committed version after the wait. READ COMMITTED takes a new snapshot per statement, not per transaction; there is no table-wide serialisation; and every statement runs in a transaction (autocommit is one).",
+      "ref": "unit-3-transactions-schema.md#7-acid-in-practice-and-the-isolation-anomalies"
+    },
+    {
+      "id": "A2-051",
+      "type": "multi",
+      "tags": [
+        "isolation",
+        "transactions"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL anomalies that PostgreSQL's REPEATABLE READ (snapshot isolation) can still allow.",
+      "choices": [
+        "A multi-row rule broken by two inserts that each passed a count check (phantom-based write skew)",
+        "Write skew over disjoint rows (for example a shared overdraft limit)",
+        "Non-repeatable read",
+        "Lost update on a single row",
+        "Dirty read"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "Snapshot isolation prevents dirty reads, non-repeatable reads and (through first-committer-wins) lost updates, but transactions that write different rows based on overlapping reads do not conflict, so write skew and its phantom form survive. Only SERIALIZABLE (or explicit guards) closes them.",
+      "ref": "unit-3-transactions-schema.md#7-acid-in-practice-and-the-isolation-anomalies"
+    },
+    {
+      "id": "A2-052",
+      "type": "single",
+      "tags": [
+        "isolation",
+        "transactions"
+      ],
+      "difficulty": 2,
+      "prompt": "A member has checking $100 and savings $100 and a rule checking + savings >= 0. Two withdrawals of $150 run concurrently under snapshot isolation, one from each account, and both commit. Why did the database not stop this?",
+      "choices": [
+        "No isolation level can enforce a rule across two rows; only database triggers or application code can do it",
+        "The transactions wrote the same row, but the second commit overwrote the first before conflict detection ran",
+        "Each transaction wrote a different row, so there is no write-write conflict to detect, though each decision depended on the other's row",
+        "Snapshot isolation only checks conflicts at statement level, and these were two separate whole transactions, which skips any check of the writes of other whole transactions"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Snapshot isolation's guard is first-committer-wins on the same row. Here each transaction read both balances, wrote a different one, and committed, so nothing collided (write skew). SERIALIZABLE would abort one of them, and a guard-row lock or a constraint can also enforce the rule; isolation levels do prevent it at the strongest level.",
+      "ref": "unit-3-transactions-schema.md#7-acid-in-practice-and-the-isolation-anomalies"
+    },
+    {
+      "id": "A2-053",
+      "type": "single",
+      "tags": [
+        "isolation",
+        "transactions"
+      ],
+      "difficulty": 3,
+      "prompt": "An application reads a balance, computes the new value in code, and writes it back (no locking, no version column). How does this behave under REPEATABLE READ in PostgreSQL versus MySQL/InnoDB?",
+      "choices": [
+        "PostgreSQL aborts the second writer with a serialization failure; InnoDB's current-read UPDATE has no such check, so the update can be lost",
+        "Both engines abort the second writer with a serialization error, since both implement snapshot isolation",
+        "InnoDB aborts the second writer, while PostgreSQL allows the lost update to happen without any error",
+        "Both engines allow the lost update, since REPEATABLE READ never offers any protection for writes at all, because writes run on the snapshot and are never compared"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Isolation level names are not portable. PostgreSQL's REPEATABLE READ is snapshot isolation with a write-write conflict check; InnoDB gives a consistent snapshot to plain reads, but UPDATE operates on the latest committed row, so an application-computed value silently overwrites. Hence either use atomic statements/locks or test the engine's behaviour.",
+      "ref": "unit-3-transactions-schema.md#7-acid-in-practice-and-the-isolation-anomalies"
+    },
+    {
+      "id": "A2-054",
+      "type": "numeric",
+      "tags": [
+        "isolation",
+        "concurrency",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A fee-collection account row is updated by every transfer, and each transaction holds that row's lock for 2.5 ms (from the UPDATE through the commit's fsync). What is the maximum sustainable rate of updates to that row, per second?",
+      "value": 400,
+      "tolerance": 0.1,
+      "unit": "updates/s",
+      "explanation": "Only one transaction can hold the row lock at a time, so the ceiling is 1 / 2.5 ms = 400 updates/s regardless of CPU or replicas. To raise it: shorten the lock hold, turn the balance into append-only entries rolled up periodically, or shard the counter across several rows.",
+      "ref": "unit-3-transactions-schema.md#7-acid-in-practice-and-the-isolation-anomalies"
+    },
+    {
+      "id": "A2-055",
+      "type": "single",
+      "tags": [
+        "transactions"
+      ],
+      "difficulty": 1,
+      "prompt": "In ACID, what does the 'C' (consistency) mainly depend on?",
+      "choices": [
+        "The isolation level alone, since SERIALIZABLE guarantees every application-level invariant, whether or not the database has been told about it",
+        "The replication factor, because all replicas must agree on the committed state before a transaction is valid",
+        "Declared constraints plus the application's own logic: the database only preserves invariants it knows",
+        "The storage engine's page size and the fill factor, because they decide whether constraints can be checked"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "'C' means a transaction takes the database from one valid state to another; the database can enforce NOT NULL, CHECK, UNIQUE and foreign keys, but an invariant it does not know about (a shared overdraft limit coded in the service) depends on application logic and the chosen isolation. Serializable orders transactions but cannot know the rule, replication is a different property, and page size is unrelated.",
+      "ref": "unit-3-transactions-schema.md#7-acid-in-practice-and-the-isolation-anomalies"
+    },
+    {
+      "id": "A2-056",
+      "type": "single",
+      "tags": [
+        "isolation",
+        "transactions",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "A rule says a member may have at most 2 accounts. The code runs SELECT count(*) and INSERTs a new account if the count is below 2. Two requests run concurrently and the member ends up with 3 accounts at REPEATABLE READ. Which pair names the problem and a correct fix?",
+      "choices": [
+        "Lost update; add a version column to the new account row and retry on conflict when it changes",
+        "Non-repeatable read; use SELECT ... FOR UPDATE on the count query alone and nothing else",
+        "Phantom-based write skew; use SERIALIZABLE with retry, a per-member guard row lock, or a constraint",
+        "Dirty read; use READ UNCOMMITTED so that each request can see the other's insert sooner, and the count will then be accurate"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Both transactions counted the same set and inserted different rows, so there is no write-write conflict; the rows that would have to be locked do not exist yet. Guarding with a member-level lock, SERIALIZABLE (which validates the predicate read) or a constraint closes it. Reading uncommitted data is the opposite of the fix, a version column on a brand-new row protects nothing, and FOR UPDATE on an aggregate cannot lock rows that do not exist.",
+      "ref": "unit-3-transactions-schema.md#7-acid-in-practice-and-the-isolation-anomalies"
+    },
+    {
+      "id": "A2-057",
+      "type": "single",
+      "tags": [
+        "isolation",
+        "transactions"
+      ],
+      "difficulty": 2,
+      "prompt": "In the lab's snapshot-isolation commit, how is first-committer-wins decided?",
+      "choices": [
+        "If a written key has a newer committed version than my snapshot, someone committed first, so abort",
+        "The transaction with the lower id always wins, regardless of the order in which the two commits happen",
+        "Any key in the read set that has a newer committed version aborts the transaction when it commits",
+        "Transactions that wrote the same key wait for each other's locks until one of them rolls back or times out, before either is allowed to commit"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "First-committer-wins checks only the write set against the snapshot: a newer committed version means a concurrent transaction won. Checking the read set is the serializable validation (stricter), ids are irrelevant, and the lab detects conflicts lazily at commit instead of waiting on locks (PostgreSQL waits on the row lock first, with the same outcome).",
+      "ref": "unit-3-transactions-schema.md#8-mvcc-snapshot-isolation-locks-and-serializable"
+    },
+    {
+      "id": "A2-058",
+      "type": "single",
+      "tags": [
+        "isolation",
+        "concurrency",
+        "transactions"
+      ],
+      "difficulty": 2,
+      "prompt": "Transfers A->B and B->A occasionally deadlock because each locks its source row first with SELECT ... FOR UPDATE and then the destination. What fixes this without changing the isolation level?",
+      "choices": [
+        "Always lock both rows in a canonical order, such as ascending account id, so opposite transfers queue instead of cross-waiting",
+        "Lock only the source row, since the destination account is only ever credited and never debited by this, so the second lock was never needed",
+        "Increase deadlock_timeout so that the database waits longer before it aborts one of the two transactions",
+        "Raise the isolation level to SERIALIZABLE, which by definition prevents lock cycles between transactions"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A deadlock is a lock-ordering fact: two transactions each hold what the other wants. A single global order removes the cycle. Higher isolation can add conflicts rather than remove them, a longer timeout just stalls requests longer before the same abort, and skipping the destination lock re-opens lost-update races on its balance.",
+      "ref": "unit-3-transactions-schema.md#8-mvcc-snapshot-isolation-locks-and-serializable"
+    },
+    {
+      "id": "A2-059",
+      "type": "single",
+      "tags": [
+        "isolation",
+        "transactions"
+      ],
+      "difficulty": 3,
+      "prompt": "Why can SELECT ... FOR UPDATE not prevent phantom-based violations such as 'at most two accounts per member'?",
+      "choices": [
+        "It locks rows that exist, but the conflicting rows are inserts that do not exist yet, so there is nothing to lock",
+        "FOR UPDATE locks apply to whole tables, so concurrent inserts into any other table are exempt from them",
+        "The lock is released as soon as the SELECT statement returns its rows, long before the transaction ends",
+        "FOR UPDATE only works inside READ COMMITTED transactions, and this scenario is running at a higher level"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Row locks protect existing rows; a phantom is a new row matching a predicate. A guard row (the member) turns the multi-row rule into a single-row lock conflict, and SERIALIZABLE validates predicate reads. FOR UPDATE works at any level, locks rows (not tables), and holds them until the end of the transaction.",
+      "ref": "unit-3-transactions-schema.md#8-mvcc-snapshot-isolation-locks-and-serializable"
+    },
+    {
+      "id": "A2-060",
+      "type": "multi",
+      "tags": [
+        "isolation",
+        "concurrency",
+        "transactions"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL statements that are true about an optimistic version column (UPDATE ... SET ..., version = version + 1 WHERE id = ? AND version = ?).",
+      "choices": [
+        "Zero affected rows means the row changed first, so the caller must re-read and retry",
+        "It makes the transaction retry-free",
+        "Under heavy contention on one row it causes many retries",
+        "It prevents write skew between two different rows",
+        "It detects a concurrent change to the same row without holding a lock while the application thinks"
+      ],
+      "answer": [
+        0,
+        2,
+        4
+      ],
+      "explanation": "The version check is a compare-and-set on one row: it turns lost updates into detectable failures that need a retry loop, and contention turns into retry storms on hot rows. It says nothing about invariants spanning other rows (write skew needs a guard or SERIALIZABLE), and it requires retries by design.",
+      "ref": "unit-3-transactions-schema.md#8-mvcc-snapshot-isolation-locks-and-serializable"
+    },
+    {
+      "id": "A2-061",
+      "type": "single",
+      "tags": [
+        "isolation",
+        "transactions",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "A statement-generation job holds one REPEATABLE READ transaction open for 40 minutes on the primary. Over two days the accounts table (updated 5 million times a day) grows from 300 MB to about 1.8 GB. What best explains and fixes it?",
+      "choices": [
+        "The indexes were never rebuilt; run a REINDEX before each job so that the table stays small and compact",
+        "The old snapshot pins old row versions so cleanup cannot remove them; use a replica for long reports",
+        "REPEATABLE READ duplicates the table into a private snapshot file; use READ COMMITTED to avoid the copy",
+        "The job locks the table, so every update creates a new full copy of it; take a share lock explicitly instead, which is what makes the table grow so quickly"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "MVCC keeps old versions as long as any snapshot might read them; a long transaction holds the cleanup horizon back, so dead versions accumulate (bloat). The fix is to avoid long snapshots on the primary. The job takes no table lock, snapshots are not copied files, and reindexing treats a symptom after the fact.",
+      "ref": "unit-3-transactions-schema.md#8-mvcc-snapshot-isolation-locks-and-serializable"
+    },
+    {
+      "id": "A2-062",
+      "type": "single",
+      "tags": [
+        "isolation",
+        "transactions"
+      ],
+      "difficulty": 3,
+      "prompt": "In an optimistic serializable scheme that validates reads at commit (like the lab), which transaction never aborts?",
+      "choices": [
+        "A read-only transaction, because it read a consistent snapshot and has no writes to order",
+        "Any transaction that used SELECT ... FOR UPDATE",
+        "A transaction that read only keys nobody wrote, even if it wrote other keys that conflict with a concurrent writer",
+        "The transaction that started first"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A transaction with no writes is serialised at its snapshot and cannot invalidate anyone, so there is nothing to abort. A transaction can still fail a write-write check, start order is irrelevant to first-committer-wins, and locking reads are not part of this scheme.",
+      "ref": "unit-3-transactions-schema.md#8-mvcc-snapshot-isolation-locks-and-serializable"
+    },
+    {
+      "id": "A2-063",
+      "type": "single",
+      "tags": [
+        "transactions",
+        "concurrency",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "A transfer transaction fails with a serialization failure (SQLSTATE 40001). How should the application respond?",
+      "choices": [
+        "Ignore the error and report success to the caller, since the database will reconcile the data later on",
+        "Retry only the statement that failed, keeping the results of the earlier statements in the same transaction, which saves repeating the work already done",
+        "Retry the whole transaction a bounded number of times, with jitter, written to be safe to re-run",
+        "Retry in a tight loop with no delay and no limit until the transaction eventually succeeds on its own"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A serialization failure means the whole transaction's reads are invalid, so every statement must run again on a new snapshot. It must be bounded and jittered to avoid retry storms, and side effects (HTTP calls, emails) must stay out of the transaction or be idempotent (A1, A6 outbox). Ignoring it loses the transfer; a tight loop amplifies contention.",
+      "ref": "unit-3-transactions-schema.md#8-mvcc-snapshot-isolation-locks-and-serializable"
+    },
+    {
+      "id": "A2-064",
+      "type": "single",
+      "tags": [
+        "isolation",
+        "transactions",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "Why is 'run everything at SERIALIZABLE' not an automatic answer?",
+      "choices": [
+        "It aborts more under contention, so every transaction needs retries and hot rows suffer",
+        "SERIALIZABLE allows dirty reads, which are unsafe for a system that moves money between accounts, so it is only used for read-only reporting",
+        "SERIALIZABLE cannot be combined with idempotency keys, so retried requests would be applied twice",
+        "SERIALIZABLE disables the write-ahead log to gain speed, so committed transactions could be lost"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "SERIALIZABLE is the safest default for complex invariants, but its cost is aborts and retries under contention (and engine-specific overhead for tracking dependencies). It does not allow dirty reads, it is compatible with idempotency keys (indeed needs them with retries), and it has no effect on the WAL.",
+      "ref": "unit-3-transactions-schema.md#8-mvcc-snapshot-isolation-locks-and-serializable"
+    },
+    {
+      "id": "A2-065",
+      "type": "single",
+      "tags": [
+        "migrations",
+        "schema",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "A migration adds a column to a hot table at 14:00. The ALTER itself needs only 10 ms, but the application is down for three minutes, until a reporting query that was already running finishes. Why, and what prevents it?",
+      "choices": [
+        "The connection pool was too small to absorb the migration; raising its size would have avoided the outage",
+        "The ALTER waits behind the long query and everything queues behind it; a short lock_timeout with retry prevents it",
+        "The ALTER rewrote the whole table in the background; adding the column as nullable avoids that rewrite",
+        "The report held a write lock on every row, so run the report at SERIALIZABLE to release them sooner"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Lock acquisition is a queue: a waiting exclusive request blocks requests that arrive after it, even though it holds nothing yet, so the outage lasts as long as the longest conflicting transaction. lock_timeout makes the DDL give up instead of queueing everyone, and it is retried. A rewrite would take much longer than 10 ms, the report held a shared lock rather than row write locks, and a larger pool only delays exhaustion.",
+      "ref": "unit-3-transactions-schema.md#9-schema-design-and-zero-downtime-migrations"
+    },
+    {
+      "id": "A2-066",
+      "type": "numeric",
+      "tags": [
+        "migrations",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A backfill updates 80 million rows in batches of 2,000 rows. Each batch takes 40 ms and the worker pauses 60 ms between batches. How long does one worker take, in hours?",
+      "value": 1.11,
+      "tolerance": 0.15,
+      "unit": "hours",
+      "explanation": "80,000,000 / 2,000 = 40,000 batches; each cycle is 40 + 60 = 100 ms, so 40,000 x 0.1 s = 4,000 s = 1.11 hours. Forgetting the pause gives 0.44 hours, which is the usual mistake when estimating a throttled backfill.",
+      "ref": "unit-3-transactions-schema.md#9-schema-design-and-zero-downtime-migrations"
+    },
+    {
+      "id": "A2-067",
+      "type": "single",
+      "tags": [
+        "migrations",
+        "schema"
+      ],
+      "difficulty": 2,
+      "prompt": "You must rename ledger_entries.memo to description while services deploy in a rolling fashion for 30 minutes. What is the safe approach?",
+      "choices": [
+        "Take the platform down for a maintenance window and rename the column atomically while no one is connected",
+        "Run ALTER TABLE ... RENAME COLUMN in the same release as the code that starts using the new name",
+        "Add the new column, dual-write, backfill and verify, move reads, stop the old writes, then drop the old column later",
+        "Create a view exposing the new name and then drop the underlying table once the view is in place"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "During a rolling deploy two code versions run against one schema, so each step must be compatible with both the previous and next versions; a direct rename breaks whichever half of the fleet still uses the old name. A maintenance window is unnecessary downtime on a 24x7 system, and replacing the table with a view just moves the incompatibility.",
+      "ref": "unit-3-transactions-schema.md#9-schema-design-and-zero-downtime-migrations"
+    },
+    {
+      "id": "A2-068",
+      "type": "multi",
+      "tags": [
+        "migrations",
+        "indexing"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL statements that are true about PostgreSQL's CREATE INDEX CONCURRENTLY.",
+      "choices": [
+        "It can be run inside a BEGIN ... COMMIT block",
+        "If it fails, it can leave an INVALID index that must be dropped",
+        "It is faster than a plain CREATE INDEX because it skips WAL logging",
+        "It takes longer than a plain CREATE INDEX because it scans the table twice and waits for older transactions",
+        "It does not block writes to the table while the index is built"
+      ],
+      "answer": [
+        1,
+        3,
+        4
+      ],
+      "explanation": "The concurrent build trades time for availability: two scans, waiting for transactions that could see the old state, no write blocking, and a possibility of an invalid leftover on failure. It cannot run inside a transaction block, and it is not faster; it still writes WAL.",
+      "ref": "unit-3-transactions-schema.md#9-schema-design-and-zero-downtime-migrations"
+    },
+    {
+      "id": "A2-069",
+      "type": "single",
+      "tags": [
+        "migrations",
+        "schema"
+      ],
+      "difficulty": 2,
+      "prompt": "How do you add a CHECK or foreign-key constraint to a huge hot table without blocking writes for the duration of a full scan?",
+      "choices": [
+        "Disable all the writers with an explicit table lock, then add the constraint and release the lock afterwards",
+        "Add it inside a SERIALIZABLE transaction, which takes no locks on the table while the constraint is checked",
+        "Add it normally during a quiet hour, because a scan of even a large table is fast enough to ignore",
+        "Add it NOT VALID (cheap, enforced for new rows), then VALIDATE CONSTRAINT, which scans without blocking writes"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "NOT VALID skips the initial scan and enforces the rule for new writes; VALIDATE CONSTRAINT checks existing rows under a lock that does not block ordinary writes. A normal ADD CONSTRAINT scans under a blocking lock, isolation levels do not remove DDL locks, and locking out all writers is the outage you are avoiding.",
+      "ref": "unit-3-transactions-schema.md#9-schema-design-and-zero-downtime-migrations"
+    },
+    {
+      "id": "A2-070",
+      "type": "single",
+      "tags": [
+        "migrations",
+        "schema",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A backfill pages through 450 million rows with LIMIT 5000 OFFSET n, and each batch gets slower; rows also get skipped as the backfill modifies them. What is the right design?",
+      "choices": [
+        "Keyset batches (WHERE id > last ORDER BY id LIMIT n), idempotent and resumable, throttled on lag or latency",
+        "Run one UPDATE over all 450 million rows inside a single transaction so that it either all works or not",
+        "Use larger OFFSET steps so that there are fewer batches and fewer total queries against the table",
+        "Pick randomly sampled batches and retry until every row happens to have been covered at least once"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "OFFSET re-reads and discards all earlier rows each time (quadratic total work) and shifts as rows change, while keyset batches seek directly to the next id and are stable. A single giant UPDATE holds locks and a snapshot for hours and floods WAL and replicas, and random sampling cannot guarantee coverage.",
+      "ref": "unit-3-transactions-schema.md#9-schema-design-and-zero-downtime-migrations"
+    },
+    {
+      "id": "A2-071",
+      "type": "single",
+      "tags": [
+        "schema",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "How should money amounts be stored in the ledger?",
+      "choices": [
+        "As double-precision floating point, which is exact enough for cents and keeps arithmetic fast and simple",
+        "As formatted text such as '$1,234.50' so that it is readable by people reviewing the table directly",
+        "As a 32-bit integer of cents, since no member balance will ever exceed twenty-one million dollars",
+        "An integer count of minor units (such as cents) with an ISO currency code, or fixed-point numeric where sub-cent precision is needed"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Integers (or fixed-point decimals) are exact and sum correctly; floats accumulate binary rounding errors, text cannot be summed safely, and a 32-bit cent counter overflows at about $21.4 million, which a commercial member can cross (the widening migration in the unit).",
+      "ref": "unit-3-transactions-schema.md#9-schema-design-and-zero-downtime-migrations"
+    },
+    {
+      "id": "A2-072",
+      "type": "single",
+      "tags": [
+        "migrations",
+        "schema",
+        "multitenancy"
+      ],
+      "difficulty": 3,
+      "prompt": "The platform stores each of its 40 credit unions in its own schema. A column change must now be applied to all of them. What is the principal cost compared with a shared schema using tenant_id?",
+      "choices": [
+        "Indexes cannot be created on tables in per-tenant schemas, so every query becomes a full table scan",
+        "Migration fan-out: 40 migrations with partial-failure states, so code must tolerate mixed schema versions",
+        "Foreign keys stop working across tenants, which is the main reason why migrations are so much harder",
+        "Per-tenant schemas cannot use transactions, so a migration cannot be rolled back if it fails partway"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Every schema-per-tenant migration is multiplied by the tenant count and can stop halfway, producing version skew the application must handle. Indexes and transactions work normally in each schema, and cross-tenant foreign keys are neither needed nor allowed by design. The trade is a legitimate isolation choice (A9) with this migration tax.",
+      "ref": "unit-3-transactions-schema.md#9-schema-design-and-zero-downtime-migrations"
+    },
+    {
+      "id": "A2-073",
+      "type": "single",
+      "tags": [
+        "migrations",
+        "schema"
+      ],
+      "difficulty": 2,
+      "prompt": "In expand / migrate / contract, why is the contract step (dropping the old column) a separate, later change?",
+      "choices": [
+        "It is the only irreversible step; keeping it separate preserves the ability to roll back all earlier steps",
+        "The old column serves as an index for the new column, so it cannot be removed until that index is rebuilt",
+        "The database requires a full restart after any DROP COLUMN statement before new queries can be run",
+        "Dropping a column is much slower than adding one, so it has to be scheduled during the overnight window"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Until the old structure is dropped, every earlier step can be rolled back by redeploying old code. The drop is a metadata-only change in PostgreSQL (not slow), requires no restart, and the new column does not depend on the old one's index.",
+      "ref": "unit-3-transactions-schema.md#9-schema-design-and-zero-downtime-migrations"
+    }
+  ]
+}

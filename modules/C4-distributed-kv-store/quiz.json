@@ -1,0 +1,906 @@
+{
+  "module": "C4",
+  "title": "Case study: distributed key-value store",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "C4-001",
+      "type": "single",
+      "tags": [
+        "requirements",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "An interviewer says 'design a distributed key-value store' and nothing else. Which clarifying question most changes the REPLICATION PROTOCOL you will draw?",
+      "choices": [
+        "Whether any operation needs create-if-absent or compare-and-set with exactly one winner",
+        "Which serialisation format clients will use for values",
+        "Whether keys are case-sensitive",
+        "Which programming languages need client libraries"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "An 'exactly one winner' operation cannot be built from quorums at any R and W; it needs a serialisation point per key (Paxos or Raft), which is a different family of design from leaderless quorums. The serialisation format, key case-sensitivity and client languages change no boxes; they are the questions that waste the first six minutes.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-that-change-the-design-000006"
+    },
+    {
+      "id": "C4-002",
+      "type": "multi",
+      "tags": [
+        "requirements",
+        "consensus",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL requirements that force a consensus-based path (Paxos/Raft) rather than tunable leaderless quorums.",
+      "choices": [
+        "Usernames must be unique: two sign-ups for the same name must never both succeed",
+        "A configuration value is updated with compare-and-set on its version",
+        "Single-key reads must complete in under 10 ms at p99",
+        "Shopping-cart writes must succeed during an AZ partition",
+        "A client must read the current holder of a lease linearizably before acting on it"
+      ],
+      "answer": [
+        0,
+        1,
+        4
+      ],
+      "explanation": "Uniqueness, compare-and-set and linearizable reads all need one order of competing operations per key, which quorum overlap does not provide. A 10 ms p99 is a latency target that leaderless quorums meet easily. 'Always writable during a partition' points the other way: it is the requirement that makes leaderless quorums with sloppy quorums attractive, and that consensus cannot meet on the minority side.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-that-change-the-design-000006"
+    },
+    {
+      "id": "C4-003",
+      "type": "single",
+      "tags": [
+        "requirements",
+        "partitioning"
+      ],
+      "difficulty": 2,
+      "prompt": "Halfway through your hash-ring design, the interviewer adds: 'customers must list every key with the prefix tenant:42:'. What is the right response?",
+      "choices": [
+        "Switch to range partitioning, or make the tenant the partition key with a sort key inside it, so the scan is local",
+        "Increase the number of virtual nodes so prefixes spread more evenly",
+        "Raise the read consistency level to ALL so the scan sees every replica",
+        "Add a bloom filter per node so the scan can skip nodes without the prefix"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Hash partitioning scatters a prefix over every node, so a scan is an N-way scatter-gather. Range partitioning keeps it contiguous; a partition key plus sort key (Cassandra, DynamoDB) keeps a scan within one partition local. More vnodes spread the prefix even more. ALL changes how many replicas answer, not how many partitions hold the prefix. Bloom filters answer 'is this exact key here', not prefix queries, and every node may hold some keys of the prefix.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-that-change-the-design-000006"
+    },
+    {
+      "id": "C4-004",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "quorum"
+      ],
+      "difficulty": 2,
+      "prompt": "Peak load is 700,000 reads/s at R = 2 and 300,000 writes/s with N = 3 (W = 2). How many replica operations per second do the nodes perform, ignoring repair and hints? Answer in req/s.",
+      "value": 2300000.0,
+      "tolerance": 0.15,
+      "unit": "req/s",
+      "explanation": "Reads: 700k × R(2) = 1.4M. Writes: every write goes to all N = 3 replicas whatever W is: 300k × 3 = 0.9M. Total ≈ 2.3M replica operations/s. Answering 2.0M counts writes as W = 2 replica writes (the third replica still applies it); answering 1M forgets the multiplier entirely.",
+      "ref": "unit-1-guided-design.md#2-estimation-replica-operations-not-bytes-decide-the-node-count-006010"
+    },
+    {
+      "id": "C4-005",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "The cluster must handle ≈ 2.3M replica operations/s, and one node handles ≈ 30,000 replica operations/s at target utilisation. How many nodes do you need by operations? Answer as a number of nodes.",
+      "value": 77,
+      "tolerance": 0.15,
+      "unit": "nodes",
+      "explanation": "2.3M / 30k ≈ 77, so ≈ 80 nodes (≈ 27 per AZ). By disk the same data (≈ 40 TB) would need only ≈ 20 nodes at ≈ 2 TB each, so operations, not bytes, size this cluster. The node count scales linearly with the per-node assumption, which is why you say you would benchmark it.",
+      "ref": "unit-1-guided-design.md#2-estimation-replica-operations-not-bytes-decide-the-node-count-006010"
+    },
+    {
+      "id": "C4-006",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "A candidate computes 10 TB × 3 replicas × 1.3 ≈ 40 TB, divides by 4 TB drives, and proposes 10 nodes for a store serving 1M operations/s. What is the main flaw?",
+      "choices": [
+        "Ten nodes would each serve ≈ 230k replica operations/s, far beyond what an LSM node sustains at a 10 ms p99; operations size this cluster",
+        "The replication factor should be applied after the LSM overhead, not before",
+        "4 TB drives are too small for any production key-value store",
+        "Ten is not divisible by three AZs, so placement is impossible"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "2.3M replica operations/s over 10 nodes is ≈ 230k each, roughly 8× the ≈ 30k assumed per node: the disk arithmetic answered the wrong question. The order of multiplying overheads doesn't change the product. Drive size is not the issue: the cluster would leave the disks mostly empty if sized by ops. Uneven AZ counts are an inconvenience (use 9 or 12), not the flaw.",
+      "ref": "unit-1-guided-design.md#2-estimation-replica-operations-not-bytes-decide-the-node-count-006010"
+    },
+    {
+      "id": "C4-007",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "A node holding ≈ 0.5 TB dies. Its replacement streams the data from the other replicas, throttled to ≈ 100 MB/s to protect foreground latency. How long until it is back to full redundancy? Answer in hours.",
+      "value": 1.39,
+      "tolerance": 0.2,
+      "unit": "hours",
+      "explanation": "0.5 × 10^12 B / 10^8 B/s = 5,000 s ≈ 1.4 h. At 4 TB per node the same throttle gives ≈ 11 h, during which the dead node's ranges have one fewer replica: that window, not the price per TB, is why you keep per-node data small. 5 h or 14 h answers usually come from MB vs Mb confusion or from using 4 TB.",
+      "ref": "unit-1-guided-design.md#2-estimation-replica-operations-not-bytes-decide-the-node-count-006010"
+    },
+    {
+      "id": "C4-008",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "300,000 writes/s, N = 3, 80 nodes, ≈ 1 KB per write. One node is down and the others store hints for it. Roughly how many GB of hints accumulate per hour? Answer in GB.",
+      "value": 40,
+      "tolerance": 0.25,
+      "unit": "GB",
+      "explanation": "Replica writes are 300k × 3 = 900k/s; the dead node's share is 900k / 80 ≈ 11k/s × 1 KB ≈ 11 MB/s × 3,600 s ≈ 40 GB per hour, spread across the stand-ins. A 3-hour hint window is ≈ 120 GB. Answers near 1 GB forget the seconds-to-hours factor; answers near 1,000 GB forget to divide by the node count.",
+      "ref": "unit-2-deep-dives.md#5-quorums-under-failure-tuning-n-r-and-w-sloppy-quorums-and-hinted-handoff-025030"
+    },
+    {
+      "id": "C4-009",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "consistency",
+        "trade-offs"
+      ],
+      "difficulty": 2,
+      "prompt": "Your ops-sized cluster is ≈ 80 nodes at R = W = 2 (QUORUM), N = 3, with 700k reads/s and 300k writes/s. Which single change to the defaults cuts the node count by roughly a third?",
+      "choices": [
+        "Default reads at ONE (R = 1)",
+        "Default writes at ONE (W = 1)",
+        "Double the number of virtual nodes per node",
+        "Switch the LSM engine to leveled compaction"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "R = 1 makes reads 700k replica operations instead of 1.4M: 1.6M total → ≈ 55 nodes, ≈ 30% fewer. W = 1 saves nothing in operations, because every write still goes to all N replicas; it only answers sooner. More vnodes improves balance, not total work. Leveled compaction changes per-node read/write amplification, not the replica-operation count, and usually costs more write IO.",
+      "ref": "unit-1-guided-design.md#2-estimation-replica-operations-not-bytes-decide-the-node-count-006010"
+    },
+    {
+      "id": "C4-010",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "cost",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "300,000 writes/s of ≈ 1 KB, N = 3 with exactly one replica per AZ, so two of the three replica writes cross an AZ boundary. How much data crosses AZ boundaries per day for replication alone? Answer in TB.",
+      "value": 52,
+      "tolerance": 0.25,
+      "unit": "TB",
+      "explanation": "300k × 1 KB × 2 = 600 MB/s × 86,400 s ≈ 52 TB/day. At an assumed ≈ $0.02/GB (both directions) that is ≈ $1,000/day, a real line item. 26 TB counts one crossing per write; 78 TB counts all three replicas as crossing (the coordinator's own AZ replica doesn't).",
+      "ref": "unit-1-guided-design.md#2-estimation-replica-operations-not-bytes-decide-the-node-count-006010"
+    },
+    {
+      "id": "C4-011",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "idempotency",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "A client's Put at QUORUM returns Timeout. What should the client assume and do?",
+      "choices": [
+        "The write may have been applied on anywhere from zero to N replicas and may become visible later; retry the same value with the same context",
+        "The write was not applied anywhere, so it can be retried as a fresh read-modify-write",
+        "The write was applied on exactly W − 1 replicas and the coordinator will roll it back",
+        "The coordinator has queued the write and will guarantee it within the hint window"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Timeout means sent but not enough acknowledgements in time; nothing is rolled back, so the write may surface later (A5's 'failed writes can be read'). Retrying the identical value with the same context produces an identical version that collapses. A fresh read-modify-write may apply a non-idempotent change twice. There is no rollback in a leaderless store, and a coordinator makes no delivery guarantee for a timed-out write.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model-consistency-levels-causal-context-and-tombstones-010016"
+    },
+    {
+      "id": "C4-012",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "conflict-resolution"
+      ],
+      "difficulty": 2,
+      "prompt": "What does the opaque 'context' returned by Get and passed back on Put let the store do?",
+      "choices": [
+        "Tell which existing versions the new write supersedes, so it keeps only the versions the client never saw as siblings",
+        "Authenticate the client without a separate token",
+        "Route the Put to the same coordinator that served the Get",
+        "Set the TTL of the new value to the remaining TTL of the old one"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The context encodes the version vector(s) the client read. Without it the store can't distinguish 'this replaces what I read' from 'this is concurrent with something I never saw', so it must either drop one (LWW) or keep everything (sibling explosion). It has nothing to do with authentication, routing (any node can coordinate) or TTL inheritance.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model-consistency-levels-causal-context-and-tombstones-010016"
+    },
+    {
+      "id": "C4-013",
+      "type": "multi",
+      "tags": [
+        "data-model",
+        "tombstones"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL fields a replica must store per key in this Dynamo-style design.",
+      "choices": [
+        "A version (version vector per sibling, or a write timestamp in LWW mode)",
+        "A tombstone flag with the time of the delete",
+        "An optional expiry time for TTL'd values",
+        "The IP address of the coordinator that wrote it",
+        "The client's session identifier"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "The version decides supersession and conflicts; the tombstone and its time make deletes survive repair and decide when they may be purged; expiry implements TTL as a scheduled tombstone. The coordinator's address is irrelevant once the write is applied (and changes with topology), and a session identifier is client state that doesn't belong in every record.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model-consistency-levels-causal-context-and-tombstones-010016"
+    },
+    {
+      "id": "C4-014",
+      "type": "single",
+      "tags": [
+        "tombstones",
+        "anti-entropy"
+      ],
+      "difficulty": 2,
+      "prompt": "Delete is implemented by removing the record. Replica C is down during a delete that reaches A and B; a weekly repair later compares the replicas. What happens?",
+      "choices": [
+        "Repair finds the key on C but not on A and B, can't tell 'deleted' from 'never received', and copies it back: the deleted key reappears",
+        "Repair sees that two of three replicas lack the key and deletes it from C by majority",
+        "Nothing: C's copy is ignored because C was down when the delete happened",
+        "The key is unreadable forever because the replicas disagree"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Anti-entropy merges replicas towards the union of what they have; an absent record carries no information, so the value wins. That is why deletes write tombstones. Repair does not vote by majority (a key written at W = 1 legitimately exists on one replica). Nothing records that C was down for that delete. Reads don't fail on disagreement; they reconcile to what exists.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model-consistency-levels-causal-context-and-tombstones-010016"
+    },
+    {
+      "id": "C4-015",
+      "type": "single",
+      "tags": [
+        "partitioning",
+        "consistent-hashing"
+      ],
+      "difficulty": 1,
+      "prompt": "80 nodes sit on a consistent-hash ring with many virtual nodes each. You add an 81st. What moves?",
+      "choices": [
+        "≈ 1/81 ≈ 1.2% of the data, in small slices from many existing nodes",
+        "≈ 80/81 ≈ 99% of the data, because every key's bucket changes",
+        "≈ 50% of the data of the new node's ring neighbour",
+        "≈ 1.2% of the data, all from the new node's single clockwise neighbour"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Each new vnode splits one existing range, so the new node takes ≈ 1/81 of the keys from roughly all the others. ≈ 99% is what hash-mod-N does when N changes. Half of one neighbour, or 1/81 from one neighbour, is a ring without virtual nodes: one donor becomes the bottleneck and load stays uneven.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-from-one-node-to-a-ring-of-coordinators-016025"
+    },
+    {
+      "id": "C4-016",
+      "type": "single",
+      "tags": [
+        "replication",
+        "partitioning"
+      ],
+      "difficulty": 2,
+      "prompt": "The preference list is built as 'the next three vnodes clockwise' with 16 vnodes per node on 80 nodes. What is the problem?",
+      "choices": [
+        "About 1 in 27 keys get two replicas on the same physical machine, so one machine failure removes two copies",
+        "Writes need four acknowledgements instead of two",
+        "Every key's replicas end up in the same AZ",
+        "Adding a node now moves ≈ 99% of keys"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Consecutive vnodes often belong to the same node: each of the three pairs collides with probability ≈ 1/80, so ≈ 3.75% of keys. The fix is to skip vnodes whose node (or AZ) is already chosen. The number of acknowledgements is set by W, not by placement. Same-AZ placement is a risk of AZ-blind selection but not 'every key'. Data movement on join is unchanged.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-from-one-node-to-a-ring-of-coordinators-016025"
+    },
+    {
+      "id": "C4-017",
+      "type": "numeric",
+      "tags": [
+        "replication",
+        "availability"
+      ],
+      "difficulty": 3,
+      "prompt": "Replicas are placed on distinct nodes but ignoring AZs; nodes are spread evenly over three AZs, so each replica lands in a random AZ. When one AZ goes down, what percentage of keys lose QUORUM (fewer than 2 of 3 replicas left)? Answer in %.",
+      "value": 26,
+      "tolerance": 0.2,
+      "unit": "%",
+      "explanation": "A key loses quorum if ≥ 2 of its 3 replicas are in the failed AZ: 3 × (1/3)² × (2/3) + (1/3)³ = 6/27 + 1/27 = 7/27 ≈ 26%. With one replica per AZ the answer is 0%, which is why placement must be AZ-aware. 33% is 'one AZ = a third of keys'; 4% is only the all-three case.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-from-one-node-to-a-ring-of-coordinators-016025"
+    },
+    {
+      "id": "C4-018",
+      "type": "single",
+      "tags": [
+        "latency",
+        "quorum"
+      ],
+      "difficulty": 2,
+      "prompt": "One of a key's three replicas has a p99 of 200 ms instead of 2 ms. The coordinator reads and writes at QUORUM. What does the client mostly see?",
+      "choices": [
+        "Little change: the coordinator waits for the 2 fastest of 3, so the slow replica is hidden on most requests",
+        "Every request takes ≈ 200 ms, because QUORUM waits for every replica",
+        "Requests fail with Unavailable until the slow replica recovers",
+        "Requests succeed but return stale data, because the slow replica is skipped"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "QUORUM completes on the second-fastest response, so one slow replica rarely shows; speculative retry handles the reads that picked it. Waiting for every replica is ALL, where the slow replica's latency becomes everyone's. Slowness is not unavailability. Skipping one replica doesn't make the answer stale: the two that answered overlap every acknowledged write.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-from-one-node-to-a-ring-of-coordinators-016025"
+    },
+    {
+      "id": "C4-019",
+      "type": "multi",
+      "tags": [
+        "availability",
+        "replication",
+        "hot-keys"
+      ],
+      "difficulty": 3,
+      "prompt": "The design has no single point of failure on the request path. Select ALL residual risks a senior candidate should still name.",
+      "choices": [
+        "A hot key: its three replicas are three machines whatever the cluster size",
+        "A bad configuration or binary pushed to every node at once",
+        "Two nodes bootstrapping at the same time and claiming overlapping ranges",
+        "The ring metadata, because it is stored only on one seed node",
+        "The node that coordinates a given request"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Hot keys, correlated failures from a fleet-wide change, and unserialised ring changes are all real. The ring is held by every node, not one seed (seeds only help new nodes find the cluster). A coordinator failing mid-request is handled by the client retrying on another node: any node can coordinate.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-from-one-node-to-a-ring-of-coordinators-016025"
+    },
+    {
+      "id": "C4-020",
+      "type": "single",
+      "tags": [
+        "quorum",
+        "trade-offs"
+      ],
+      "difficulty": 2,
+      "prompt": "Feature flags are read 100× more often than written, by admins only; seconds of staleness are fine. With N = 3, which setting is best?",
+      "choices": [
+        "R = 1, W = 3: reads cost one replica and survive two failures, and R + W > N still holds",
+        "R = 3, W = 1: writes are cheap and always succeed",
+        "R = 1, W = 1: the cheapest and most available option",
+        "R = 2, W = 2 with sloppy quorums"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "For read-heavy, rarely written data, spend the overlap on the write side: W = N keeps R + W > N with R = 1, so reads are as cheap and available as possible and a flag write fails only while a replica is down (the admin retries). R = 3 makes every read pay the slowest replica. R = 1, W = 1 loses the overlap. QUORUM with sloppy quorums doubles read cost for no benefit here.",
+      "ref": "unit-2-deep-dives.md#5-quorums-under-failure-tuning-n-r-and-w-sloppy-quorums-and-hinted-handoff-025030"
+    },
+    {
+      "id": "C4-021",
+      "type": "single",
+      "tags": [
+        "quorum",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "A colleague says: 'We use R = 2, W = 2, N = 3, so the store is strongly consistent.' Which statement is correct?",
+      "choices": [
+        "R + W > N makes every quorum read overlap the home replicas of the latest completed write, but it is not linearizable: in-flight and timed-out writes, read-repair races and sloppy quorums break the guarantee",
+        "The colleague is right: R + W > N is the definition of linearizability",
+        "R + W > N guarantees nothing at all; only W = N does",
+        "It is linearizable only if read repair is enabled"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Overlap is a real but weaker guarantee. Two reads during an in-flight write can see new then old; a write reported as failed can be read later; sloppy quorums put acknowledgements outside the home set. W = N doesn't make it linearizable either (concurrent reads still race). Read repair helps convergence, not linearizability.",
+      "ref": "unit-2-deep-dives.md#5-quorums-under-failure-tuning-n-r-and-w-sloppy-quorums-and-hinted-handoff-025030"
+    },
+    {
+      "id": "C4-022",
+      "type": "single",
+      "tags": [
+        "quorum",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "With sloppy quorums (N = 3, R = W = 2), a write is acknowledged by home replica A and stand-in D (holding a hint for B). A QUORUM read immediately afterwards consults home replicas B and C. What can it return?",
+      "choices": [
+        "The old value: neither B nor C has the write until D replays the hint",
+        "The new value, because R + W > N guarantees overlap",
+        "An error, because B is not in sync",
+        "The new value, because D forwards the read"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "R + W > N guarantees overlap among home replicas; D is outside that set, so the read can miss the write until the hint is delivered. That staleness window is the price of always-writable. A read doesn't fail because a replica is behind, and stand-ins don't serve reads for the keys they hold hints for.",
+      "ref": "unit-2-deep-dives.md#5-quorums-under-failure-tuning-n-r-and-w-sloppy-quorums-and-hinted-handoff-025030"
+    },
+    {
+      "id": "C4-023",
+      "type": "single",
+      "tags": [
+        "replication",
+        "anti-entropy"
+      ],
+      "difficulty": 2,
+      "prompt": "A node was down for six hours; the hint window is three hours. It comes back. What should happen before it serves reads at consistency ONE?",
+      "choices": [
+        "Run anti-entropy repair of its ranges, because the last three hours of writes are missing and no hint covers them",
+        "Nothing: hinted handoff replays everything it missed",
+        "Only wait for hint replay to finish",
+        "Extend the hint window to six hours so the stand-ins resend the rest"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Hints stopped after three hours, so ≈ 1.2 × 10^8 replica writes for its ranges are simply absent; replaying the hints that exist doesn't create the missing ones. QUORUM reads stay correct (the other replicas have the writes) but ONE reads that land on it would be stale until repair. Changing the window now can't recreate hints that were never stored.",
+      "ref": "unit-2-deep-dives.md#5-quorums-under-failure-tuning-n-r-and-w-sloppy-quorums-and-hinted-handoff-025030"
+    },
+    {
+      "id": "C4-024",
+      "type": "numeric",
+      "tags": [
+        "availability",
+        "quorum"
+      ],
+      "difficulty": 3,
+      "prompt": "Each replica is independently unavailable with probability p = 0.01. With a strict quorum, N = 3, W = 2, what is the probability that a write fails (fewer than 2 replicas up)? Answer in %.",
+      "value": 0.0298,
+      "tolerance": 0.1,
+      "unit": "%",
+      "explanation": "Fails if 2 or 3 replicas are down: 3p²(1 − p) + p³ = 3 × 0.0001 × 0.99 + 0.000001 ≈ 0.000298 ≈ 0.03%. With W = 3 it would be ≈ 3p ≈ 3%. The independence assumption is the weak part: a rolling restart makes one replica deliberately unavailable, so the 'second failure' only needs to happen during that window.",
+      "ref": "unit-2-deep-dives.md#5-quorums-under-failure-tuning-n-r-and-w-sloppy-quorums-and-hinted-handoff-025030"
+    },
+    {
+      "id": "C4-025",
+      "type": "single",
+      "tags": [
+        "conflict-resolution",
+        "trade-offs"
+      ],
+      "difficulty": 1,
+      "prompt": "Which conflict resolution suits a session record (session data plus a last-seen time, touched by the client every few seconds)?",
+      "choices": [
+        "Last-write-wins on the whole value",
+        "Siblings returned to the client and merged on every read",
+        "A PN-counter CRDT",
+        "A consensus round per write"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Losing one of two concurrent touches is harmless, so LWW's silent loss costs nothing and keeps reads simple. Siblings would make every read pay a merge for no benefit. A counter type doesn't model the record. Consensus would add round trips and make sessions unwritable on the minority side of a partition, for a guarantee nobody needs.",
+      "ref": "unit-2-deep-dives.md#6-versions-and-conflicts-last-write-wins-vector-clocks-and-siblings-crdts-030034"
+    },
+    {
+      "id": "C4-026",
+      "type": "single",
+      "tags": [
+        "conflict-resolution",
+        "crdt"
+      ],
+      "difficulty": 2,
+      "prompt": "A 'likes' counter is incremented and decremented from many devices through different coordinators. Which representation converges correctly?",
+      "choices": [
+        "A PN-counter: per-replica increment and decrement slots, merged by per-slot max",
+        "A plain integer with last-write-wins",
+        "A plain integer with siblings merged by summing them",
+        "A read-modify-write at QUORUM on a plain integer"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Per-replica slots record which increments each replica has seen, so merging by max is idempotent and order-independent. LWW and read-modify-write both lose concurrent increments (both read 7 and write 8). Summing integer siblings double-counts the base they share (7 + 8 = 15 instead of 9).",
+      "ref": "unit-2-deep-dives.md#6-versions-and-conflicts-last-write-wins-vector-clocks-and-siblings-crdts-030034"
+    },
+    {
+      "id": "C4-027",
+      "type": "single",
+      "tags": [
+        "conflict-resolution",
+        "crdt"
+      ],
+      "difficulty": 2,
+      "prompt": "A cart is stored with siblings merged by set union. One phone removes 'eggs' while another, still holding the old cart, adds 'bread'. After the merge, eggs is back. Which design keeps the concurrent add without resurrecting the remove?",
+      "choices": [
+        "An observed-remove set: each add gets a unique tag, a remove records the tags it observed, and an element is present if it has a tag that was not removed",
+        "Last-write-wins on the whole cart",
+        "Merge siblings by keeping the longest cart",
+        "Merge siblings by set intersection"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The OR-Set records why an element is absent (its observed tags were removed), so bread's new tag survives and eggs' removed tag stays removed. LWW drops one phone's change entirely. 'Longest wins' is LWW with another tie-breaker and loses removes. Intersection would drop the concurrent add of bread.",
+      "ref": "unit-2-deep-dives.md#6-versions-and-conflicts-last-write-wins-vector-clocks-and-siblings-crdts-030034"
+    },
+    {
+      "id": "C4-028",
+      "type": "single",
+      "tags": [
+        "conflict-resolution",
+        "clocks"
+      ],
+      "difficulty": 2,
+      "prompt": "Two coordinators' clocks are 50 ms apart. Under last-write-wins, two writes to the same key arrive 20 ms apart, the later one through the coordinator whose clock is behind. Which value survives?",
+      "choices": [
+        "The earlier write, because the later one carries the smaller timestamp",
+        "The later write, because it arrived later",
+        "Both, as siblings",
+        "Neither: the replicas detect the skew and reject both"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "LWW orders by timestamp, not arrival. With 50 ms of skew, a write made up to 50 ms later can lose; here the later write's timestamp is ≈ 30 ms smaller. LWW has no siblings by definition, and replicas don't detect skew: the loss is silent.",
+      "ref": "unit-2-deep-dives.md#6-versions-and-conflicts-last-write-wins-vector-clocks-and-siblings-crdts-030034"
+    },
+    {
+      "id": "C4-029",
+      "type": "multi",
+      "tags": [
+        "consensus",
+        "conflict-resolution"
+      ],
+      "difficulty": 2,
+      "prompt": "Username → user-id claims are stored in the store. Select ALL statements that are true.",
+      "choices": [
+        "Resolving sibling claims later cannot work: two users were already told the name is theirs",
+        "Last-write-wins cannot work: it silently overrides the first claimant",
+        "The claim needs a single serialisation point per key, such as a Paxos round or a Raft leader",
+        "A CRDT set of claimed names guarantees that no two users get the same name"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Uniqueness must be prevented, not repaired: by the time siblings or LWW resolve the conflict, both users have acted on success. A CRDT set converges on the union of claims, which happily contains the same name claimed by two users; convergence is not exclusivity. Only a per-key serialisation point (consensus) gives exactly one winner.",
+      "ref": "unit-2-deep-dives.md#6-versions-and-conflicts-last-write-wins-vector-clocks-and-siblings-crdts-030034"
+    },
+    {
+      "id": "C4-030",
+      "type": "numeric",
+      "tags": [
+        "anti-entropy",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Two replicas compare Merkle trees of depth 20, and they differ in ≈ 1,000 leaves on different paths. Roughly how many hash comparisons does the descent make? Answer as a count of hashes.",
+      "value": 40000,
+      "tolerance": 0.2,
+      "unit": "hashes",
+      "explanation": "One root comparison, then two child comparisons per level for each differing path: ≈ 1 + 1,000 × 2 × 20 ≈ 40,000 hashes ≈ 1.3 MB at 32 B each, versus ≈ 29 GB for a list of (key, hash) pairs for 5 × 10^8 keys. Shared ancestors near the root make the exact number slightly smaller. 20,000 forgets that both children are compared; 2 × 10^6 is the size of the whole tree.",
+      "ref": "unit-2-deep-dives.md#7-anti-entropy-and-deletes-merkle-trees-tombstones-and-zombies-034039"
+    },
+    {
+      "id": "C4-031",
+      "type": "single",
+      "tags": [
+        "anti-entropy"
+      ],
+      "difficulty": 1,
+      "prompt": "Two replicas of a range are identical. How many hash comparisons does a Merkle-tree comparison make, whatever the depth?",
+      "choices": [
+        "One: the roots match, so nothing below is compared",
+        "One per leaf",
+        "Two per level",
+        "One per key in the range"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Equal roots mean equal contents (with a collision-resistant hash), so the descent stops immediately; the lab tests that identical trees cost exactly one comparison. One per leaf or per key is what a list comparison costs; two per level is the cost of following one differing path.",
+      "ref": "unit-2-deep-dives.md#7-anti-entropy-and-deletes-merkle-trees-tombstones-and-zombies-034039"
+    },
+    {
+      "id": "C4-032",
+      "type": "single",
+      "tags": [
+        "anti-entropy",
+        "trade-offs"
+      ],
+      "difficulty": 2,
+      "prompt": "Why not compare two replicas by exchanging row counts per range, or one hash of the whole range?",
+      "choices": [
+        "They can tell that replicas differ (or, for counts, miss differences entirely) but not where, so the whole range would have to be shipped",
+        "Hashes are too expensive to compute on large ranges",
+        "Row counts are not available in an LSM store",
+        "A single hash would make tombstones invisible"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Equal counts hide changed values and missed deletes; a single hash detects a difference but doesn't localise it. The tree's levels are what localise differences to a few leaves. Hashing is cheap relative to reading the data (which repair does anyway). LSM stores can count rows; that isn't the problem. A whole-range hash would include tombstones if they are in the hashed bytes.",
+      "ref": "unit-2-deep-dives.md#7-anti-entropy-and-deletes-merkle-trees-tombstones-and-zombies-034039"
+    },
+    {
+      "id": "C4-033",
+      "type": "single",
+      "tags": [
+        "tombstones",
+        "anti-entropy"
+      ],
+      "difficulty": 2,
+      "prompt": "A node returns after 12 days down. Tombstones are kept for 10 days. What should the operator do?",
+      "choices": [
+        "Not rejoin it with its data: wipe it and rebuild (replace) it from the other replicas",
+        "Rejoin it and run repair immediately, which will fix any differences",
+        "Rejoin it and rely on read repair",
+        "Extend the grace period to 12 days and then rejoin it"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The other replicas have purged tombstones for deletes this node never saw; any repair would copy its old values back (zombies). Read repair resurrects the same way, one read at a time. Extending the grace period now can't restore tombstones already purged. Rebuilding gives it nothing old to resurrect.",
+      "ref": "unit-2-deep-dives.md#7-anti-entropy-and-deletes-merkle-trees-tombstones-and-zombies-034039"
+    },
+    {
+      "id": "C4-034",
+      "type": "single",
+      "tags": [
+        "tombstones"
+      ],
+      "difficulty": 3,
+      "prompt": "Which purge cutoff for tombstones cannot resurrect data, whatever the outage length? (now = current time, grace = grace period, lastFullRepair = start of the last repair that covered every replica of the range)",
+      "choices": [
+        "min(now − grace, lastFullRepair)",
+        "max(now − grace, lastFullRepair)",
+        "now − grace",
+        "lastFullRepair + grace"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A tombstone newer than the last full repair may not have reached a replica that was down, so it must stay regardless of age: take the older of the two cutoffs. max() or now − grace alone purge tombstones that a long-absent replica never received (the zombie). lastFullRepair + grace can even exceed now, purging tombstones younger than the grace period.",
+      "ref": "unit-2-deep-dives.md#7-anti-entropy-and-deletes-merkle-trees-tombstones-and-zombies-034039"
+    },
+    {
+      "id": "C4-035",
+      "type": "numeric",
+      "tags": [
+        "tombstones",
+        "anti-entropy"
+      ],
+      "difficulty": 2,
+      "prompt": "Full repair runs every 7 days and tombstones are kept for 10 days. What is the longest node outage that is GUARANTEED not to produce zombies, regardless of when in the repair cycle the node returns? Answer in days.",
+      "value": 3,
+      "tolerance": 0.25,
+      "unit": "days",
+      "explanation": "Safe while grace > outage + time until the next full repair reaches the node. In the worst case the node returns just after a repair and waits 7 days: 10 − 7 = 3 days. Shorter outages are safe; longer ones are safe only by luck of timing (the lab's 5-day row happened to end on a repair day). 10 days ignores the repair interval; 17 adds it the wrong way.",
+      "ref": "unit-2-deep-dives.md#7-anti-entropy-and-deletes-merkle-trees-tombstones-and-zombies-034039"
+    },
+    {
+      "id": "C4-036",
+      "type": "single",
+      "tags": [
+        "anti-entropy",
+        "replication"
+      ],
+      "difficulty": 1,
+      "prompt": "Which keys does read repair never fix?",
+      "choices": [
+        "Keys that are not read, including those whose deletes must reach a replica before the grace period ends",
+        "Keys read at QUORUM",
+        "Hot keys",
+        "Keys written with sloppy quorums"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Read repair runs only when a read sees disagreeing replicas, so cold keys stay divergent until anti-entropy compares them. QUORUM reads of hot keys are exactly what read repair heals quickly; keys written sloppily are fixed by hint replay or, if they get read, by read repair.",
+      "ref": "unit-2-deep-dives.md#7-anti-entropy-and-deletes-merkle-trees-tombstones-and-zombies-034039"
+    },
+    {
+      "id": "C4-037",
+      "type": "single",
+      "tags": [
+        "membership",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Every second each of 80 nodes exchanges heartbeat tables with one random peer (push-pull). Roughly how many rounds until every node knows a given node's latest heartbeat?",
+      "choices": [
+        "≈ 7 rounds, because the number of nodes that know roughly doubles each round (≈ log2 80)",
+        "≈ 80 rounds, one per node",
+        "≈ 1 round",
+        "≈ 40 rounds, half the cluster"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Epidemic dissemination grows the informed set geometrically: ≈ log2(80) ≈ 6.3 plus a small tail; the lab measures ≈ 7 rounds for 64 nodes with fanout 1. 80 or 40 rounds assume one new node learns per round. One round would need every node to contact every other.",
+      "ref": "unit-2-deep-dives.md#8-membership-rebalancing-hot-keys-and-when-the-answer-flips-to-consensus-039045"
+    },
+    {
+      "id": "C4-038",
+      "type": "single",
+      "tags": [
+        "failure-detection",
+        "membership"
+      ],
+      "difficulty": 2,
+      "prompt": "A node stalls for 12 s in a GC pause. Peers heartbeat every 1 s. Compare a fixed 10 s timeout with a phi-accrual detector convicting at phi = 8 (exponential model).",
+      "choices": [
+        "The fixed timeout convicts it; phi 8 needs ≈ 18 s of silence at a 1 s mean and does not",
+        "Both convict it after 10 s",
+        "Neither convicts it, because GC pauses are invisible to heartbeats",
+        "Phi convicts it sooner, after ≈ 8 s"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "phi = silence / (mean × ln 10) = 8 → silence ≈ 18.4 s at a 1 s mean, so the 12 s pause stays below the threshold while the fixed 10 s timeout fires. A paused node sends no heartbeats, so pauses are visible. Phi 8 is not '8 seconds'; it is a probability of 10^-8 under the model.",
+      "ref": "unit-2-deep-dives.md#8-membership-rebalancing-hot-keys-and-when-the-answer-flips-to-consensus-039045"
+    },
+    {
+      "id": "C4-039",
+      "type": "numeric",
+      "tags": [
+        "failure-detection"
+      ],
+      "difficulty": 2,
+      "prompt": "A phi-accrual detector models heartbeat inter-arrival times as exponential with mean 1 s, so phi = silence / (mean × ln 10). After how many seconds of silence does phi reach 8? Answer in s.",
+      "value": 18.4,
+      "tolerance": 0.15,
+      "unit": "s",
+      "explanation": "silence = 8 × 1 s × ln 10 ≈ 8 × 2.303 ≈ 18.4 s. For a peer that heartbeats every 100 ms the same threshold is ≈ 1.8 s: one threshold, a different timeout per peer. 8 s confuses phi with seconds; ≈ 3.5 s divides by ln 10 instead of multiplying by it.",
+      "ref": "unit-2-deep-dives.md#8-membership-rebalancing-hot-keys-and-when-the-answer-flips-to-consensus-039045"
+    },
+    {
+      "id": "C4-040",
+      "type": "single",
+      "tags": [
+        "membership",
+        "failure-detection"
+      ],
+      "difficulty": 2,
+      "prompt": "Why should a failure detector's 'dead' verdict only reroute traffic (hints, fallbacks) and never trigger data movement by itself?",
+      "choices": [
+        "Because false positives (GC pauses, brief partitions) are common, and streaming ≈ 0.5 TB per conviction would turn each one into an hours-long incident",
+        "Because streaming is impossible while a node is dead",
+        "Because gossip cannot carry ownership changes",
+        "Because the dead node must first acknowledge its removal"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Conviction must be cheap because it is often wrong; removal (decommission, replace) changes ownership and streams data, so it is a deliberate operator action. Streaming from the surviving replicas works fine while a node is dead (that is what replace does). Gossip does carry ownership changes. A dead node can't acknowledge anything, which is why removal can't depend on it.",
+      "ref": "unit-2-deep-dives.md#8-membership-rebalancing-hot-keys-and-when-the-answer-flips-to-consensus-039045"
+    },
+    {
+      "id": "C4-041",
+      "type": "single",
+      "tags": [
+        "membership"
+      ],
+      "difficulty": 2,
+      "prompt": "A node crashes and restarts; its heartbeat counter starts again at 0, and peers keep ignoring it as 'older' than the count they saw before the crash. What fixes this?",
+      "choices": [
+        "A generation number bumped on restart and compared before the counter",
+        "Resetting every node's counter when any node restarts",
+        "A longer conviction threshold",
+        "Copying status from the peer that saw it last"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Comparing (generation, version) lexicographically makes the restarted node's first heartbeat newer than anything from its previous life; the lab tests acceptance within 12 rounds. Resetting everyone is a cluster-wide coordination step that gossip exists to avoid. A longer threshold delays conviction, not acceptance. Copying status spreads one node's opinion instead of evidence.",
+      "ref": "unit-2-deep-dives.md#8-membership-rebalancing-hot-keys-and-when-the-answer-flips-to-consensus-039045"
+    },
+    {
+      "id": "C4-042",
+      "type": "single",
+      "tags": [
+        "hot-keys",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "A launch-page config key takes 150,000 reads/s; its three replicas can serve ≈ 90,000 between them. What is the best fix?",
+      "choices": [
+        "Cache it in clients or coordinators for a few seconds",
+        "Add 20 nodes to the cluster",
+        "Raise its reads to QUORUM so more replicas share the load",
+        "Increase the number of virtual nodes"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A key's replicas are three machines whatever the cluster size, so adding nodes or vnodes doesn't move it; QUORUM makes each read touch two replicas, doubling their load. A short client- or coordinator-side cache spreads the reads over every coordinator (≈ 2k/s each across 80), and a config page tolerates seconds of staleness.",
+      "ref": "unit-2-deep-dives.md#8-membership-rebalancing-hot-keys-and-when-the-answer-flips-to-consensus-039045"
+    },
+    {
+      "id": "C4-043",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "trade-offs"
+      ],
+      "difficulty": 3,
+      "prompt": "1% of writes (username claims) need create-if-absent with exactly one winner; the other 99% are carts and sessions that must stay writable during an AZ partition. What do you pick?",
+      "choices": [
+        "A Paxos round per key on the existing replicas for the claims only (lightweight-transaction style), accepting ≈ 4 round trips per claim",
+        "Raft groups per key range for the whole store",
+        "Strict quorums with W = N for the claim keys",
+        "Last-write-wins with tightly synchronised clocks for the claim keys"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Per-key consensus serialises competing claims and leaves the rest of the store leaderless and always writable; only claims pay the extra round trips and fail on the minority side. Raft for everything would make carts unwritable on the minority side of every range. W = N gives overlap, not a single winner: two coordinators can both get N acks for different values. LWW picks a winner after both were told yes.",
+      "ref": "unit-2-deep-dives.md#8-membership-rebalancing-hot-keys-and-when-the-answer-flips-to-consensus-039045"
+    },
+    {
+      "id": "C4-044",
+      "type": "multi",
+      "tags": [
+        "consensus",
+        "replication"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL that change if you convert the whole store to Raft groups per key range.",
+      "choices": [
+        "The minority side of a partition can no longer write to any range",
+        "Sloppy quorums and hinted handoff disappear",
+        "Each range has a leader that takes its writes, which must be balanced across nodes",
+        "Per-key version vectors become necessary to order writes"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Raft commits on a majority of a fixed replica set through a leader, so the minority side stops accepting writes, there are no stand-ins (hence no hints), and leaders become hot spots to balance. Version vectors become unnecessary rather than necessary: the leader's log gives every write a single order.",
+      "ref": "unit-2-deep-dives.md#8-membership-rebalancing-hot-keys-and-when-the-answer-flips-to-consensus-039045"
+    },
+    {
+      "id": "C4-045",
+      "type": "single",
+      "tags": [
+        "replication",
+        "multi-region"
+      ],
+      "difficulty": 3,
+      "prompt": "STRETCH. Each key has 3 replicas in each of two regions. Writes use LOCAL_QUORUM. What is the consequence compared with EACH_QUORUM?",
+      "choices": [
+        "Local writes stay at in-region latency, but writes not yet replicated to the other region are lost if the local region disappears",
+        "Writes become linearizable across regions",
+        "Every write waits for a cross-region round trip",
+        "Reads in the other region always see the write immediately"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "LOCAL_QUORUM waits for 2 of 3 local replicas and replicates to the other region asynchronously: fast, with an RPO equal to the replication lag. EACH_QUORUM waits for a quorum in every region (≈ 80–150 ms per write, RPO ≈ 0). Neither is linearizable across regions, and the remote region sees the write only after asynchronous replication.",
+      "ref": "unit-2-deep-dives.md#5-quorums-under-failure-tuning-n-r-and-w-sloppy-quorums-and-hinted-handoff-025030"
+    }
+  ]
+}

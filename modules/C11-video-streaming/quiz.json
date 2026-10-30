@@ -1,0 +1,1260 @@
+{
+  "module": "C11",
+  "title": "Case study: video streaming",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "C11-001",
+      "type": "single",
+      "tags": [
+        "design",
+        "requirements"
+      ],
+      "difficulty": 2,
+      "prompt": "You have time for one more clarifying question before designing a video sharing platform. Which answer changes the design the most?",
+      "choices": [
+        "Roughly how many hours are watched per hour uploaded, and on which devices and networks",
+        "Whether videos can have custom thumbnails",
+        "Which frontend framework the web player uses",
+        "Whether comments are threaded"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The upload-to-watch ratio decides whether egress or storage dominates and whether expensive encoding pays back; the device and network mix sets the ladder, codecs and packaging. Custom thumbnails are a small side step in the pipeline. The frontend framework doesn't touch the architecture. Comments are usually out of scope and don't affect the video paths.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-an-interviewer-expects"
+    },
+    {
+      "id": "C11-002",
+      "type": "multi",
+      "tags": [
+        "design",
+        "requirements"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the clarifying questions whose answers change the architecture of a video platform.",
+      "choices": [
+        "Is the content protected (DRM, paid, geo-restricted)?",
+        "Which colour scheme should the player controls use?",
+        "Video on demand, live, or both?",
+        "How fast must an upload become playable?",
+        "Should the like button be a heart or a thumb?",
+        "Where are viewers, and how concentrated is viewing?"
+      ],
+      "answer": [
+        0,
+        2,
+        3,
+        5
+      ],
+      "explanation": "Live vs VOD decides batch DAG vs real-time pipeline; time to playable decides whether segment-level parallelism is needed; protection adds encryption at packaging, licence servers and signed URLs; viewer geography and concentration set the CDN footprint and hit ratio. The like button's icon and the player's colours are UI choices with no architectural consequence.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-an-interviewer-expects"
+    },
+    {
+      "id": "C11-003",
+      "type": "single",
+      "tags": [
+        "design",
+        "requirements",
+        "trade-offs"
+      ],
+      "difficulty": 3,
+      "prompt": "The interviewer changes the prompt from 'design YouTube' to 'design Netflix'. Which change to the design does that justify?",
+      "choices": [
+        "Use segment-level parallelism more aggressively, because time to publish is measured in seconds",
+        "Store fewer renditions per title, because viewers mostly watch on phones",
+        "Spend far more compute per title (per-title or per-shot ladders) and pre-position popular titles in edge caches before release, because the catalogue is small and every title is watched heavily",
+        "Drop the CDN, because a curated catalogue is small enough to serve from origin"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A curated catalogue has few uploads, very high views per title and predictable demand (release dates), so premium encoding pays back on every title and caches can be filled ahead of demand. Catalogue size doesn't change egress, which follows viewing, so the CDN stays. Publish latency is days, not seconds, so parallelism matters less, not more. A Netflix-like audience is TV-heavy, which pushes the ladder up, not down.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-an-interviewer-expects"
+    },
+    {
+      "id": "C11-004",
+      "type": "single",
+      "tags": [
+        "design",
+        "requirements"
+      ],
+      "difficulty": 2,
+      "prompt": "Product relaxes 'playable within 2 minutes of upload' to 'playable by tomorrow morning'. What can change?",
+      "choices": [
+        "The CDN can be removed, since viewers will watch later",
+        "Retries can be dropped, because there's time to rerun failed jobs manually",
+        "Segment-level parallelism stops being necessary: one whole-file encode per video, queued and run overnight on cheap capacity, meets the requirement; steps should still be resumable",
+        "Transcoding can move into the upload request, since there's no deadline pressure"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Publish latency is what forces the segment DAG; with a day of slack a coarse queue of whole-file jobs is cheaper to run, though a long encode should still resume rather than restart. Egress, and so the CDN, depends on viewing, not publishing. Transcoding inside the upload request couples a CPU-heavy job to a network endpoint regardless of deadlines. Dropping retries turns transient infrastructure failures into manual work at hundreds of thousands of jobs a day.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-an-interviewer-expects"
+    },
+    {
+      "id": "C11-005",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "bandwidth"
+      ],
+      "difficulty": 2,
+      "prompt": "A video app has 20 M daily viewers watching 60 minutes a day each. Average delivered bitrate is 4 Mbps and peak concurrency is 3× the daily average. What is peak egress? Answer in Tbps.",
+      "value": 10,
+      "tolerance": 0.25,
+      "unit": "Tbps",
+      "explanation": "Viewer-minutes per day = 20 M × 60 = 1.2 × 10^9; ÷ 1,440 minutes per day ≈ 833k concurrent on average; × 3 ≈ 2.5 M at peak. × 4 Mbps ≈ 10^13 bit/s = 10 Tbps. Common errors: using bytes (1.25 TB/s is the same quantity in bytes), forgetting the peak factor (3.3 Tbps), or dividing by seconds instead of minutes.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C11-006",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "bandwidth"
+      ],
+      "difficulty": 1,
+      "prompt": "How many gigabytes does one hour of video at a constant 5 Mbps transfer? Answer in GB.",
+      "value": 2.25,
+      "tolerance": 0.15,
+      "unit": "GB",
+      "explanation": "5 × 10^6 bit/s × 3,600 s = 1.8 × 10^10 bits ÷ 8 = 2.25 × 10^9 bytes ≈ 2.25 GB. Shortcut: 1 Mbps for an hour ≈ 0.45 GB. Forgetting the ÷ 8 gives 18 GB (the bits/bytes error); using 60 s instead of 3,600 s gives 37.5 MB.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C11-007",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "qps",
+        "cdn"
+      ],
+      "difficulty": 2,
+      "prompt": "3.5 M viewers are watching at peak, each player fetching one 4-second segment at a time once its buffer is full. Roughly how many segment requests per second does the CDN serve? Answer in req/s.",
+      "value": 875000,
+      "tolerance": 0.25,
+      "unit": "req/s",
+      "explanation": "Each viewer requests one segment every 4 s: 3.5 × 10^6 ÷ 4 ≈ 875k requests/s. Halving the segment duration to 2 s doubles it. Multiplying by the number of rungs is wrong: a player fetches one rung per segment, not every rung.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C11-008",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "A ladder has rungs of 0.4, 0.8, 1.2, 2.5 and 5 Mbps, and the 10 Mbps source is also kept. How much storage does one uploaded minute add (ladder plus source)? Answer in MB.",
+      "value": 150,
+      "tolerance": 0.2,
+      "unit": "MB",
+      "explanation": "Ladder ≈ 0.4 + 0.8 + 1.2 + 2.5 + 5 ≈ 9.9 Mbps ≈ 10 Mbps; source 10 Mbps; total ≈ 20 Mbps × 60 s ÷ 8 = 150 MB. Shortcut: 1 Mbps for a minute ≈ 7.5 MB. Forgetting the source gives ≈ 75 MB; forgetting ÷ 8 gives 1.2 GB.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C11-009",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "cost",
+        "bandwidth"
+      ],
+      "difficulty": 2,
+      "prompt": "A platform delivers 30 PB of video per day. At an assumed $0.01 per GB of CDN egress, what is the monthly (30-day) egress bill? Answer in dollars per month.",
+      "value": 9000000,
+      "tolerance": 0.25,
+      "unit": "$/month",
+      "explanation": "30 PB/day = 3 × 10^7 GB/day × $0.01 = $300k/day × 30 ≈ $9 M/month. Using PB = 10^12 instead of 10^15 bytes gives $9k; forgetting the 30 days gives $300k. The $0.01 is an assumption: real negotiated CDN prices vary widely and cloud list egress is several times higher.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C11-010",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "500k uploads a day average 6 minutes each. Transcoding costs about 1 CPU-core-second per second of output per rendition, and the ladder has 5 renditions. Roughly how many cores are busy on average? Answer in cores.",
+      "value": 10400,
+      "tolerance": 0.25,
+      "unit": "cores",
+      "explanation": "500k × 6 min = 3 M minutes = 1.8 × 10^8 seconds of video per day; × 5 renditions × 1 core-s = 9 × 10^8 core-seconds per day ÷ 86,400 ≈ 10,400 cores on average (≈ 165 servers of 64 cores), with ≈ 2× at the upload peak. Forgetting the 5 renditions gives ≈ 2,100; using minutes instead of seconds gives ≈ 170.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C11-011",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "bandwidth",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Your estimate shows ≈ 4 Tbps average egress and ≈ 21 Gbps average upload ingress. What is the most important conclusion?",
+      "choices": [
+        "Both directions are similar enough to share one fleet of servers",
+        "The upload path is the bottleneck and needs the most servers",
+        "Storage will dominate cost, so the CDN can wait",
+        "Design effort and cost belong on delivery: a CDN is mandatory from day one, and bytes per hour watched and price per GB are the biggest levers"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Egress is ≈ 200× ingest, so the playback side drives architecture and cost; no origin serves Tbps. Uploads go direct to the blob store and are a small fraction of traffic. Storage is significant and accumulates, but at these numbers egress is the larger monthly line. The two directions differ by two orders of magnitude and scale with different drivers, so sharing a fleet makes no sense.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C11-012",
+      "type": "multi",
+      "tags": [
+        "estimation",
+        "pitfalls"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the estimation mistakes that the failure story in the estimation section warns about for a video platform.",
+      "choices": [
+        "Estimating concurrent viewers from viewer-minutes per day",
+        "Sizing the system from upload volume",
+        "Comparing egress in bytes per day with link speeds in bits per second without converting",
+        "Using the source (upload) bitrate to compute viewing egress",
+        "Sizing the transcode fleet for the average upload rate with no peak",
+        "Treating storage as an accumulation that grows every year"
+      ],
+      "answer": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "explanation": "Sizing from uploads ignores the ≈ 200× egress; viewers watch at the rung the player picks, not the source rate; bits vs bytes is an 8× error; a fleet sized for the average upload rate builds a backlog at weekly peaks. Treating storage as an accumulation is correct (the mistake is treating it as a rate), and deriving concurrency from viewer-minutes ÷ 1,440 is the right method.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C11-013",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "api-design"
+      ],
+      "difficulty": 2,
+      "prompt": "A mobile client calls POST /v1/uploads, times out, and retries. Without any other change, one creator ends up with four copies of the same video. What fixes it?",
+      "choices": [
+        "Deduplicate by filename across all of the creator's videos",
+        "Increase the client timeout to 5 minutes",
+        "Make the server reject any second upload from the same user within an hour",
+        "Have the client send an Idempotency-Key per upload intent, so a retried create returns the same upload_id and video_id"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "An idempotency key identifies the request, so retries of the same create map to the same session and video, while genuinely new uploads get new ones. Filename dedupe merges different videos that share a name (\"final.mp4\"). Longer timeouts reduce retries but never eliminate them. Rate-limiting by user blocks legitimate uploads and still doesn't identify which request is a retry.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C11-014",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "storage",
+        "cdn"
+      ],
+      "difficulty": 2,
+      "prompt": "Which object key scheme for published segments best supports both an idempotent pipeline and long CDN caching?",
+      "choices": [
+        "videos/{upload_timestamp}/{n}.m4s",
+        "videos/{random_uuid}.m4s, one per transcode attempt",
+        "videos/{video_id}/v{version}/{rendition}/seg_{n}.m4s, never overwritten; a re-encode writes a new version",
+        "videos/{video_id}/{rendition}/seg_{n}.m4s, overwritten in place on re-encode"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Deterministic keys mean a retried step writes the same object and 'done?' is 'does the key exist?'; the version makes each URL immutable, so edges can cache it for a year with no invalidation. Overwriting in place lets edges serve old bytes for the TTL and splice old and new segments. Random keys per attempt make resume impossible and leave orphans. A timestamp key isn't derived from the step's inputs, so retries can't find their earlier output, and it carries no rendition.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C11-015",
+      "type": "single",
+      "tags": [
+        "data-model",
+        "partitioning"
+      ],
+      "difficulty": 2,
+      "prompt": "Watch progress (resume position per user per video) is written every ≈ 30 s by ≈ 3.5 M concurrent viewers. Which partition key fits best?",
+      "choices": [
+        "user_id, with the video_id as a sort/clustering key",
+        "A single global partition ordered by update time",
+        "video_id, with the user_id as a sort key",
+        "The CDN edge location serving the viewer"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Reads are per user ('continue watching', resume on this video) and per-user write rates are tiny, so partitioning by user keeps a user's rows together with no hot partition. Partitioning by video makes every popular video a hot partition taking all its viewers' heartbeats. A single partition can't take ≈ 117k writes/s. The edge location changes per session and has nothing to do with how progress is read.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C11-016",
+      "type": "single",
+      "tags": [
+        "data-model",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A worker crashes mid-job and the video's status column says 'transcoding' forever; nobody knows which of 600 outputs exist. What data model fixes this?",
+      "choices": [
+        "Writing status updates in a transaction with the metadata row",
+        "An artifacts record per finished step (step key → object key), written after the object is durable; status and progress are derived from it",
+        "A larger status enum with values for each pipeline stage",
+        "A heartbeat column updated every second by the worker"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A record per finished step tells a resumed job exactly what to skip and gives progress as done/total; status becomes a derived view. A heartbeat shows the worker died but not which outputs exist. More enum values still collapse 600 step states into one field. Transactions make a single status write atomic but don't record per-step completion.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C11-017",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "cdn",
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does the playback API return a signed, short-lived manifest URL instead of serving the manifest and segments itself?",
+      "choices": [
+        "So the API can choose a bitrate for each viewer",
+        "So every byte comes from the CDN while the API only authorises: it checks entitlement and signs once per play, and the edge verifies the signature on each request",
+        "Because signed URLs make the content impossible to download",
+        "Because manifests are too large for an API response"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The API's job is authorisation and version selection; with a signed URL it's called once per play and the edge enforces access without calling back. Signed URLs stop casual link sharing, not determined downloading (that's DRM, and even DRM can't stop screen capture). Manifests are small text files. Bitrate selection happens in the player, per segment.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C11-018",
+      "type": "single",
+      "tags": [
+        "migrations",
+        "storage"
+      ],
+      "difficulty": 3,
+      "prompt": "You want to re-encode the whole catalogue with a more efficient codec without breaking playback. What's the safest approach?",
+      "choices": [
+        "Keep the old ladder and add the new codec's segments into the same media playlists",
+        "Purge the whole CDN, then re-encode everything in one batch",
+        "Overwrite the existing segments in place during a low-traffic window",
+        "Write each video's new ladder under a new version prefix, flip current_version when its manifest exists, roll out most-watched first with a kill switch, and delete the old version after a grace period"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Versioned outputs and an atomic pointer flip mean players mid-session keep their old manifest and new sessions get the new version; most-watched first captures savings soonest; deterministic keys let a crashed migration resume. Overwriting in place serves mixed old and new bytes from caches. A full purge sends the whole catalogue's misses to origin at once. Mixing codecs inside one media playlist breaks players that can't decode the new codec; codecs belong in separate renditions declared in the master playlist.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C11-019",
+      "type": "multi",
+      "tags": [
+        "design",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the components whose load scales with the number of concurrent viewers rather than with uploads.",
+      "choices": [
+        "The watch-progress store",
+        "The playback API (authorise and sign per play)",
+        "The playback event ingest and view-count aggregation",
+        "CDN edges and the shield tier",
+        "The upload session API",
+        "The transcode worker fleet"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "Edges, shield, the playback API, event ingestion and progress writes all grow with viewing. The transcode fleet scales with uploaded minutes, and the upload API with uploads. Separating these drivers is why the three paths share only the blob store and the metadata database.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-upload-processing-and-playback-traced"
+    },
+    {
+      "id": "C11-020",
+      "type": "single",
+      "tags": [
+        "reliability",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "A transcode worker is killed halfway through processing a 2-hour movie in a segment-parallel pipeline. What is lost?",
+      "choices": [
+        "Nothing, because the worker finishes the task before exiting",
+        "The whole job, which restarts from the probe step",
+        "Only the in-flight task (one segment × one rendition, a few core-seconds); it is retried elsewhere and writes the same key, and every finished segment is skipped",
+        "Every segment that worker had ever processed for this job"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "With deterministic keys and an artifacts record, finished steps are durable and skipped; the lost attempt times out (lease or per-attempt deadline) and is retried, overwriting with identical bytes. Restarting the job is the single-machine design's failure. Outputs already written and recorded don't disappear when the worker dies. A killed process doesn't get to finish.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-upload-processing-and-playback-traced"
+    },
+    {
+      "id": "C11-021",
+      "type": "single",
+      "tags": [
+        "design",
+        "isolation"
+      ],
+      "difficulty": 2,
+      "prompt": "Why not run transcoding inside the upload service, which 'already has the file'?",
+      "choices": [
+        "Because the upload service can't run ffmpeg",
+        "Because transcoding must happen in a different region from uploads",
+        "Because uploads must be encrypted before transcoding",
+        "Uploads are network-bound and must be accepted immediately, transcoding is CPU-bound and can queue; co-locating them sizes for both peaks at once, pinned CPUs slow uploads, and the bytes went straight to the blob store anyway"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The two workloads have different resources, scaling drivers and failure handling; separating them lets the fleet run on interruptible capacity and lets a backlog grow without hurting uploads. Any service could run ffmpeg. There's no regional requirement. Encryption at rest applies regardless and isn't the reason for the split.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-upload-processing-and-playback-traced"
+    },
+    {
+      "id": "C11-022",
+      "type": "single",
+      "tags": [
+        "cdn",
+        "caching",
+        "stampede"
+      ],
+      "difficulty": 2,
+      "prompt": "A video goes viral one minute after it's published, with 200 CDN edges all missing on its first segments at once. What keeps the origin from a thundering herd?",
+      "choices": [
+        "Purging the video from the CDN until traffic settles",
+        "A short TTL on segments so edges refresh often",
+        "A shield tier with request collapsing: concurrent misses for the same object become one origin fetch per shield location",
+        "Serving the first segments directly from the playback API"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The shield collapses N edge misses into one origin fetch, and edges collapse their own concurrent misses; after the first fetch, everything is a hit. Short TTLs cause more misses, not fewer. Purging forces even more origin traffic. Putting the API in the byte path couples playback to an API that isn't built for Tbps.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-upload-processing-and-playback-traced"
+    },
+    {
+      "id": "C11-023",
+      "type": "numeric",
+      "tags": [
+        "concurrency",
+        "job-scheduler"
+      ],
+      "difficulty": 1,
+      "prompt": "A job has 50 segments and 4 renditions: one transcode step per (segment, rendition), one package step per segment and one manifest step. How many steps in total? Answer as a count of steps.",
+      "value": 251,
+      "tolerance": 0.01,
+      "unit": "steps",
+      "explanation": "50 × 4 = 200 transcodes + 50 packages + 1 manifest = 251. Forgetting the packages gives 201; counting a package per (segment, rendition) gives 401.",
+      "ref": "unit-2-deep-dives.md#5-the-transcoding-pipeline-as-a-dependency-graph"
+    },
+    {
+      "id": "C11-024",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "job-scheduler"
+      ],
+      "difficulty": 2,
+      "prompt": "In the transcode DAG with unlimited workers and every step taking one unit of time, how long does a job take, regardless of the number of segments?",
+      "choices": [
+        "One unit per segment",
+        "One unit per rendition",
+        "3 units: transcode, then package, then manifest (the critical path)",
+        "Segments × renditions units"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Every transcode can run at once, every package as soon as its segment's renditions are done, and the manifest last: the longest chain is three steps. Per-segment or per-rendition times describe serial pipelines; segments × renditions is the fully serial case with one worker.",
+      "ref": "unit-2-deep-dives.md#5-the-transcoding-pipeline-as-a-dependency-graph"
+    },
+    {
+      "id": "C11-025",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Why is the segment, rather than the whole video or the rendition, the usual unit of parallelism for transcoding?",
+      "choices": [
+        "Segments compress better than whole files",
+        "Players can only download whole segments",
+        "Renditions can't be encoded in parallel",
+        "Segments are independent, so a long video becomes thousands of tasks across the fleet and turnaround stops depending on video length; the costs are a keyframe per segment, per-segment rate control and more tasks to track"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Per-rendition parallelism gives only ≈ 5× (and the top rung is still a long serial job); per-video gives none within a video. Segment boundaries slightly hurt compression, not help it. What players download is a separate concern from how the encode is split (encode chunks can be longer than delivery segments). Renditions can be encoded in parallel; it's just not enough parallelism.",
+      "ref": "unit-2-deep-dives.md#5-the-transcoding-pipeline-as-a-dependency-graph"
+    },
+    {
+      "id": "C11-026",
+      "type": "single",
+      "tags": [
+        "fairness",
+        "job-scheduler"
+      ],
+      "difficulty": 3,
+      "prompt": "One 3-hour upload creates 13,500 ready transcode steps just before 500 short uploads with 50 steps each. With a single FIFO ready queue, short uploads wait for hours. What's the fix?",
+      "choices": [
+        "Make the FIFO queue larger",
+        "Reject uploads longer than one hour",
+        "Process long videos on a separate weekly schedule",
+        "Fair scheduling across jobs: a cap on in-flight steps per job, round-robin across jobs' ready lists, and a priority class for the steps that make a video playable"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Per-job caps and round-robin stop one job from monopolising the fleet while still giving it hundreds of cores, and fast-path priority keeps time-to-playable low for everyone. A weekly schedule makes long videos unacceptably slow. Rejecting long uploads changes the product. A bigger FIFO queue holds more waiting work; it doesn't change the order.",
+      "ref": "unit-2-deep-dives.md#5-the-transcoding-pipeline-as-a-dependency-graph"
+    },
+    {
+      "id": "C11-027",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "job-scheduler"
+      ],
+      "difficulty": 2,
+      "prompt": "In the lab's scheduler, where should the per-step dependency counts live?",
+      "choices": [
+        "In a map shared by all workers behind a mutex held during the worker call",
+        "In Run's own goroutine: workers only execute steps and send results back on a channel, and the scheduler decrements counts and releases ready steps",
+        "In each worker, which checks whether its inputs exist before starting",
+        "In the Store, polled by every worker"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "One owner makes 'became ready' happen exactly once and needs no lock, which also lets OnProgress run outside any lock. Workers checking for themselves race and poll. Holding a mutex across worker calls serialises the pool. Polling the store adds latency and load, and still races on who starts a newly ready step.",
+      "ref": "unit-2-deep-dives.md#5-the-transcoding-pipeline-as-a-dependency-graph"
+    },
+    {
+      "id": "C11-028",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "latency"
+      ],
+      "difficulty": 3,
+      "prompt": "A job of 10,000 segment tasks is 98% done, but its last few tasks are on a slow, overloaded machine. What's the standard technique to cut the tail, and why is it safe here?",
+      "choices": [
+        "Issue backup copies of the remaining in-flight tasks on other workers and take whichever finishes first; idempotent deterministic keys make the duplicate harmless",
+        "Lower the number of segments for future jobs",
+        "Increase MaxAttempts so the slow tasks eventually time out",
+        "Cancel the job and restart it on a faster machine"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Backup tasks (from MapReduce) bound the straggler effect; because a duplicate writes the same key with the same bytes, running a step twice can't corrupt the output. Restarting throws away 98% of the work. More attempts don't speed up an attempt that's slow but not failing. Fewer segments reduce parallelism and make each straggler worse.",
+      "ref": "unit-2-deep-dives.md#5-the-transcoding-pipeline-as-a-dependency-graph"
+    },
+    {
+      "id": "C11-029",
+      "type": "numeric",
+      "tags": [
+        "reliability",
+        "retries",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Each of a job's 541 tasks fails transiently and independently with probability 0.1%, and there are no retries. Roughly what percentage of jobs fail? Answer in percent.",
+      "value": 42,
+      "tolerance": 0.15,
+      "unit": "%",
+      "explanation": "P(job succeeds) = 0.999^541 ≈ e^(−0.541) ≈ 0.58, so ≈ 42% of jobs fail. With 3 attempts per task the per-task failure becomes 10^−9 and the job failure rate ≈ 5 × 10^−7. Answering 0.1% (one task's rate) or 54% (541 × 0.1%, which ignores overlap) are the common errors.",
+      "ref": "unit-2-deep-dives.md#6-when-the-pipeline-fails-retries-poison-inputs-resume-and-cost"
+    },
+    {
+      "id": "C11-030",
+      "type": "multi",
+      "tags": [
+        "reliability",
+        "retries",
+        "queues"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL the failures that should be retried (with backoff) rather than failed fast.",
+      "choices": [
+        "The source declares a codec the encoder doesn't support",
+        "A worker is OOM-killed by a noisy neighbour",
+        "The blob store returns 503 when reading the source",
+        "The creator deleted the video while it was processing",
+        "A spot instance is reclaimed mid-encode",
+        "The encoder reports 'invalid data found when processing input' on the source"
+      ],
+      "answer": [
+        1,
+        2,
+        4
+      ],
+      "explanation": "Reclamation, storage 503s and OOM kills are transient infrastructure failures: retry elsewhere with backoff and jitter. Invalid data and unsupported codecs are deterministic properties of the input (poison): retrying yields the same error, so dead-letter the job and tell the creator. Deletion is cancellation: stop and clean up.",
+      "ref": "unit-2-deep-dives.md#6-when-the-pipeline-fails-retries-poison-inputs-resume-and-cost"
+    },
+    {
+      "id": "C11-031",
+      "type": "single",
+      "tags": [
+        "timeouts",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A 4-second 1080p segment normally transcodes in 4–8 s with p99 ≈ 10 s. What per-attempt timeout is sensible?",
+      "choices": [
+        "8 s, the median runtime",
+        "1 hour, to be safe",
+        "≈ 30 s (about 3× p99): long enough not to kill healthy slow tasks, short enough that a hang costs seconds, not a slot for hours",
+        "No timeout; hung encoders are rare"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Deriving the timeout from the measured distribution with headroom bounds the cost of a hang while rarely killing a healthy task. 8 s kills the slow half of healthy tasks and multiplies load with retries. An hour lets each hang hold a worker for an hour, and at hundreds of hangs a day that's a measurable share of the fleet. No timeout is the story where ≈ 3% of slots were stuck.",
+      "ref": "unit-2-deep-dives.md#6-when-the-pipeline-fails-retries-poison-inputs-resume-and-cost"
+    },
+    {
+      "id": "C11-032",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "Which ordering inside a pipeline step makes resume correct?",
+      "choices": [
+        "Record all artifacts at the end of the job in one batch",
+        "Write the output object durably, then record the artifact, then release dependents",
+        "Release dependents, then write the output, then record it",
+        "Record the artifact, then write the output object, then release dependents"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "If the record exists, the object exists, so a resumed job can safely skip it, and dependents never start before their inputs are durable. Recording first leaves a record pointing at a missing object after a crash. Releasing dependents first lets them read outputs that don't exist yet. Recording at the end loses every finished step on a crash.",
+      "ref": "unit-2-deep-dives.md#6-when-the-pipeline-fails-retries-poison-inputs-resume-and-cost"
+    },
+    {
+      "id": "C11-033",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "messaging"
+      ],
+      "difficulty": 2,
+      "prompt": "A queue redelivers a transcode task that already succeeded (the worker died before acknowledging). Why is that harmless in this design?",
+      "choices": [
+        "The orchestrator deletes the first output before the retry",
+        "The queue guarantees exactly-once delivery",
+        "The second worker detects the duplicate by comparing timestamps",
+        "The step writes the same deterministic key with the same bytes, so the duplicate is an overwrite with identical content and the artifact record is an upsert"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Idempotency by construction: output keys are functions of the step's inputs and encoder settings are deterministic. At-least-once queues don't guarantee exactly-once delivery. Deleting the first output would create a window with no output. Timestamps differ between runs and identify nothing.",
+      "ref": "unit-2-deep-dives.md#6-when-the-pipeline-fails-retries-poison-inputs-resume-and-cost"
+    },
+    {
+      "id": "C11-034",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "leaks",
+        "context"
+      ],
+      "difficulty": 3,
+      "prompt": "A creator deletes a video mid-processing and the job's context is cancelled. Which implementation detail most often causes a goroutine leak in the pipeline?",
+      "choices": [
+        "Calling cancel() more than once",
+        "Closing the task channel after the workers have exited",
+        "A worker that finishes after cancellation blocks forever on a plain send of its result, because the scheduler has stopped receiving",
+        "Using a buffered results channel"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "After cancellation the scheduler stops reading results; a worker sending with a plain `results <- r` blocks forever, and Run, waiting on the worker WaitGroup, never returns. The send must select on ctx.Done() too. Calling a CancelFunc twice is safe. Closing the task channel is part of a clean shutdown. A buffered channel can delay the problem but doesn't remove it once the buffer is full.",
+      "ref": "unit-2-deep-dives.md#6-when-the-pipeline-fails-retries-poison-inputs-resume-and-cost"
+    },
+    {
+      "id": "C11-035",
+      "type": "single",
+      "tags": [
+        "queues",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "About 0.05% of uploads are corrupt files the encoder can never process. What should the pipeline do with them?",
+      "choices": [
+        "Retry every minute until the file processes",
+        "Detect at probe time where possible; otherwise stop after a bounded number of attempts, dead-letter the job with the error and attempt history, alert on the error class, and tell the creator",
+        "Silently drop them so they don't clutter dashboards",
+        "Publish whatever segments succeeded and skip the rest"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Bounded attempts plus a dead letter is the poison-message rule from A6; validating at probe time avoids scheduling thousands of doomed tasks; the creator needs to know so they can re-upload. Retrying forever is the story where ≈ 1,750 jobs looped. Dropping hides real problems and leaves creators guessing. Publishing with gaps in a rendition makes it unplayable; a partial publish must drop whole rungs and is a deliberate product choice.",
+      "ref": "unit-2-deep-dives.md#6-when-the-pipeline-fails-retries-poison-inputs-resume-and-cost"
+    },
+    {
+      "id": "C11-036",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "testing",
+        "machine-coding"
+      ],
+      "difficulty": 2,
+      "prompt": "In labs/c11/transcode you call Store.Put only once, at the end of Run, for every artifact. Which test fails, and why does it matter in production?",
+      "choices": [
+        "TestRun_ResumesFromTheStoreWithoutRedoingWork: after a failed run nothing was persisted, so the rerun redoes every step; a crash at 98% of a 2-hour movie starts over",
+        "TestSteps_EnumeratesTranscodePackageManifest: the step list is wrong",
+        "No test fails, because the store ends up with the same contents",
+        "TestRun_BoundsConcurrencyAndOverlapsIndependentWork: Put is too slow"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The resume test fails the job deliberately and checks that finished steps were persisted as they completed ('only 0 artifacts persisted before the failure'); persisting at the end means a failure loses everything. The concurrency test doesn't depend on when Put happens. Steps is independent of the store. On a failed run Run returns early, so the end-of-run Put never happens.",
+      "ref": "unit-2-deep-dives.md#6-when-the-pipeline-fails-retries-poison-inputs-resume-and-cost"
+    },
+    {
+      "id": "C11-037",
+      "type": "multi",
+      "tags": [
+        "concurrency",
+        "machine-coding",
+        "go"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the behaviours the labs/c11/transcode contract requires of Run.",
+      "choices": [
+        "A step whose Key is already in the Store is skipped without calling the worker",
+        "A worker panic is recovered and counted as a failed attempt",
+        "Run may return while worker goroutines are still running, as long as the result is correct",
+        "Every step is retried forever until it succeeds",
+        "OnProgress is called from Run's own goroutine, outside any lock",
+        "At most MaxWorkers steps run at once, and independent steps overlap"
+      ],
+      "answer": [
+        0,
+        1,
+        4,
+        5
+      ],
+      "explanation": "Bounded and used concurrency, skip-on-existing (idempotent resume), panic containment and a progress callback that may call back into dependencies are all in the contract. Retries are bounded by MaxAttempts (default 3), and Run must return only after every goroutine it started has exited; the tests check for leaks.",
+      "ref": "unit-2-deep-dives.md#5-the-transcoding-pipeline-as-a-dependency-graph"
+    },
+    {
+      "id": "C11-038",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "timeouts",
+        "machine-coding"
+      ],
+      "difficulty": 2,
+      "prompt": "In the lab, a worker hangs on its first attempt until its context is done. With StepTimeout = 30 ms and MaxAttempts = 2, what should happen?",
+      "choices": [
+        "The attempt's context expires after 30 ms, the attempt counts as failed, the step is retried, and the second attempt succeeds, so the job completes",
+        "The job fails immediately with ErrStepFailed",
+        "The whole job's context is cancelled",
+        "Run waits for the hung attempt indefinitely"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Each attempt runs under its own deadline derived from the job context; a timed-out attempt is a failed attempt and counts toward MaxAttempts, so with two attempts the retry succeeds (TestRun_PerAttemptTimeoutRetriesAHungWorker). Failing immediately ignores the retry budget. Waiting forever is what happens without the per-attempt timeout. Only exhausting a step's attempts or the caller's cancellation cancels the job.",
+      "ref": "unit-2-deep-dives.md#6-when-the-pipeline-fails-retries-poison-inputs-resume-and-cost"
+    },
+    {
+      "id": "C11-039",
+      "type": "single",
+      "tags": [
+        "packaging",
+        "storage",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "You must serve Apple devices (HLS) and Android, browsers and TVs (DASH). How do you avoid storing and caching every segment twice?",
+      "choices": [
+        "Store HLS segments only and convert them to DASH at the edge on each request",
+        "Choose one protocol and drop support for the other devices",
+        "Store both packages but give them the same filenames",
+        "Package once as CMAF (fragmented MP4) segments and write two manifests, an HLS playlist and a DASH MPD, that reference the same files"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "CMAF exists so one set of segments serves both protocols: one copy in storage, one copy in every cache. Per-request conversion at the edge adds compute and breaks simple caching. Dropping a device family is a product loss. Identical filenames for different container formats would collide and break playback.",
+      "ref": "unit-2-deep-dives.md#7-packaging-the-bitrate-ladder-and-adaptive-bitrate"
+    },
+    {
+      "id": "C11-040",
+      "type": "single",
+      "tags": [
+        "packaging",
+        "latency",
+        "trade-offs"
+      ],
+      "difficulty": 2,
+      "prompt": "A team proposes 10-second segments for VOD to keep request rates low. What is the main cost, and what is a better default?",
+      "choices": [
+        "Worse compression; 1-second segments compress best",
+        "Slow startup and slow adaptation (the player waits for a 10 s segment and decides quality only every 10 s); ≈ 4–6 s segments balance startup, adaptation, request rate and compression",
+        "More objects in storage; 30-second segments are better",
+        "No cost; segment duration only matters for live"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Long segments mean a big first download and few adaptation points; ≈ 4–6 s is the usual VOD compromise. Shorter segments compress slightly worse (more keyframes), not better, and multiply requests. 10 s segments produce fewer objects than shorter ones, not more. Duration matters for VOD startup and adaptation too, not only for live latency.",
+      "ref": "unit-2-deep-dives.md#7-packaging-the-bitrate-ladder-and-adaptive-bitrate"
+    },
+    {
+      "id": "C11-041",
+      "type": "single",
+      "tags": [
+        "abr",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "A viewer's bandwidth is a steady 4 Mbps. The ladder has rungs at 1.2, 2.5 and 5 Mbps. Why does rung spacing matter here?",
+      "choices": [
+        "It doesn't: the player can request any bitrate it wants",
+        "The player will alternate between 2.5 and 5 Mbps to average 4 Mbps",
+        "The viewer will get 5 Mbps because the safety factor rounds up",
+        "With rungs ≈ 2× apart this viewer gets the 2.5 Mbps rung and uses ≈ 60% of their bandwidth; tighter spacing (≈ 1.5×) would offer a rung closer to what they can sustain, at the cost of more encode and storage per rung"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The player can only choose among encoded rungs, so spacing sets adaptation granularity; every added rung costs encode compute and storage. Players can't request arbitrary bitrates. Alternating would flap and cause stalls on the 5 Mbps segments. The safety factor (≈ 0.8) makes the player more conservative, not less: 0.8 × 4 = 3.2 Mbps, which affords 2.5.",
+      "ref": "unit-2-deep-dives.md#7-packaging-the-bitrate-ladder-and-adaptive-bitrate"
+    },
+    {
+      "id": "C11-042",
+      "type": "single",
+      "tags": [
+        "abr",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A player is on 1080p (5 Mbps) with 20 s buffered when throughput drops to 2 Mbps. With a safety factor of 0.8 and rungs at 0.8, 1.2, 2.5 and 5 Mbps, what should it request next?",
+      "choices": [
+        "The 2.5 Mbps rung, one step down at a time",
+        "The 1.2 Mbps rung, immediately: 0.8 × 2 = 1.6 Mbps affords 1.2 but not 2.5",
+        "Stay on 1080p until the buffer falls below 10 s",
+        "The 0.8 Mbps rung, because any drop triggers panic"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Down-switches are immediate and go to the highest rung within safety × throughput. Staying on 1080p drains the buffer at 2.5× its refill rate. Stepping down one rung at a time still requests 2.5 Mbps on a 2 Mbps link. Panic to the lowest rung applies only when the buffer is below the panic threshold, and 20 s is comfortable.",
+      "ref": "unit-2-deep-dives.md#7-packaging-the-bitrate-ladder-and-adaptive-bitrate"
+    },
+    {
+      "id": "C11-043",
+      "type": "single",
+      "tags": [
+        "abr",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A player has only 3 s of video buffered while on 1080p, and its last measurement says 50 Mbps. What should a well-designed ABR policy do?",
+      "choices": [
+        "Drop to the lowest rung for the next segment: with the buffer nearly empty, a rebuffer is the worst outcome, and a small segment refills the buffer fastest",
+        "Pause playback until the buffer reaches 10 s",
+        "Stay on 1080p, since throughput is ample",
+        "Switch up to the top rung, since 50 Mbps affords it"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Below the panic threshold the buffer, not the throughput estimate, decides: a single surprise means a stall. Trusting one high measurement at 3 s of buffer risks exactly that. Switching up makes the next segment larger and riskier. Pausing deliberately is a rebuffer.",
+      "ref": "unit-2-deep-dives.md#7-packaging-the-bitrate-ladder-and-adaptive-bitrate"
+    },
+    {
+      "id": "C11-044",
+      "type": "single",
+      "tags": [
+        "abr",
+        "cdn",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Why is bitrate selection done in the player rather than by the server per viewer?",
+      "choices": [
+        "Servers aren't fast enough to choose a bitrate",
+        "HLS forbids server-side logic",
+        "Players have better codecs than servers",
+        "The player knows its current throughput, buffer and screen second by second, and keeping segments identical static files for everyone is what lets the CDN cache them"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The information needed is on the device, and per-viewer responses would break shared caching, which the economics depend on. Choosing a bitrate is cheap; that isn't the constraint. HLS doesn't forbid server logic (servers can send hints). Codecs are the same on both sides; decoding capability matters, not 'better codecs'.",
+      "ref": "unit-2-deep-dives.md#7-packaging-the-bitrate-ladder-and-adaptive-bitrate"
+    },
+    {
+      "id": "C11-045",
+      "type": "single",
+      "tags": [
+        "packaging",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Why must segment boundaries and keyframes be aligned across all renditions?",
+      "choices": [
+        "So the manifest can be shorter",
+        "So the player can switch to a different rendition at any segment boundary and decode the next segment on its own, without a glitch",
+        "So the CDN can deduplicate segments across renditions",
+        "So all renditions have the same file size"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Segment n must cover the same time range in every rendition and start with a keyframe, so a switch between n and n+1 is seamless. Sizes differ by design (different bitrates). Different encodings are different bytes, so there's nothing to dedupe. Manifest length doesn't depend on alignment.",
+      "ref": "unit-2-deep-dives.md#7-packaging-the-bitrate-ladder-and-adaptive-bitrate"
+    },
+    {
+      "id": "C11-046",
+      "type": "numeric",
+      "tags": [
+        "cdn",
+        "caching",
+        "bandwidth"
+      ],
+      "difficulty": 2,
+      "prompt": "Peak egress is 10 Tbps and the CDN's byte hit ratio is 97%. How much does the origin serve at peak? Answer in Gbps.",
+      "value": 300,
+      "tolerance": 0.15,
+      "unit": "Gbps",
+      "explanation": "Origin load follows the miss ratio: 3% of 10 Tbps = 0.3 Tbps = 300 Gbps. At 99% it would be 100 Gbps (3× less). Answering 9.7 Tbps confuses hits with misses; 30 Gbps slips a factor of 10 (using 0.3% instead of 3%).",
+      "ref": "unit-2-deep-dives.md#8-cdn-economics-and-storage-tiers"
+    },
+    {
+      "id": "C11-047",
+      "type": "single",
+      "tags": [
+        "cdn",
+        "caching",
+        "security"
+      ],
+      "difficulty": 3,
+      "prompt": "Playback URLs carry a per-viewer signature in the query string, and the CDN's cache key includes the full query string. What happens, and what's the fix?",
+      "choices": [
+        "Hit ratio improves because each viewer gets a private cache",
+        "Nothing; signatures don't affect caching",
+        "The CDN rejects the requests; switch to unsigned URLs",
+        "Every viewer's request is a distinct cache key, so popular segments miss per viewer and edges fill with copies; validate the token at the edge and exclude it from the cache key"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Cache key fragmentation from tokens is the most common cause of a bad hit ratio on video; the edge should authorise with the token and look up the object without it. Signatures absolutely affect caching when they're in the key. Dropping signatures gives up access control. Per-viewer copies are the problem, not an improvement.",
+      "ref": "unit-2-deep-dives.md#8-cdn-economics-and-storage-tiers"
+    },
+    {
+      "id": "C11-048",
+      "type": "single",
+      "tags": [
+        "cdn",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "Segment URLs are versioned and never change content. Which Cache-Control is right for them?",
+      "choices": [
+        "public, max-age=31536000, immutable",
+        "no-cache, so edges revalidate every request",
+        "private, max-age=60",
+        "max-age=1800, to be safe"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Immutable URLs never need invalidation, so a year-long TTL is safe and maximises hits; re-encodes publish new URLs. no-cache forces a revalidation round trip on every request. A 30-minute TTL makes every edge refetch the long tail every half hour. private stops shared caches (the CDN) from storing the segment at all.",
+      "ref": "unit-2-deep-dives.md#8-cdn-economics-and-storage-tiers"
+    },
+    {
+      "id": "C11-049",
+      "type": "single",
+      "tags": [
+        "cdn",
+        "failover",
+        "multi-region"
+      ],
+      "difficulty": 3,
+      "prompt": "Your primary CDN fails at peak and the playback API moves 60% of ≈ 10 Tbps to the secondary CDN, whose caches hold about half the requested bytes. What's the main risk?",
+      "choices": [
+        "The secondary's ≈ 3 Tbps of misses lands on your shield and origin, ≈ 30× the normal miss traffic, turning a CDN outage into an origin outage unless the secondary is kept warm and the shield is sized for failover",
+        "Viewers see lower quality because the secondary CDN transcodes",
+        "The secondary CDN charges more, which is the only problem",
+        "Players can't switch CDNs mid-session, so nothing happens"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A cold CDN forwards its misses upstream: 6 Tbps × 50% ≈ 3 Tbps against a steady-state origin load of ≈ 105 Gbps. Keeping a steady share on the secondary and sizing the shield for the failover case are the mitigations. New sessions can be steered and many players fail over mid-stream, so something does happen. Price matters but isn't the main risk. CDNs serve the same encoded files; they don't transcode.",
+      "ref": "unit-2-deep-dives.md#8-cdn-economics-and-storage-tiers"
+    },
+    {
+      "id": "C11-050",
+      "type": "multi",
+      "tags": [
+        "storage",
+        "cost"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the sound storage-tiering choices for a UGC video platform's long tail.",
+      "choices": [
+        "Move all objects older than 7 days to the coldest tier regardless of access",
+        "Drive tier transitions by last access rather than by upload age",
+        "Move renditions not read in ≈ 30–90 days to an infrequent-access tier with millisecond reads",
+        "Put renditions of old videos into a deep-archive tier with hours of retrieval latency",
+        "Move sources, read only for re-encodes, to an archive tier",
+        "Keep every object in the standard tier forever to avoid retrieval fees"
+      ],
+      "answer": [
+        1,
+        2,
+        4
+      ],
+      "explanation": "Infrequent-access tiers keep instant reads at lower storage prices; sources are rarely read; last access catches old videos that go viral and new ones nobody watches. Deep archive for anything playable means a revived video can't be played for hours. Keeping everything standard pays full price for bytes nobody reads (the ≈ $4 M/month story). Age-based moves to the coldest tier ignore access patterns and incur retrieval fees and minimum durations.",
+      "ref": "unit-2-deep-dives.md#8-cdn-economics-and-storage-tiers"
+    },
+    {
+      "id": "C11-051",
+      "type": "single",
+      "tags": [
+        "cdn",
+        "cost",
+        "observability"
+      ],
+      "difficulty": 2,
+      "prompt": "Your CDN dashboard shows a 96% request hit ratio, but origin egress is high. What's the likely explanation?",
+      "choices": [
+        "The CDN is misreporting; request and byte hit ratios are always equal",
+        "A 96% request hit ratio means origin egress must be 4% of total bytes",
+        "The byte hit ratio is much lower: small manifests hit while large segments miss; byte hit ratio is the metric that tracks cost",
+        "Origin egress is unrelated to CDN misses"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A manifest is ≈ 1 KB and a segment ≈ megabytes, so the two ratios can diverge widely. They're only equal if every object is the same size. Origin egress is exactly the bytes the CDN misses. 4% of requests can be far more than 4% of bytes when the misses are the large objects.",
+      "ref": "unit-2-deep-dives.md#8-cdn-economics-and-storage-tiers"
+    },
+    {
+      "id": "C11-052",
+      "type": "single",
+      "tags": [
+        "cdn",
+        "cost",
+        "trade-offs"
+      ],
+      "difficulty": 3,
+      "prompt": "When does building your own edge (or placing caches inside ISPs) start to make sense?",
+      "choices": [
+        "Never; commercial CDNs are always cheaper",
+        "When your hit ratio drops below 99%",
+        "When egress is in the Tbps range, concentrated in a predictable head that appliances can hold, and the per-GB cost of contracts exceeds owning servers, colocation and peering",
+        "As soon as you have more than one region"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Owning the edge pays only at very large, concentrated volume; before that, multi-CDN with good contracts gets most of the benefit. Region count doesn't decide it. A low hit ratio is usually a configuration problem (cache keys, TTLs, shield), not a reason to build a CDN. A few of the largest video companies do run their own edge because at their scale it is cheaper.",
+      "ref": "unit-2-deep-dives.md#8-cdn-economics-and-storage-tiers"
+    },
+    {
+      "id": "C11-053",
+      "type": "single",
+      "tags": [
+        "storage",
+        "cost",
+        "design"
+      ],
+      "difficulty": 3,
+      "prompt": "For videos with very few views, a team proposes keeping only the source and the two lowest rungs, recreating higher rungs on demand. What makes this practical, and what's the cost?",
+      "choices": [
+        "It's free: there is no downside",
+        "The idempotent DAG: missing rung keys simply run as transcode, package and manifest steps while existing ones are skipped; the cost is that the first viewer of a revived video gets lower quality or waits briefly, and the source must be in a tier with fast reads",
+        "Nothing makes it practical; deleted rungs can never be recreated",
+        "It requires storing the source in deep archive to save the most money"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Resume-from-artifacts treats a deleted rung like an unfinished step. The trade-off is a degraded first experience for a revived video, and the source must be quickly readable, which rules out hour-latency archive (the opposite of the last option). Rungs can always be recreated from the source.",
+      "ref": "unit-2-deep-dives.md#8-cdn-economics-and-storage-tiers"
+    },
+    {
+      "id": "C11-054",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "analytics",
+        "messaging"
+      ],
+      "difficulty": 2,
+      "prompt": "A premiere drives 40k play starts per second to one video, and view counts are `UPDATE videos SET views = views + 1`. Playback fails site-wide. What's the senior fix?",
+      "choices": [
+        "Add an index on videos.views",
+        "Move the counter to a single Redis key with INCR",
+        "Send play events to a log, aggregate per video per time window in a stream job, and write one batched increment per video per window; serve the count from a cache",
+        "Increase the database connection pool size"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Aggregation turns 40k plays/s into one write per window and moves the hot key off the metadata database that playback authorisation depends on. An index doesn't help a hot row's lock contention (it adds write work). A single Redis key moves the hot spot to one shard's CPU. A bigger pool means more connections blocked on the same row lock.",
+      "ref": "unit-2-deep-dives.md#9-metadata-view-counts-and-watch-progress-at-scale"
+    },
+    {
+      "id": "C11-055",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "qps"
+      ],
+      "difficulty": 1,
+      "prompt": "3.5 M concurrent viewers each save their watch progress every 30 seconds. How many progress writes per second is that? Answer in writes/s.",
+      "value": 117000,
+      "tolerance": 0.15,
+      "unit": "writes/s",
+      "explanation": "3.5 × 10^6 ÷ 30 s ≈ 117k writes/s. Saving every second would be ≈ 3.5 M writes/s for no visible benefit. Multiplying by 30 instead of dividing gives 105 M.",
+      "ref": "unit-2-deep-dives.md#9-metadata-view-counts-and-watch-progress-at-scale"
+    },
+    {
+      "id": "C11-056",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "analytics"
+      ],
+      "difficulty": 2,
+      "prompt": "Creators complain that the displayed view count isn't exact. How should the system handle display versus payouts?",
+      "choices": [
+        "Use the CDN's segment request logs as the exact count",
+        "Make the displayed count exact with a transactional increment per play",
+        "Only update counts once a day for both",
+        "Display a fast, approximate, cached count from the stream aggregator; compute the exact count used for payouts in a delayed batch over the same event log with heavier fraud filtering"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Two derived numbers from one source of truth, each with the consistency its use needs. Per-play transactional increments are what caused the outage. Segment requests count bytes fetched, not views, and include prefetch and retries. Daily updates make the display stale for no reason.",
+      "ref": "unit-2-deep-dives.md#9-metadata-view-counts-and-watch-progress-at-scale"
+    },
+    {
+      "id": "C11-057",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "analytics",
+        "messaging"
+      ],
+      "difficulty": 3,
+      "prompt": "The view-count aggregator crashes and restarts from a log offset 40 s back, after it had already flushed some windows' increments. How do you prevent double counting?",
+      "choices": [
+        "Write per-(video, window) partial counts keyed by window id as upserts, and commit the log offset with (or after) the flushed windows",
+        "Ignore it; double counting is unavoidable",
+        "Subtract 40 seconds' worth of views on restart",
+        "Restart from the latest log offset instead"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Upserting window results makes the flush idempotent, and committing offsets with the state is the A6 commit-timing rule. Skipping to the latest offset loses 40 s of events. A fixed subtraction is a guess. It is avoidable, and the payout path must avoid it.",
+      "ref": "unit-2-deep-dives.md#9-metadata-view-counts-and-watch-progress-at-scale"
+    },
+    {
+      "id": "C11-058",
+      "type": "single",
+      "tags": [
+        "live",
+        "latency"
+      ],
+      "difficulty": 3,
+      "prompt": "STRETCH. A live sports stream uses 6-second segments and players buffer 3 segments. Viewers are ≈ 25 s behind real time. What gets latency to ≈ 2–5 s while keeping HTTP caching?",
+      "choices": [
+        "Low-latency HLS or DASH: partial segments published as they're encoded, blocking playlist reloads or chunked transfer, and a smaller player buffer",
+        "Raising playlist TTLs so players fetch less often",
+        "WebRTC delivery to all 2 M viewers",
+        "Doubling the number of renditions"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Latency is dominated by the player buffer and the segment duration; LL-HLS/LL-DASH shrink both while staying cacheable. WebRTC reaches sub-second but gives up most CDN caching, which is a cost step-change at millions of viewers. More renditions don't affect latency. Longer playlist TTLs make players stall at the live edge.",
+      "ref": "unit-2-deep-dives.md#10-stretch--live-streaming"
+    },
+    {
+      "id": "C11-059",
+      "type": "single",
+      "tags": [
+        "live",
+        "cdn",
+        "caching"
+      ],
+      "difficulty": 3,
+      "prompt": "STRETCH. For a live stream, how should the CDN treat media playlists versus segments?",
+      "choices": [
+        "Both get long TTLs, because live content is cacheable",
+        "Segments are immutable and get long TTLs; playlists change every segment and get a TTL of about half a segment duration, with request collapsing at edges and shield",
+        "Playlists get long TTLs and segments short ones",
+        "Both are uncacheable and go to the origin"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A segment's bytes never change once published, but the playlist gains a new entry every segment, so a long playlist TTL leaves players unaware of new segments. Making both uncacheable sends hundreds of thousands of requests per second to the packager. The last option is backwards.",
+      "ref": "unit-2-deep-dives.md#10-stretch--live-streaming"
+    },
+    {
+      "id": "C11-060",
+      "type": "single",
+      "tags": [
+        "encoding",
+        "cost"
+      ],
+      "difficulty": 3,
+      "prompt": "STRETCH. Per-title encoding analyses each title and picks its own ladder. On a UGC platform, where should you apply it?",
+      "choices": [
+        "To every upload, as soon as it arrives",
+        "Only to videos shorter than one minute",
+        "Nowhere; fixed ladders are always more efficient",
+        "To titles with enough views that the bits saved on delivery repay the extra analysis and encode passes, typically the popular head"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Per-title saves bytes per hour watched and costs compute per title, so it pays where views are high. Applying it to every upload spends compute on a long tail that's barely watched. Video length isn't the criterion. Fixed ladders waste bits on simple content and starve complex content; that inefficiency is the reason per-title exists.",
+      "ref": "unit-2-deep-dives.md#7-packaging-the-bitrate-ladder-and-adaptive-bitrate"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "D4",
+  "slug": "full-loop",
+  "title": "Mock: full senior loop simulation",
+  "track": "D",
+  "status": "written",
+  "core": true,
+  "summary": "Back-to-back HLD (hld-45), LLD (lld-45) and machine-coding (mc-90) rounds on unseen problems plus a component oral on the 13 building blocks; each round scored on its own rubric, the loop on a minimum rule. Three loops at meets are the course's final exam.",
+  "hours": {"core": 20, "stretch": 0, "total": 20},
+  "prerequisites": ["D1", "D2", "D3", "A8", "A9", "C3", "C4", "C7", "C8", "C9", "C10", "C11", "C12"],
+  "gate": {"requires": ["mocks"], "mocks_required": 3, "mock_formats": ["loop"]},
+  "paths": {
+    "dir": "modules/D4-full-loop",
+    "readme": "modules/D4-full-loop/README.md"
+  },
+  "units": [
+    {"n": 1, "title": "The loop day", "file": "modules/D4-full-loop/unit-1-loop-day.md", "hours": {"core": 8, "stretch": 0}, "labs": []},
+    {"n": 2, "title": "The component oral and the finish line", "file": "modules/D4-full-loop/unit-2-oral-and-finish.md", "hours": {"core": 12, "stretch": 0}, "labs": []}
+  ],
+  "labs": [],
+  "outcomes": [
+    {"text": "Sustain three different interview formats back to back (about 3 h 20 min on the clock) with the same checkpoint discipline in round 3 as in round 1.", "core": true},
+    {"text": "Switch cleanly between modes (boxes and numbers, types and seams, code and tests) with a fixed break routine.", "core": true},
+    {"text": "Explain each of the 13 building blocks from first principles under follow-up questions: why it exists, how it works inside, how it fails, when not to use it.", "core": true},
+    {"text": "Read a loop as a committee would: rounds on their own rubrics, the minimum rule and cross-round patterns, and turn it into one habit to fix.", "core": true},
+    {"text": "Track the course definition of done with checkable evidence for every item, and close the remaining gaps.", "core": true},
+    {"text": "Pass three loops at meets on nine unseen problems.", "core": true}
+  ]
+}

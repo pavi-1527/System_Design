@@ -1,0 +1,1531 @@
+{
+  "module": "A4",
+  "title": "Replication, partitioning, hot keys, consistent hashing",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "A4-001",
+      "type": "single",
+      "tags": [
+        "replication",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "A write-bound primary runs at 4,800 write TPS. Each replica of the same hardware spends nearly all of its capacity just applying those 4,800 writes/s. The team plans to add four more read replicas to cut the primary's load. What will happen?",
+      "choices": [
+        "Read capacity grows roughly linearly with the replica count, because each replica serves its own share of the reads and the primary's load drops",
+        "Write capacity grows with the replica count, because the 4,800 writes per second are now shared among five machines instead of one",
+        "Little or no read relief: every replica applies every write, so none has spare capacity, and write capacity is unchanged",
+        "The replicas will help only if replication is switched to synchronous, which removes the apply cost from every replica"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Replication copies the whole write stream to every replica, so replica capacity = machine capacity minus apply cost. When writes consume nearly all of it there is nothing left to serve reads; the leader also pays to ship the log to more followers. Linear read scaling holds only when writes are a small fraction of a machine. Write capacity never grows with replicas (each write is executed N+1 times). Synchronous replication changes when the leader replies, not how much work each replica does, and it adds latency.",
+      "ref": "unit-1-replication.md#1-leaderfollower-replication-and-log-shipping"
+    },
+    {
+      "id": "A4-002",
+      "type": "numeric",
+      "tags": [
+        "replication",
+        "estimation",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "A read replica has the same hardware as the primary and can serve 50,000 reads/s when it applies no writes. Applying the current write stream costs it 25% of its capacity. How many reads/s can it serve? Answer in reads/second.",
+      "value": 37500,
+      "tolerance": 0.1,
+      "unit": "reads/s",
+      "explanation": "Replica capacity = 50,000 × (1 − 0.25) = 37,500 reads/s. Forgetting the apply cost (50,000) overstates the benefit of replicas; subtracting the write rate in raw units instead of as a share of capacity gives nonsense because apply cost is a CPU/IO fraction, not a QPS figure.",
+      "ref": "unit-1-replication.md#1-leaderfollower-replication-and-log-shipping"
+    },
+    {
+      "id": "A4-003",
+      "type": "single",
+      "tags": [
+        "replication",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "A MySQL deployment uses statement-based replication. A transfers table has a column filled by the statement INSERT ... VALUES (?, NOW(), RAND()). A month later an audit finds that created_at and the fee bucket differ between the primary and its replicas for the same transfer ids. What is the most likely cause and the right fix?",
+      "choices": [
+        "Replicas re-executed the statement text and re-evaluated NOW() and RAND(); ship row images (row-based logging) instead",
+        "Replicas applied the statements out of order; add a global ordering token to every statement before it is shipped to them",
+        "The binary log was corrupted in transit for some packets; enable checksums and compression on the replication stream to stop the divergence",
+        "Replica clocks drifted ahead of the primary's; synchronise them with NTP and keep statement-based logging in place"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Statement shipping sends intentions, so every non-deterministic expression (time, random, UUID, session variables, triggers) is evaluated again on each replica and can produce different values. Shipping the resulting row images (row-based/logical or physical logging) makes the replica identical by construction. Packet corruption would not produce plausible-looking different values and is already protected by TCP; out-of-order apply is a different problem (and a log position already orders statements); clock sync would reduce but never remove divergence and RAND() would still differ.",
+      "ref": "unit-1-replication.md#1-leaderfollower-replication-and-log-shipping"
+    },
+    {
+      "id": "A4-004",
+      "type": "single",
+      "tags": [
+        "replication",
+        "durability"
+      ],
+      "difficulty": 1,
+      "prompt": "What must be captured together to bootstrap a new follower so that it neither misses nor double-applies changes?",
+      "choices": [
+        "A full dump of the data and the wall-clock time at which the dump finished",
+        "The leader's current configuration file and the list of its connected clients",
+        "A consistent snapshot of the data and the log position at which that snapshot was taken",
+        "A copy of the data directory taken while the leader keeps running, plus the newest log segment"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The follower restores the snapshot and then streams the log from exactly the recorded position; any other pairing leaves a gap (missed changes) or an overlap (changes applied twice), and the replica silently diverges. A file copy of a live data directory is not a consistent snapshot. A wall-clock time does not identify a log position precisely. Configuration and client lists are irrelevant to the data.",
+      "ref": "unit-1-replication.md#1-leaderfollower-replication-and-log-shipping"
+    },
+    {
+      "id": "A4-005",
+      "type": "multi",
+      "tags": [
+        "replication",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the rules a follower's apply step needs so that replaying the log is safe even when the network duplicates and reorders messages.",
+      "choices": [
+        "Buffer entries whose position is beyond the next expected one until the gap fills",
+        "Apply entries only in log-position order, one position after another",
+        "Reject any entry that arrives late and ask the leader for a full resync",
+        "Apply every entry immediately in arrival order, because the leader sent them in order",
+        "Ignore entries whose position is at or below the last applied position"
+      ],
+      "answer": [
+        0,
+        1,
+        4
+      ],
+      "explanation": "Position-ordered apply, duplicate suppression and buffering of the future together make apply idempotent and order-preserving, so a follower always exposes a prefix of the leader's history. Applying in arrival order breaks as soon as the network reorders (an update could be applied before the insert it depends on). Forcing a full resync on any late message is needlessly expensive: a late message is exactly what buffering handles.",
+      "ref": "unit-1-replication.md#1-leaderfollower-replication-and-log-shipping"
+    },
+    {
+      "id": "A4-006",
+      "type": "single",
+      "tags": [
+        "replication",
+        "failover",
+        "operations"
+      ],
+      "difficulty": 2,
+      "prompt": "A Postgres follower has been offline since Friday because its host was decommissioned by mistake. By Monday the primary's disk is full and writes fail, although traffic is normal. Which mechanism most likely caused this, and what is the lesson?",
+      "choices": [
+        "The missing acknowledgements make the primary write undo copies of every transaction it cannot confirm to its local disk until the follower returns and acknowledges them",
+        "The primary mirrors the dead follower's data directory locally so that the follower can be restored later without needing a base backup",
+        "The primary keeps log for a registered follower until it is consumed; an abandoned slot grows without bound, so alert on retained log and drop dead slots",
+        "Asynchronous replication buffers every client request in memory and spills it to a temporary file whenever the follower stops reading"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The leader must keep every log record that some follower still needs (replication slots in Postgres, retained binlogs in MySQL). A follower that never returns makes the retained log grow without bound. Async replication does not roll back anything for missing acks, does not mirror the follower's data, and does not buffer client requests; it simply cannot discard log the follower has not consumed.",
+      "ref": "unit-1-replication.md#1-leaderfollower-replication-and-log-shipping"
+    },
+    {
+      "id": "A4-007",
+      "type": "single",
+      "tags": [
+        "replication",
+        "operations"
+      ],
+      "difficulty": 3,
+      "prompt": "You must upgrade Postgres by one major version with minimal downtime and want the upgraded copy to catch up live from the old primary before cutover. Which replication approach fits, and why?",
+      "choices": [
+        "Physical streaming with synchronous commit, because synchronous mode converts page formats during apply on the standby",
+        "Logical (row-level) replication, which is independent of the page format and so works between major versions",
+        "Statement-based replication, because SQL statements are portable across versions and avoid copying page images around",
+        "Physical WAL streaming, because a bit-for-bit copy is the safest way to move data between different server versions"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Physical replication ships page-level changes and requires the same major version and layout on the standby. Logical replication ships row changes and is decoupled from storage layout, which is why it is used for upgrades, selective replication and CDC. Statement-based replication is portable in principle but has the non-determinism problems of the previous question. Synchronous commit controls acknowledgement timing, not page formats.",
+      "ref": "unit-1-replication.md#1-leaderfollower-replication-and-log-shipping"
+    },
+    {
+      "id": "A4-008",
+      "type": "numeric",
+      "tags": [
+        "replication",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "The leader generates about 1 KB of log per write at 1,200 writes/s and streams it to three followers in another region. How much sustained cross-region egress does that need? Answer in Mbps (megabits per second).",
+      "value": 29,
+      "tolerance": 0.15,
+      "unit": "Mbps",
+      "explanation": "1,200 writes/s × 1 KB ≈ 1.2 MB/s per follower; × 3 followers = 3.6 MB/s; × 8 bits = 28.8 Mbps ≈ 29 Mbps. Counting only one follower gives ≈ 10 Mbps; mixing up bits and bytes gives a figure 8× off (3.6 'Mbps'), the most common estimation error in NUMBERS.md.",
+      "ref": "unit-1-replication.md#1-leaderfollower-replication-and-log-shipping"
+    },
+    {
+      "id": "A4-009",
+      "type": "single",
+      "tags": [
+        "replication",
+        "availability",
+        "durability"
+      ],
+      "difficulty": 2,
+      "prompt": "A leader replicates synchronously to its only follower. The follower's host reboots for a kernel patch and for 40 seconds every commit on the healthy leader blocks until the client times out. Which design change best keeps durability on two machines without this outage?",
+      "choices": [
+        "Make the single synchronous follower faster by moving it into the same AZ as the leader",
+        "Add a second follower and use semi-synchronous commit that waits for any one follower to flush",
+        "Wait for acknowledgements from all followers instead of one, so a slow follower is noticed sooner",
+        "Switch to asynchronous replication, which keeps the durability guarantee unchanged because the log is still shipped"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "With two followers and 'any one', commits proceed as long as either follower is up, and every acknowledged write exists on at least two machines. Pure async removes the blocking but also the durability: the last seconds of writes can be lost. A same-AZ follower speeds acks but gives no AZ protection and still blocks on its reboot. Waiting for all followers makes availability worse (every follower becomes a veto).",
+      "ref": "unit-1-replication.md#2-synchronous-asynchronous-and-semi-synchronous-replication-failover"
+    },
+    {
+      "id": "A4-010",
+      "type": "numeric",
+      "tags": [
+        "replication",
+        "failover",
+        "durability",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A leader acknowledged writes at 1,400 per second with asynchronous replication. At the moment the host died, the most up-to-date follower was 1.3 seconds behind. About how many acknowledged transactions are missing from the promoted follower?",
+      "value": 1820,
+      "tolerance": 0.1,
+      "unit": "transactions",
+      "explanation": "RPO in data = lag × write rate = 1.3 s × 1,400/s ≈ 1,820 transactions. The median lag is irrelevant; what counts is the lag at the moment of failure, which tends to be largest when the system is busiest.",
+      "ref": "unit-1-replication.md#2-synchronous-asynchronous-and-semi-synchronous-replication-failover"
+    },
+    {
+      "id": "A4-011",
+      "type": "single",
+      "tags": [
+        "replication",
+        "latency",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Local fsync takes about 1 ms. A leader switches a commit from asynchronous to synchronous replication to a follower in a different region with a round trip of about 70 ms. Roughly what commit latency should the application expect?",
+      "choices": [
+        "About 2–3 ms, the same as a synchronous follower in another AZ",
+        "At least about 70 ms, because the commit now waits a full round trip to the follower",
+        "About 10 ms, because only the log bytes are sent and they are small",
+        "About 1 ms, because the follower fsyncs in parallel with the leader and the network is not on the commit path"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Synchronous commit puts the leader-follower round trip (plus remote fsync) on the critical path; cross-region that is ≈ 70 ms or more, and no tuning can beat the speed of light. The parallel fsync does not hide the round trip. Payload size is irrelevant at this scale; latency is dominated by distance. The 2–3 ms figure is for a follower in another AZ of the same region (RTT ≈ 1–2 ms).",
+      "ref": "unit-1-replication.md#2-synchronous-asynchronous-and-semi-synchronous-replication-failover"
+    },
+    {
+      "id": "A4-012",
+      "type": "multi",
+      "tags": [
+        "failover",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the steps that belong in a safe, automated failover of a single-leader database.",
+      "choices": [
+        "Repoint the other followers to the new leader and truncate any divergent tail they hold",
+        "Fence the old leader (cut it off or revoke its ability to commit) so it cannot keep accepting writes",
+        "Promote the follower with the most free disk space, because it can store the most new data",
+        "Choose the live follower with the highest applied log position as the candidate",
+        "Assume clients move immediately once DNS is updated, and skip handling in-flight and cached connections"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "A safe failover picks the least-lossy candidate (highest position), fences the old leader to prevent split brain, and reconciles the followers to a single history. Free disk space is not a correctness criterion. DNS is a hint, not a switch: cached records and pooled connections keep clients on the old node, so redirection must be handled explicitly (epochs, redirects, proxies).",
+      "ref": "unit-1-replication.md#2-synchronous-asynchronous-and-semi-synchronous-replication-failover"
+    },
+    {
+      "id": "A4-013",
+      "type": "single",
+      "tags": [
+        "failover",
+        "replication",
+        "availability"
+      ],
+      "difficulty": 3,
+      "prompt": "After a 40-second network partition between two sites, an automated tool promotes a replica in the other region while the original primary is healthy and still accepting writes. When the partition heals, both sides hold writes the other lacks. What is the best lesson for the design?",
+      "choices": [
+        "Remove the standby region, since a second site only creates opportunities for split brain and adds operational overhead",
+        "Cross-region promotion is a data-loss decision: gate it on a fence and a lag limit, or require a human, and treat lag as RPO",
+        "Use a much longer heartbeat timeout on every database so that failovers never trigger during short network events like this one",
+        "Make replication synchronous across regions so the two sides can never differ, and change nothing else in the failover tooling"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The failure was an automatic promotion that could not distinguish 'primary dead' from 'primary unreachable' and had no fence or lag guard. Longer timeouts only trade split-brain risk for downtime. Cross-region synchronous replication removes the divergence but charges ≈ 70+ ms per commit and blocks writes during any partition (a conscious CAP-style choice, A5). Removing the DR region trades a fixable process problem for losing disaster recovery.",
+      "ref": "unit-1-replication.md#2-synchronous-asynchronous-and-semi-synchronous-replication-failover"
+    },
+    {
+      "id": "A4-014",
+      "type": "numeric",
+      "tags": [
+        "replication",
+        "availability",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Writes require acknowledgement from all three of a cluster's machines (the leader and two synchronous followers). Each machine is independently available 99.9% of the time. About how many hours per year are writes unavailable? Answer in hours.",
+      "value": 26,
+      "tolerance": 0.15,
+      "unit": "hours",
+      "explanation": "Availability multiplies: 0.999³ ≈ 0.997, so unavailability ≈ 0.3% × 8,766 h ≈ 26 h/year. A quorum-style design (wait for any one follower) would keep writes available whenever the leader and at least one follower are up, ≈ 99.9%, about 8.8 h/year, which is why 'sync to all' is rarely used.",
+      "ref": "unit-1-replication.md#2-synchronous-asynchronous-and-semi-synchronous-replication-failover"
+    },
+    {
+      "id": "A4-015",
+      "type": "single",
+      "tags": [
+        "replication",
+        "durability"
+      ],
+      "difficulty": 2,
+      "prompt": "A follower acknowledges a synchronous commit as soon as the log record reaches its memory, before it is flushed to disk. The leader's data centre then loses power, and in the same event the follower's server also loses power and its memory is lost. What happened to the acknowledged write?",
+      "choices": [
+        "It is safe only if the follower sits in a different region than the leader, since regions fail independently of each other",
+        "It is safe, because two machines saw the record, which is the definition of durability in any replicated system",
+        "It can be lost: 'received' is not durable; the ack must wait for the follower's flush to survive both crashes",
+        "It is safe, because the follower can rebuild the record by replaying the leader's log, which is also stored on the leader's disk"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Durability needs the data on stable storage on the machines that acknowledged it. A memory-only ack survives a leader crash alone but not a simultaneous follower crash. The leader's disk may hold the record, but if that machine is also lost or unavailable the write is gone for the cluster. Region placement reduces correlated failures but does not make a memory-only acknowledgement durable.",
+      "ref": "unit-1-replication.md#2-synchronous-asynchronous-and-semi-synchronous-replication-failover"
+    },
+    {
+      "id": "A4-016",
+      "type": "single",
+      "tags": [
+        "failover",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "A failover promoted follower B. Later the old leader A comes back with five log records that were never replicated, and it believes it is still the leader. What must happen next?",
+      "choices": [
+        "A is fenced, truncates its unreplicated tail to the common prefix and rejoins as B's follower; the five writes are reported lost",
+        "A resumes as leader and replicates its five records to B, restoring the writes that the failover had lost, with no conflict and no data loss for any client",
+        "A is promoted again because it has the longest log, and B is demoted and re-synchronised from A's version of history",
+        "A and B both stay writable and reconcile their two logs by timestamp whenever they next communicate with each other"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "After promotion B's history is the cluster's history; A's extra records exist on no other node and were never part of it. Letting A lead again or merging by timestamp produces split brain and divergent histories. Longest log is not a safe rule because A's tail diverges from B's. The correct handling reports the discarded writes (they were acknowledged to clients) so they can be reconciled with the source of truth, e.g. the core banking system.",
+      "ref": "unit-1-replication.md#2-synchronous-asynchronous-and-semi-synchronous-replication-failover"
+    },
+    {
+      "id": "A4-017",
+      "type": "multi",
+      "tags": [
+        "replication",
+        "availability",
+        "durability"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL statements about semi-synchronous replication (wait for acknowledgement from any one of several followers) that are correct.",
+      "choices": [
+        "Every acknowledged write exists on at least two machines at acknowledgement time",
+        "A single slow or dead follower does not block commits as long as another follower acknowledges",
+        "It removes the need to fence the old leader during failover",
+        "If no follower acknowledges within the timeout, the system must choose between blocking writes and degrading to asynchronous",
+        "It guarantees that every follower is identical to the leader at every moment"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "Semi-sync buys data on two machines without letting one follower veto progress, but when no follower is reachable the system faces an availability-versus-durability decision. It does not make all followers identical (the non-acknowledging ones may lag), and it says nothing about fencing: split brain prevention is a separate requirement.",
+      "ref": "unit-1-replication.md#2-synchronous-asynchronous-and-semi-synchronous-replication-failover"
+    },
+    {
+      "id": "A4-018",
+      "type": "single",
+      "tags": [
+        "lag",
+        "consistency"
+      ],
+      "difficulty": 1,
+      "prompt": "A member moves $400 between their own accounts, the API returns 201, and 300 ms later the accounts screen (served by a read replica 3 s behind) shows the old balances. Which anomaly is this?",
+      "choices": [
+        "Read-your-writes violation: the read was served by a replica that had not yet applied the member's own write",
+        "Consistent-prefix violation: the member saw the effects of a transaction without the causes that preceded it",
+        "Lost update: two concurrent writers overwrote each other's changes because neither used a lock or a version check",
+        "Monotonic-reads violation: the member saw newer data first and then older data afterwards from a different replica"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The member wrote and then read their own data from a replica that was behind: read-after-write. Monotonic reads requires two reads in which the second is older than the first. Consistent prefix concerns causally related writes in different partitions. Lost update is a concurrency anomaly between writers, not a visibility lag.",
+      "ref": "unit-1-replication.md#3-replication-lag-anomalies-and-how-to-fix-them"
+    },
+    {
+      "id": "A4-019",
+      "type": "single",
+      "tags": [
+        "lag",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "A member refreshes their transactions list twice. The first refresh shows a new transfer; the second, a second later, does not. Reads are balanced round-robin across two replicas with lags of 50 ms and 3 s. Which guarantee is missing and which fix addresses it directly?",
+      "choices": [
+        "Linearizability; make every replica synchronous so that all readers observe a single global order of operations",
+        "Monotonic reads; keep a floor of the highest log position the session has seen and read only from replicas at or above it",
+        "Read-your-writes; send all of the member's later reads to the leader for ever after their first write, so nothing is stale",
+        "Consistent prefix; partition the data so related rows share a partition and every reader sees them together"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Time went backwards for one reader across two reads, which is a monotonic-reads violation; a session floor (or pinning to a single replica, with its limits) fixes it. Read-your-writes concerns the member's own writes, and 'leader for ever' is a heavy-handed answer to a different problem. Consistent prefix is about cross-partition causality. Making every replica synchronous is far stronger and costlier than needed (and linearizability is an A5 topic).",
+      "ref": "unit-1-replication.md#3-replication-lag-anomalies-and-how-to-fix-them"
+    },
+    {
+      "id": "A4-020",
+      "type": "single",
+      "tags": [
+        "lag",
+        "consistency",
+        "partitioning"
+      ],
+      "difficulty": 3,
+      "prompt": "Transactions are partitioned by account. Alice pays Bob (account A's partition), and Bob then immediately pays Carol (account B's partition). A reader querying replicas sees Bob's payment to Carol but not Alice's payment to Bob. Replica lag on A's partition is 5 s, on B's 0.1 s. What is this called, and what avoids it?",
+      "choices": [
+        "A write skew anomaly; use serialisable isolation on each partition so concurrent transactions cannot interleave badly",
+        "A consistent-prefix violation; keep causally related data in one partition so a reader cannot see an effect without its cause",
+        "A monotonic-reads violation; pin the reader to a single replica so that it never sees an older state than it saw before",
+        "Replica corruption; rebuild the lagging replica from a backup and re-enable it once it has caught up with the leader again"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Each partition replays its own log in order, but there is no order across partitions, so an observer can see Bob's later payment without the earlier one that funded it. Co-locating causally related writes or tracking dependencies (A5) prevents it. Pinning a reader to one replica does not synchronise two partitions. Write skew is an isolation anomaly inside one database. Nothing is corrupt; the replicas are simply at different points.",
+      "ref": "unit-1-replication.md#3-replication-lag-anomalies-and-how-to-fix-them"
+    },
+    {
+      "id": "A4-021",
+      "type": "single",
+      "tags": [
+        "lag",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "You want read-your-writes without sending all reads to the leader. Which design is correct?",
+      "choices": [
+        "Return the commit position with the write; reads carry it; the router uses a replica that has applied it, else waits briefly or uses the leader",
+        "Pin the user to one randomly chosen replica for the whole session so that all of their reads are consistent with each other",
+        "Read from two random replicas in parallel and return whichever response arrives first, to cut latency and staleness together",
+        "Have the client sleep for one second after every write before it is allowed to issue its next read, so replicas have time to catch up, which is long enough for any lag"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A position token makes the freshness requirement explicit and checkable, so only reads that follow a write pay a price. A fixed sleep is a guess that fails during lag spikes and adds latency everywhere. Pinning gives monotonic reads but the pinned replica may be behind the member's write. 'First response wins' returns whichever replica is fastest, with no relation to freshness.",
+      "ref": "unit-1-replication.md#3-replication-lag-anomalies-and-how-to-fix-them"
+    },
+    {
+      "id": "A4-022",
+      "type": "numeric",
+      "tags": [
+        "lag",
+        "estimation"
+      ],
+      "difficulty": 1,
+      "prompt": "Three followers lag by 0.05 s, 0.05 s and 3 s. A client reads from a uniformly random follower 300 ms after its write. What percentage of those reads return stale data? Answer as a percentage.",
+      "value": 33,
+      "tolerance": 0.1,
+      "unit": "%",
+      "explanation": "Only the follower with 3 s lag has not applied the write after 0.3 s: 1 of 3 ≈ 33%. The two 50 ms followers have already caught up. If the slow follower's lag were 0.2 s, staleness would drop to ~0%: stale reads are a step function of (time since write) versus (lag of the chosen replica), which is why lag spikes cause bursts of anomalies.",
+      "ref": "unit-1-replication.md#3-replication-lag-anomalies-and-how-to-fix-them"
+    },
+    {
+      "id": "A4-023",
+      "type": "multi",
+      "tags": [
+        "lag",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL approaches that give a member read-your-writes after a transfer.",
+      "choices": [
+        "Add more read replicas so that each replica receives less replication traffic",
+        "Pass the commit position from the write and require a replica that has applied it",
+        "Pin the member to one replica and rely on it to be current",
+        "Route that session's reads to the leader for a window longer than the expected lag",
+        "Make the commit wait until the replica that will serve the next read has applied it"
+      ],
+      "answer": [
+        1,
+        3,
+        4
+      ],
+      "explanation": "A leader window, a position token and a commit that waits for the reading replica (remote_apply-style) each ensure the read sees the member's write. Pinning to one replica provides at most monotonic reads: that replica can still be behind. More replicas do not reduce lag on any of them, because each applies the full write stream.",
+      "ref": "unit-1-replication.md#3-replication-lag-anomalies-and-how-to-fix-them"
+    },
+    {
+      "id": "A4-024",
+      "type": "single",
+      "tags": [
+        "lag",
+        "replication",
+        "capacity"
+      ],
+      "difficulty": 3,
+      "prompt": "After adding a position-token read-your-writes rule, the leader's CPU rises by 40% during every payroll run, even though total traffic did not change. What is the most likely explanation, and the best response?",
+      "choices": [
+        "During the spike replicas trail the tokens, so reads fall back to the leader; add a short bounded wait, return the written state, and alert on leader-read share",
+        "The token comparison is CPU-expensive on the leader, so the check should move to the client, leaving the leader out of read routing entirely",
+        "Replicas are rejecting reads because the tokens are invalid after a restart; regenerate tokens more frequently so replicas accept them",
+        "Position tokens are only valid under synchronous replication, so the system silently switched modes when the payroll run started"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The guarantee is free when replicas are fresher than the read-after-write gap and degrades into 'read from the leader' when they are not, which is exactly the situation during a lag spike. Mitigations: wait a few milliseconds for a replica, avoid the re-read by returning the new state, cache, and watch the leader-read share. The token comparison is trivial work. Tokens are not 'invalid' and do not require synchronous replication.",
+      "ref": "unit-1-replication.md#3-replication-lag-anomalies-and-how-to-fix-them"
+    },
+    {
+      "id": "A4-025",
+      "type": "single",
+      "tags": [
+        "lag",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "A member makes a transfer on their phone and then opens the web app on a laptop, which shows the old balance. The phone app uses read-your-writes routing based on a cookie holding the commit position. What is the gap?",
+      "choices": [
+        "The cookie should be signed and encrypted, because replicas reject unencrypted tokens and fall back to stale data",
+        "Laptops always read from a different database cluster than phones do, which cannot be fixed with any routing change",
+        "The position token lives in the phone session only; store it with the member so every device uses it as a read floor",
+        "The web app needs a longer cache TTL so that it reads from replicas less often and therefore sees stale data less often"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Read-your-writes must follow the person, not the connection: tokens kept per device do not help another device. Storing the last-write position with the member record (and using it as a floor for any session) closes the gap. Encryption is unrelated to freshness, and a longer TTL would make staleness worse, not better.",
+      "ref": "unit-1-replication.md#3-replication-lag-anomalies-and-how-to-fix-them"
+    },
+    {
+      "id": "A4-026",
+      "type": "single",
+      "tags": [
+        "lag",
+        "operations"
+      ],
+      "difficulty": 2,
+      "prompt": "Which pair of replica health criteria is the most sensible to decide whether a replica may serve reads?",
+      "choices": [
+        "Its CPU is below 50 percent and its disk is under 80 percent full",
+        "Its replication lag in seconds reads exactly zero at the instant of the health check",
+        "Its lag is under a threshold and a heartbeat proves it is applying the log",
+        "Its process is running and its port accepts connections from the load balancer"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A replica that accepts connections but is wedged (not applying the log) looks healthy to a port check while serving ever-older data; a threshold on lag combined with proof of forward progress (e.g. heartbeat row advancing) is what protects readers. CPU and disk are capacity signals, not freshness. A time-lag figure of zero can be reported when the leader is idle even though the replica is stuck, and requiring exactly zero would eject healthy replicas under any load.",
+      "ref": "unit-1-replication.md#3-replication-lag-anomalies-and-how-to-fix-them"
+    },
+    {
+      "id": "A4-027",
+      "type": "single",
+      "tags": [
+        "multi-leader",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Two regions run active-active with last-write-wins. East's clock is 300 ms fast. A west-side edit happens 100 ms after an east-side edit to the same address field. After replication, every replica holds the east value. What happened?",
+      "choices": [
+        "LWW compares unsynchronised clocks: the earlier east write carried the larger timestamp, so the later west write was silently discarded",
+        "Replication from west to east failed during the exchange, so east kept its own value and never learned of the later west edit, and the failed link went unnoticed",
+        "The system detected a conflict, asked a person to choose between the two edits, and the person picked the east value",
+        "Both values were merged character by character and east's value happened to be the longer string, so it was retained"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "LWW always converges but picks the winner by timestamp, which depends on clock skew, and it discards the other write without an error. There was no replication failure: both writes arrived. No conflict detection or manual resolution is part of plain LWW, and the system does not merge fields.",
+      "ref": "unit-1-replication.md#4-multi-leader-and-leaderless-replication-introduction"
+    },
+    {
+      "id": "A4-028",
+      "type": "single",
+      "tags": [
+        "multi-leader",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "Two leaders each apply a withdrawal of $90 from an account holding $100. Both local checks (balance ≥ 90) pass, and the operations (not the resulting rows) are replicated and applied commutatively on both sides. What is the final state?",
+      "choices": [
+        "Balance $100: both withdrawals are rolled back as a conflict once the leaders exchange their operations with each other",
+        "Balance −$80 is impossible, because a CRDT counter enforces non-negative values automatically when it merges the operations",
+        "Balance −$80: operation merging converges, but 'balance ≥ 0' is a property of the merged state that neither leader could see when deciding",
+        "Balance $10: the commutative merge detects the conflict and applies only the first withdrawal that arrived at each leader and discards the other one"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Commutative operations guarantee convergence, not invariants. Each leader validated against its own partial view, and the combined result violates the rule. Preventing it requires coordination before accepting (a single home leader per account, escrow of part of the balance per region, or consensus). Merges do not 'detect' business conflicts, and CRDT counters do not enforce lower bounds.",
+      "ref": "unit-1-replication.md#4-multi-leader-and-leaderless-replication-introduction"
+    },
+    {
+      "id": "A4-029",
+      "type": "single",
+      "tags": [
+        "multi-leader",
+        "partitioning",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "A bank wants low-latency writes for members in two regions and must not lose or double-apply any balance update. Which approach is best?",
+      "choices": [
+        "Give each account a home region that handles all its writes (partition by account) and replicate to the other region for reads and DR",
+        "Accept writes in both regions and let the client retry each request until both regions eventually agree on the balance",
+        "Run multi-leader and reconcile the balances each night from the logs of both regions, correcting any differences found",
+        "Run multi-leader with last-write-wins on the balance row in both regions so each member always writes to the nearest one, which keeps write latency low"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Conflict avoidance by routing each record to one writer removes the need to resolve conflicts, which is the safest strategy for balances. LWW loses updates; nightly reconciliation allows overdrafts and wrong balances for hours; client retries cannot make two independent writers agree and would duplicate operations without idempotency.",
+      "ref": "unit-1-replication.md#4-multi-leader-and-leaderless-replication-introduction"
+    },
+    {
+      "id": "A4-030",
+      "type": "multi",
+      "tags": [
+        "multi-leader",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the strategies that deal with concurrent writes in a multi-leader system.",
+      "choices": [
+        "Merge with data types designed for it, such as counters and sets (CRDTs)",
+        "Replicate more frequently so that conflicts cannot occur",
+        "Use last-write-wins and treat the discarded write as acceptable for every type of data",
+        "Keep both versions as siblings and let the application or user resolve them",
+        "Avoid conflicts by sending all writes for a record to one leader"
+      ],
+      "answer": [
+        0,
+        3,
+        4
+      ],
+      "explanation": "Avoidance, mergeable data types and sibling resolution are the standard options (plus last-write-wins where losing a write is acceptable, but not 'for every type of data'). Faster replication shrinks the window but concurrent writes within one network delay still conflict, so it cannot eliminate them.",
+      "ref": "unit-1-replication.md#4-multi-leader-and-leaderless-replication-introduction"
+    },
+    {
+      "id": "A4-031",
+      "type": "single",
+      "tags": [
+        "multi-leader",
+        "replication"
+      ],
+      "difficulty": 1,
+      "prompt": "Which statement best describes leaderless (Dynamo-style) replication?",
+      "choices": [
+        "Each region has a leader, and the leaders exchange their writes asynchronously and resolve conflicts with timestamps",
+        "Data is partitioned so that each key has exactly one copy on one node, and there is therefore nothing to repair or reconcile between replicas",
+        "One elected node accepts all writes and the other nodes copy its log, with automatic failover when that node is lost",
+        "Any replica can accept a write; coordinators use quorum thresholds on several replicas, with repair such as hinted handoff and read repair"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Leaderless systems skip leader election and failover: a failed replica is simply skipped and caught up later by hinted handoff, read repair and anti-entropy. The first option describes single-leader replication, the second multi-leader, and the last is not replication at all. Quorum arithmetic and what quorums guarantee are covered in A5.",
+      "ref": "unit-1-replication.md#4-multi-leader-and-leaderless-replication-introduction"
+    },
+    {
+      "id": "A4-032",
+      "type": "single",
+      "tags": [
+        "partitioning",
+        "sharding"
+      ],
+      "difficulty": 2,
+      "prompt": "A team range-partitions a transactions table by posted_at into monthly partitions, hoping to spread load. During the month, one partition runs hot while the others are idle. Why?",
+      "choices": [
+        "The older partitions have lower priority in the scheduler and therefore never receive any of the newly arriving writes",
+        "Monthly partitions are too large; daily partitions would spread the writes evenly across the days of the month",
+        "Range partitioning cannot index the posted_at column, so the writes to the table are serialised behind one lock",
+        "An increasing key sends every new write to the newest range (a hot tail); older partitions only see reads"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Timestamps only grow, so every insert belongs to the last range regardless of its granularity; smaller ranges just move the hot tail to the newest small partition. Range partitioning can index the column and has no scheduler priority; the problem is the key's access pattern. Fixes: a hash or bucket prefix, or using time only as the ordering key inside a hashed partition.",
+      "ref": "unit-2-partitioning.md#5-why-partition-and-the-partitioning-schemes"
+    },
+    {
+      "id": "A4-033",
+      "type": "numeric",
+      "tags": [
+        "partitioning",
+        "sharding",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A fleet uses hash(key) mod N to place data. Growing from 15 to 16 shards, about what percentage of keys change shard? Answer as a percentage.",
+      "value": 94,
+      "tolerance": 0.05,
+      "unit": "%",
+      "explanation": "A key stays only if hash mod 15 equals hash mod 16, which holds for 15 of every 15 × 16 = 240 hash values, i.e. 1/16 of keys; so N/(N+1) = 15/16 ≈ 94% move. The ideal is the new shard's fair share, 1/16 ≈ 6%. The larger N is, the worse mod gets.",
+      "ref": "unit-2-partitioning.md#5-why-partition-and-the-partitioning-schemes"
+    },
+    {
+      "id": "A4-034",
+      "type": "single",
+      "tags": [
+        "partitioning",
+        "sharding"
+      ],
+      "difficulty": 2,
+      "prompt": "The most frequent query is 'transactions of account X between two dates, newest first', always within one credit union. Which partitioning of the transactions table serves it best?",
+      "choices": [
+        "Hash of (tenant_id, account_id) selects the partition, and posted_at (descending) orders rows inside it",
+        "Range on posted_at, so that date ranges are contiguous and each statement period lives in one partition",
+        "Directory by tenant only, with one shard per credit union regardless of how large or small it is",
+        "Hash of transaction_id, so that the rows of every table spread as evenly as possible over the partitions"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The account hash keeps one account's rows together and ordered, so the query is a single-partition index range scan, while the hash spreads even a huge tenant over many partitions. Hashing the transaction id scatters an account's rows over all partitions (scatter-gather). Range on time creates a hot tail and makes every account's query hit the same partition for a given month. One shard per tenant ignores that two tenants hold half of the data.",
+      "ref": "unit-2-partitioning.md#5-why-partition-and-the-partitioning-schemes"
+    },
+    {
+      "id": "A4-035",
+      "type": "single",
+      "tags": [
+        "partitioning",
+        "sharding"
+      ],
+      "difficulty": 2,
+      "prompt": "A platform serves 40 tenants of very uneven size, and one has a contract requiring dedicated database servers. Which partitioning element handles this best?",
+      "choices": [
+        "Range partitioning on tenant_id in alphabetical order, so neighbouring tenants share shards and ranges can be split",
+        "Hash partitioning on tenant_id into a fixed number of equal shards, so every tenant lands on some shard automatically",
+        "A directory (tenant → cell/shard map) so big or special tenants can get dedicated shards and small ones are pooled",
+        "Modulo placement on a numeric tenant id, so that each tenant maps to exactly one shard without any lookup table"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Explicit placement lets you honour contractual isolation, move a tenant that grows, and pool the small ones. Hash, range or modulo on the tenant id assign tenants to shards mechanically, with no way to give one tenant its own servers and with skew when a few tenants dominate the data. The cost of a directory is that it sits on the hot path and must be cached and kept highly available.",
+      "ref": "unit-2-partitioning.md#5-why-partition-and-the-partitioning-schemes"
+    },
+    {
+      "id": "A4-036",
+      "type": "multi",
+      "tags": [
+        "partitioning",
+        "sharding"
+      ],
+      "difficulty": 2,
+      "prompt": "The transactions table is partitioned by hash of account_id with rows ordered by posted_at inside each partition. Select ALL queries served by a single partition.",
+      "choices": [
+        "All transactions posted in March for every account of one credit union, sorted by time",
+        "Find the account whose card ends in 4321",
+        "Transactions for account 77 posted in March",
+        "The most recent 20 transactions of account 77",
+        "All transactions larger than $10,000 posted today across the platform"
+      ],
+      "answer": [
+        2,
+        3
+      ],
+      "explanation": "Both account-scoped queries contain the partition key and map to one partition and one index range. The other three have no account_id: a platform-wide filter or a card-last-four lookup must visit every partition (or use a secondary index, Unit 3), and the tenant-wide March listing touches every partition that holds the credit union's accounts.",
+      "ref": "unit-2-partitioning.md#5-why-partition-and-the-partitioning-schemes"
+    },
+    {
+      "id": "A4-037",
+      "type": "single",
+      "tags": [
+        "partitioning",
+        "sharding"
+      ],
+      "difficulty": 3,
+      "prompt": "An engineer proposes tenant_id as the only partition key: 'forty values, and queries are always tenant-scoped'. What is the main problem?",
+      "choices": [
+        "Tenant-scoped queries would have to visit all 40 partitions to find the rows that belong to the tenant",
+        "Queries cannot be served because tenant_id is not unique per row, and partition keys must identify a single row",
+        "Partition keys must be integers, and tenant ids are strings, so the database cannot compute a partition for them",
+        "Low cardinality and skew: at most 40 partitions, with two tenants holding half the data, so the biggest cannot spread across machines"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A partition key needs enough distinct values and no dominant ones. Uniqueness is not required (many rows share a partition key by design), key types are not restricted to integers, and tenant-scoped queries would in fact hit exactly one partition; the issue is that one partition per tenant cannot spread a huge tenant and caps parallelism.",
+      "ref": "unit-2-partitioning.md#5-why-partition-and-the-partitioning-schemes"
+    },
+    {
+      "id": "A4-038",
+      "type": "single",
+      "tags": [
+        "consistent-hashing",
+        "caching",
+        "sharding"
+      ],
+      "difficulty": 2,
+      "prompt": "A fleet of 8 cache nodes selects a node with hash(key) mod 8. Autoscaling adds a ninth node and the cache hit rate falls from 95% to about 15% for several minutes, flooding the database. What property of the placement function caused this, and what fixes it?",
+      "choices": [
+        "The hash function is too slow, so lookups start timing out and are counted as misses; the fix is a faster hash function such as a non-cryptographic one",
+        "Round-robin load balancing sent too much traffic to the new node before it was ready to serve cached data to anyone",
+        "Newly added nodes are always cold, so the hit rate must drop for a while; nothing can reduce that effect on the fleet",
+        "N is in the formula, so about 8/9 of keys change node; consistent hashing (or fixed slots) moves only about 1/9, all to the new node"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "With mod placement almost every key's home changes when N changes, so almost every cached entry becomes unreachable at once. A ring moves only the new node's fair share (≈ 1/9 of the keys, all to the new node), so ≈ 8/9 of the cache stays valid. A new node being cold affects only its own share. Hash speed and load balancing are unrelated to the remapping.",
+      "ref": "unit-2-partitioning.md#6-consistent-hashing-and-virtual-nodes"
+    },
+    {
+      "id": "A4-039",
+      "type": "numeric",
+      "tags": [
+        "consistent-hashing",
+        "sharding",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A store holds 9 TB spread by a consistent-hash ring over 31 equal nodes. A 32nd node joins. About how much data must move to it, ideally? Answer in GB (use 1 TB = 1,024 GB).",
+      "value": 288,
+      "tolerance": 0.15,
+      "unit": "GB",
+      "explanation": "The new node's fair share is 1/32 of the data: 9 × 1,024 / 32 = 288 GB, all moving to the new node. Mod placement would move ≈ 31/32 ≈ 97% ≈ 8.9 TB.",
+      "ref": "unit-2-partitioning.md#6-consistent-hashing-and-virtual-nodes"
+    },
+    {
+      "id": "A4-040",
+      "type": "single",
+      "tags": [
+        "consistent-hashing"
+      ],
+      "difficulty": 2,
+      "prompt": "After adding node X to a consistent-hash ring (with a fixed hash function), what can happen to a key that is not on X's new arcs?",
+      "choices": [
+        "Nothing: it keeps the same owner; keys only move to X, never between two existing nodes",
+        "It moves to the successor of its old owner, because the ring rebalances itself to keep the arcs equal in length",
+        "It may move to any other existing node, depending on where the hash of the key falls relative to the new points",
+        "It is re-hashed using the new node count, in the same way that modulo placement recomputes every key's home"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Monotonicity is the defining property: X's points capture only the arcs immediately before them, so a key either stays or moves to X. Movement between existing nodes would mean the ring behaves like mod placement. Re-hashing with the node count is exactly what the ring avoids.",
+      "ref": "unit-2-partitioning.md#6-consistent-hashing-and-virtual-nodes"
+    },
+    {
+      "id": "A4-041",
+      "type": "single",
+      "tags": [
+        "consistent-hashing",
+        "partitioning"
+      ],
+      "difficulty": 2,
+      "prompt": "A ring of 10 nodes places one point per node. Load tests show one node at about 3× the average and another nearly empty. What is the standard fix and why does it work?",
+      "choices": [
+        "Rehash the node names with different seeds until the arcs on the ring come out equal in length for every node",
+        "Switch to hash mod N, whose balance is perfect for any key distribution and any number of nodes in the cluster",
+        "Add replicas of each key so that the load on any heavily loaded node is shared among three different nodes",
+        "Give each node many virtual nodes (about 100–256): each then owns many small arcs, so its load averages out"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "With a single random point per node, arcs are very unequal (the largest of 10 is ≈ 2.9× average). Many virtual nodes sum many small random arcs, so the standard deviation of a node's share falls like 1/√v. Rehashing names to equalise arcs is fragile and changes when nodes change. Replication copies data; it does not change which node owns the primary range. Mod N balances well but fails on resize.",
+      "ref": "unit-2-partitioning.md#6-consistent-hashing-and-virtual-nodes"
+    },
+    {
+      "id": "A4-042",
+      "type": "numeric",
+      "tags": [
+        "consistent-hashing",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A node's share of keys on a ring with v virtual nodes per node has a relative standard deviation of roughly 1/√v. With v = 100 virtual nodes per node, what is the approximate relative standard deviation of per-node load, as a percentage?",
+      "value": 10,
+      "tolerance": 0.3,
+      "unit": "%",
+      "explanation": "1/√100 = 0.1 = 10%. So the busiest of ~10 nodes is typically about 1 + 2 × 10% ≈ 1.2× the mean, matching the lab's break-it table (≈ 1.2 at 16–64 vnodes, ≈ 1.05 at 1,024). Going from 100 to 400 vnodes halves the deviation, which is why returns diminish.",
+      "ref": "unit-2-partitioning.md#6-consistent-hashing-and-virtual-nodes"
+    },
+    {
+      "id": "A4-043",
+      "type": "single",
+      "tags": [
+        "consistent-hashing",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "A store replicates each key on the 3 'next points' clockwise from its position on a ring where each node has 256 virtual nodes. A node failure test shows some keys lost all copies when one machine died. What is the likely bug?",
+      "choices": [
+        "Three replicas are too few for a ring of this size; the ring needs at least five points per key to be safe",
+        "The ring was hashed with too many virtual nodes, which makes replicas collide on the same machine more often",
+        "Replicas should be chosen by a counter-clockwise walk so that no copy can land on the same node as the primary",
+        "Adjacent points can belong to one machine; replicas must be the first three distinct physical nodes met (ideally in distinct AZs)"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "With many vnodes per machine, consecutive points on the ring frequently belong to the same machine, so 'the next 3 points' can put all copies on one box. Walking clockwise and skipping nodes already chosen yields distinct machines, and zone-awareness extends the same walk. Direction of the walk is irrelevant, and vnodes are the cause of the collision only in combination with the naive walk, not a reason to avoid them.",
+      "ref": "unit-2-partitioning.md#6-consistent-hashing-and-virtual-nodes"
+    },
+    {
+      "id": "A4-044",
+      "type": "single",
+      "tags": [
+        "consistent-hashing",
+        "load-balancing"
+      ],
+      "difficulty": 3,
+      "prompt": "A cache tier uses a consistent-hash ring; a few very popular keys overload their nodes even with 200 virtual nodes. The team adopts 'consistent hashing with bounded loads' with ε = 0.25. What does that give and what does it cost?",
+      "choices": [
+        "Hot keys are detected and split automatically into sub-keys, so no single key can overload any single node",
+        "Every key is stored on two nodes, so a hot key's load is halved with no other effect on placement or lookups",
+        "The ring is rebuilt every second from fresh load measurements, which removes skew but needs a central coordinator",
+        "No node exceeds 125% of the average; keys whose node is full spill clockwise, so some keys sit off-owner and placement depends on history"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Bounded loads cap each node at ceil((1+ε) × average) and let overflow continue clockwise; the price is that some keys are off-owner (so lookups must remember or recompute the spill) and that assignment depends on the order of insertion. It is not replication, not periodic rebuilding, and it does not split keys: a single key with more load than the cap still lives on one node at a time.",
+      "ref": "unit-2-partitioning.md#6-consistent-hashing-and-virtual-nodes"
+    },
+    {
+      "id": "A4-045",
+      "type": "single",
+      "tags": [
+        "consistent-hashing",
+        "sharding"
+      ],
+      "difficulty": 3,
+      "prompt": "Which statement about jump consistent hash is correct?",
+      "choices": [
+        "It requires a sorted array of points like a ring, which is why it needs more memory but gives smoother balance",
+        "Its lookup cost grows linearly with the number of buckets, which is why it is used only for small clusters",
+        "It needs no memory and is very even, and growing n to n+1 moves keys only into the new bucket, but only the last bucket can be added or removed",
+        "It supports weighted nodes and arbitrary node removal by renumbering the buckets, so any node can leave at any time"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Jump hash computes the bucket number from the key in O(ln n) with no state; the price is that buckets are just numbers 0..n−1, so you cannot remove an arbitrary bucket or give one a weight. Use it for numbered partitions that only grow, with a table from partition to machine. It is not linear and it keeps no ring.",
+      "ref": "unit-2-partitioning.md#6-consistent-hashing-and-virtual-nodes"
+    },
+    {
+      "id": "A4-046",
+      "type": "single",
+      "tags": [
+        "consistent-hashing",
+        "operations"
+      ],
+      "difficulty": 3,
+      "prompt": "Two services each build the same ring from the same member list, but a fraction of keys are read from the wrong node. One service uses per-process randomly seeded hashing for keys. What is the real fix?",
+      "choices": [
+        "Rebuild the ring in every client every minute, so that any disagreement between their copies is only temporary",
+        "Use a stable, well-specified hash with identical labels and tie-breaking in every client (check golden vectors), and version the membership",
+        "Add more virtual nodes until the clients' rings agree with each other on average across the whole key space",
+        "Replace the ring with hash mod N, which does not depend on hash seeds and so behaves the same in every process"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Placement is only meaningful if every client computes exactly the same ring: same hash function (no per-process seeds), same labels, same collision rule and the same membership. More vnodes cannot fix disagreement. Mod N has the same dependency on the hash and has the resharding problem. Periodic rebuilds do not remove a systematic difference.",
+      "ref": "unit-2-partitioning.md#6-consistent-hashing-and-virtual-nodes"
+    },
+    {
+      "id": "A4-047",
+      "type": "multi",
+      "tags": [
+        "consistent-hashing"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL properties of rendezvous (highest-random-weight) hashing.",
+      "choices": [
+        "It balances load poorly unless many virtual nodes are added",
+        "Adding or removing a node moves only the keys that node wins or loses",
+        "Lookup cost is O(log number of nodes) using a sorted ring",
+        "Each lookup scores every node, so cost is O(number of nodes)",
+        "It needs no ring or virtual nodes, and weights are simple to add"
+      ],
+      "answer": [
+        1,
+        3,
+        4
+      ],
+      "explanation": "Rendezvous scores (node, key) for all nodes and picks the maximum, so it is O(N) per lookup, minimal-movement and evenly balanced without virtual nodes; it suits small N. The logarithmic lookup and the need for vnodes describe rings.",
+      "ref": "unit-2-partitioning.md#6-consistent-hashing-and-virtual-nodes"
+    },
+    {
+      "id": "A4-048",
+      "type": "numeric",
+      "tags": [
+        "rebalancing",
+        "sharding",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A cluster has 256 fixed partitions of 40 GB spread over 8 nodes. A ninth node joins and 28 partitions move to it, two at a time, each stream copying at 100 MB/s. How long does the rebalance take? Answer in hours (1 GB = 1,024 MB).",
+      "value": 1.6,
+      "tolerance": 0.2,
+      "unit": "hours",
+      "explanation": "Data = 28 × 40 GB = 1,120 GB. Throughput = 2 streams × 100 MB/s = 200 MB/s. Time = 1,120 × 1,024 / 200 ≈ 5,700 s ≈ 1.6 h. Doing it unthrottled would be faster but competes with foreground traffic for the same disks and NICs.",
+      "ref": "unit-2-partitioning.md#7-rebalancing-request-routing-and-operating-a-partitioned-system"
+    },
+    {
+      "id": "A4-049",
+      "type": "single",
+      "tags": [
+        "rebalancing",
+        "failover",
+        "operations"
+      ],
+      "difficulty": 3,
+      "prompt": "A cluster's failure detector marks a slow (not dead) node as down. The system immediately re-replicates its partitions, adding copy traffic to already stressed nodes, which then also look down, and more copying starts. What is this, and what is the standard defence?",
+      "choices": [
+        "A split brain between two leaders; fence the affected nodes by cutting their network access until they are repaired and verified healthy",
+        "A rebalance storm; delay re-replication by a grace period, throttle copies and cap concurrency so slow is not treated as dead",
+        "A hot partition caused by one popular key; split that key into several sub-keys and spread the writes among them",
+        "A replication lag spike on the followers; make replication synchronous so the followers can never fall behind again"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A failure detector cannot tell dead from slow, and moving data is expensive, so reacting instantly turns a minor slowdown into cluster-wide overload. Grace periods, throttles and concurrency limits break the feedback loop. Split brain concerns two writers; hot partitions concern skew; synchronous replication would add more waiting to an overloaded system.",
+      "ref": "unit-2-partitioning.md#7-rebalancing-request-routing-and-operating-a-partitioned-system"
+    },
+    {
+      "id": "A4-050",
+      "type": "multi",
+      "tags": [
+        "rebalancing",
+        "sharding",
+        "operations"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the elements of a safe live migration of a partition from node A to node B.",
+      "choices": [
+        "Stop all clients for the duration of the copy to guarantee consistency",
+        "Briefly fence writes on A, apply the final delta, then switch the routing map to B with a new epoch",
+        "Copy a snapshot, then stream the change log until B is nearly caught up",
+        "Delete A's copy as soon as the snapshot finishes to free space",
+        "Verify B (counts or checksums) before deleting A's copy"
+      ],
+      "answer": [
+        1,
+        2,
+        4
+      ],
+      "explanation": "Snapshot + catch-up keeps the pause short, a fenced cutover with a new epoch makes ownership unambiguous, and verification before delete keeps the source as the rollback. Stopping all clients for hours is not acceptable at scale. Deleting early turns any copy bug into permanent data loss.",
+      "ref": "unit-2-partitioning.md#7-rebalancing-request-routing-and-operating-a-partitioned-system"
+    },
+    {
+      "id": "A4-051",
+      "type": "single",
+      "tags": [
+        "routing",
+        "rebalancing"
+      ],
+      "difficulty": 2,
+      "prompt": "After a partition moves, some clients still send requests to the old node, which answers with a redirect naming the new owner and the current map version. Why is the version (epoch) needed?",
+      "choices": [
+        "So that requests are encrypted with a key that changes each epoch, preventing replays of old routing decisions by a stale client",
+        "So that the number of replicas of each partition can be changed without ever touching the stored data",
+        "So that clients can compute the partition number for a key locally without needing to fetch any map at all",
+        "So a node can tell a request used a stale map and redirect it, and a demoted owner knows it no longer owns the data"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Epochs/versions make staleness detectable: the receiving node compares the request's map version with its own and redirects. They do not encrypt traffic, remove the need for a map, or change replica counts. Clients should expect redirects and retry safely (idempotency keys).",
+      "ref": "unit-2-partitioning.md#7-rebalancing-request-routing-and-operating-a-partitioned-system"
+    },
+    {
+      "id": "A4-052",
+      "type": "single",
+      "tags": [
+        "rebalancing",
+        "sharding"
+      ],
+      "difficulty": 3,
+      "prompt": "A team creates 8 fixed partitions for a hash-partitioned table, planning to run on 4 nodes now and up to 20 nodes later. What is the problem?",
+      "choices": [
+        "Hash partitioning requires the number of partitions to be a power of ten so that the hash ranges divide evenly",
+        "Eight partitions will always be distributed unevenly across four nodes, leaving some nodes with far more data",
+        "Fewer partitions than nodes: at most 8 nodes can ever hold data, and the count is a lifetime choice, so size it far above the largest cluster",
+        "Fixed partitions cannot be moved between nodes once they have been created, so the cluster cannot be rebalanced"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Fixed-partition schemes assign whole partitions to nodes; with 8 partitions a 20-node cluster would leave 12 nodes empty and partition sizes would grow with the data. Choose hundreds or thousands up front (Redis Cluster uses 16,384 slots). Moving partitions is exactly what the scheme is for; 8 over 4 is an even split; there is no power-of-ten rule.",
+      "ref": "unit-2-partitioning.md#7-rebalancing-request-routing-and-operating-a-partitioned-system"
+    },
+    {
+      "id": "A4-053",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "partitioning",
+        "sharding"
+      ],
+      "difficulty": 2,
+      "prompt": "One general-ledger row receives 1,500 updates/s and its partition is saturated while 26 others are idle. The team doubles the number of partitions and the problem persists. Why?",
+      "choices": [
+        "Doubling partitions halves the key's load only if the replication factor is also doubled at the same time",
+        "Hash partitioning pins the hottest key to the first partition by design so that lookups for it stay fast",
+        "Skew from one key does not depend on the partition count: the key still lives on exactly one partition and the average load shrinks",
+        "The new partitions have not been populated yet; after the next rebalance completes the load will spread out evenly"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A key maps to one partition by definition, so more partitions cannot divide its load; the ratio of the hot partition to the average actually gets worse. The rebalance moves whole partitions, not a key's traffic. Replication factor affects reads, not the single leader that takes the writes. Hashing does not 'pin' hot keys anywhere special. Fixes must change the key's structure: cache, split, coalesce or change the model.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#8-skew-hot-keys-and-celebrity-problems"
+    },
+    {
+      "id": "A4-054",
+      "type": "numeric",
+      "tags": [
+        "hot-key",
+        "concurrency",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Each update to a single hot row holds its row lock for about 4 ms (including waiting for the commit's fsync). What is the maximum sustained update rate for that row, in updates per second?",
+      "value": 250,
+      "tolerance": 0.1,
+      "unit": "ops/s",
+      "explanation": "Lock holders serialise, so the ceiling is 1 / 0.004 s = 250 updates/s regardless of how many cores or partitions exist. If 1,000 updates/s arrive, the queue grows without bound: the fix is to remove the shared row (append-only entries), split it, or batch updates.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#8-skew-hot-keys-and-celebrity-problems"
+    },
+    {
+      "id": "A4-055",
+      "type": "numeric",
+      "tags": [
+        "hot-key",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "20 equal partitions. One key receives 30% of all traffic and the rest is spread uniformly over the other keys. How many times the average partition load does the hot key's partition carry? Answer as a multiple (e.g. 2.5).",
+      "value": 6.7,
+      "tolerance": 0.1,
+      "unit": "x",
+      "explanation": "The hot partition gets 30% + 70%/20 = 33.5% of traffic versus an average of 5%: 33.5 / 5 ≈ 6.7×. With 40 partitions the same key gives (30% + 1.75%) / 2.5% ≈ 12.7×: skew from a single key worsens as partitions are added.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#8-skew-hot-keys-and-celebrity-problems"
+    },
+    {
+      "id": "A4-056",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "data-model"
+      ],
+      "difficulty": 3,
+      "prompt": "Every ACH posting updates the credit union's settlement GL balance with UPDATE gl SET balance = balance + ?. At 900 postings/s the row is a bottleneck. Which change removes the bottleneck most fundamentally?",
+      "choices": [
+        "Cache the GL balance in front of the database and write through to the database on every single update",
+        "Add more CPU cores to the database server so that the row lock is acquired and released faster on each update, which shortens the serial queue on the row",
+        "Switch the table to a hash-partitioned layout so that the one row is spread across several partitions evenly",
+        "Insert an immutable ledger entry per posting (no shared row is updated) and derive or periodically roll up the balance"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Inserting separate rows removes the contention entirely: inserts do not serialise on one lock, and the balance becomes an aggregate. More cores do not shorten the serial lock queue; a write-through cache still funnels every update to the same row; partitioning cannot split one row across partitions.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#8-skew-hot-keys-and-celebrity-problems"
+    },
+    {
+      "id": "A4-057",
+      "type": "multi",
+      "tags": [
+        "hot-key",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "A counter (e.g. likes on a promotion) is write-hot: 3,000 increments/s on one key. Select ALL remedies that address the write bottleneck.",
+      "choices": [
+        "Put a read cache in front of the counter",
+        "Split the counter into F sub-counters, write to a random one, and sum them on read",
+        "Add more read replicas for the partition that holds the counter",
+        "Append one row per event and compute the count by aggregation or roll-up",
+        "Aggregate increments in memory or on a queue and apply one combined update per second"
+      ],
+      "answer": [
+        1,
+        3,
+        4
+      ],
+      "explanation": "Splitting, batching and append-only events reduce the number of updates to any single row. Caches and read replicas help reads only; the problem here is serialised writes on one key.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#8-skew-hot-keys-and-celebrity-problems"
+    },
+    {
+      "id": "A4-058",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "detection"
+      ],
+      "difficulty": 3,
+      "prompt": "A router splits keys flagged as hot into 8 sub-keys for writes. A read of a key that became hot ten minutes ago returns a total that is too low. What did the read miss?",
+      "choices": [
+        "The replicas of each sub-key, which hold the newest values that the leaders have not yet had time to publish",
+        "The routing table, which has to be fetched from the coordinator again on every read of a split key",
+        "Writes made before the key was classified hot live under the plain key; reads must include it as well as the sub-keys until it is folded in",
+        "The sub-keys that have not yet been written to, because sub-keys are created lazily and reads must wait for them"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Before the split, all history was written under the unsplit key, so the correct set of keys to read for a newly hot key is the plain key plus the sub-keys. Lazily created sub-keys that do not exist contribute nothing, replicas hold the same data as their leaders, and the routing table is not the issue here.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#8-skew-hot-keys-and-celebrity-problems"
+    },
+    {
+      "id": "A4-059",
+      "type": "numeric",
+      "tags": [
+        "hot-key",
+        "detection",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A Space-Saving summary has k = 200 counters and has observed N = 50,000 events. Any key whose true frequency exceeds what value is guaranteed to be tracked?",
+      "value": 250,
+      "tolerance": 0.05,
+      "unit": "events",
+      "explanation": "Space-Saving's guarantee: every key with true frequency greater than N/k is monitored. 50,000 / 200 = 250 events (0.5% of traffic). Keys below this may or may not be tracked, and any reported count can overestimate by at most its recorded error.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#8-skew-hot-keys-and-celebrity-problems"
+    },
+    {
+      "id": "A4-060",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "detection"
+      ],
+      "difficulty": 3,
+      "prompt": "A hot-key detector reports a key as hot when its Space-Saving Count exceeds 5% of traffic. In a stream of mostly distinct keys it flags many cold keys. How should the detector decide instead?",
+      "choices": [
+        "Use only the Err value, since it measures how often the key has been evicted and re-admitted to the summary",
+        "Use Count × 2 against the threshold, since the Space-Saving summary under-counts keys that were evicted earlier",
+        "Use the guaranteed lower bound Count − Err against the threshold (plus a minimum count), since a newcomer inherits an evicted count as error",
+        "Increase the number of counters until the reported Count equals the true frequency of every single key"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "In a crowded summary, new keys inherit the minimum counter's count, so Count is inflated by evidence that belongs to other keys; Count − Err is a guaranteed lower bound on the key's own frequency and avoids false positives. Space-Saving over-counts (never under-counts). Err alone says nothing about the key's own traffic, and making Count exact requires one counter per distinct key, which defeats the point.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#8-skew-hot-keys-and-celebrity-problems"
+    },
+    {
+      "id": "A4-061",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "partitioning"
+      ],
+      "difficulty": 2,
+      "prompt": "Event rows are keyed by an auto-incrementing id in a range-partitioned table, and one partition takes all inserts. Which change fixes the write distribution while keeping per-entity ordering?",
+      "choices": [
+        "Increase the auto-increment step so that consecutive ids are further apart and land in different ranges of the table",
+        "Split the table into more range partitions of smaller size, so that each partition receives a smaller share of inserts over its lifetime",
+        "Add a read replica for the newest partition, so that the inserts to it can be served by more than one machine",
+        "Hash or bucket the leading part of the key (for example by entity id) and keep the id or timestamp as the ordering part"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A leading hash/bucket spreads consecutive inserts across partitions while an ordering suffix retains order within an entity. Larger steps and smaller ranges still send every new id to the highest range, and a read replica does nothing for write distribution.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#8-skew-hot-keys-and-celebrity-problems"
+    },
+    {
+      "id": "A4-062",
+      "type": "numeric",
+      "tags": [
+        "secondary-index",
+        "tail-latency",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A search fans out to 50 partitions in parallel and waits for all. Each partition responds slower than its own p99 on 1% of requests, independently. What percentage of searches are at least as slow as that p99? Answer as a percentage.",
+      "value": 39.5,
+      "tolerance": 0.1,
+      "unit": "%",
+      "explanation": "P(at least one slow) = 1 − 0.99^50 ≈ 39.5%. At 100 partitions it is 63% (the NUMBERS.md figure), at 27 about 24%. The query's tail latency is the tail of the slowest participant, which is why fan-out is expensive.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#9-secondary-indexes-across-partitions-and-cross-partition-queries"
+    },
+    {
+      "id": "A4-063",
+      "type": "single",
+      "tags": [
+        "secondary-index",
+        "sharding",
+        "tail-latency"
+      ],
+      "difficulty": 2,
+      "prompt": "Member search by last name runs against 27 shards; p99 is 230 ms and the cluster is busy. The team adds 27 more shards, expecting the search to get faster. What happens?",
+      "choices": [
+        "Each search needs 54 sub-queries, so tail latency and cost per search rise; scatter-gather throughput does not scale with shards",
+        "Search latency halves, because each shard now holds half as much data and therefore scans half as many index entries for every query it receives",
+        "Latency improves, but only if the index is rebuilt as a global index, which the database does automatically",
+        "Nothing changes, because queries are routed directly to the one shard that holds the name being searched for"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A query without the partition key touches every partition: the work per query grows with the shard count and the response time is the maximum over more participants. Smaller shards make each sub-query slightly cheaper, but not enough to offset the extra fan-out and tail exposure. The query is not routed (it has no partition key). Indexes do not convert themselves.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#9-secondary-indexes-across-partitions-and-cross-partition-queries"
+    },
+    {
+      "id": "A4-064",
+      "type": "multi",
+      "tags": [
+        "secondary-index",
+        "partitioning"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL true statements about local (document-partitioned) secondary indexes.",
+      "choices": [
+        "The index entries live on a different partition from their rows, which makes writes cross-partition",
+        "A read on the indexed attribute goes to a single index partition chosen by the attribute's value",
+        "A read on the indexed attribute must query every partition unless the query also constrains the partition key",
+        "Aggregated query capacity does not grow in proportion to the number of partitions when every query touches all of them",
+        "A write updates the index and the row on the same partition, so they stay consistent"
+      ],
+      "answer": [
+        2,
+        3,
+        4
+      ],
+      "explanation": "A local index lives with its rows: cheap, consistent writes, and expensive scatter-gather reads. The last two descriptions are properties of a global (term-partitioned) index.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#9-secondary-indexes-across-partitions-and-cross-partition-queries"
+    },
+    {
+      "id": "A4-065",
+      "type": "single",
+      "tags": [
+        "secondary-index",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "A global index on last_name is maintained asynchronously from change events. Staff report that a member who joined 4 seconds ago cannot be found, and that renamed members still show under the old name. Which combination of measures is best?",
+      "choices": [
+        "Disable the index entirely and scan every partition for each search so that no stale entries can ever appear",
+        "Version-stamp and de-duplicate index updates, re-check the predicate on the base row on read, set a staleness SLO and monitor lag, keep a rebuild job",
+        "Cache the search results for ten minutes so that the staleness of the index is hidden from the staff who search",
+        "Make the index update part of the member-creation request itself and retry the request until the update succeeds"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "An asynchronous global index is eventually consistent by design: treat it as a hint (verify against the base row), make updates idempotent and ordered by version, monitor lag, and keep a repair path. Doing the update inside the request either makes it synchronous across partitions (a distributed transaction) or fails open. Scanning everything throws away the index. Caching for ten minutes makes staleness worse.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#9-secondary-indexes-across-partitions-and-cross-partition-queries"
+    },
+    {
+      "id": "A4-066",
+      "type": "single",
+      "tags": [
+        "secondary-index",
+        "sharding"
+      ],
+      "difficulty": 2,
+      "prompt": "A support tool searches members by name for one credit union at a time. The credit union's data lives on 2 of 27 partitions. How should the query behave?",
+      "choices": [
+        "Build a global index across all tenants before allowing any search, so every query goes to one index partition",
+        "Broadcast the query to all 27 partitions so that the code path is uniform for every tenant and every search",
+        "Query one randomly chosen partition and return its results, since any partition can answer for any tenant",
+        "Use the tenant → partition mapping to query only those 2 partitions with a local index, rather than all 27"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Bounding the fan-out with the partition prefix (tenant) is the cheapest way to reduce the tail and cost of scatter-gather: two sub-queries instead of 27. Broadcasting wastes capacity and adds tail exposure; a random partition returns incomplete results; a platform-wide global index is unnecessary for tenant-scoped queries.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#9-secondary-indexes-across-partitions-and-cross-partition-queries"
+    },
+    {
+      "id": "A4-067",
+      "type": "single",
+      "tags": [
+        "sharding",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "A transfer debits an account on partition 3 and credits another on partition 19. Which statement about using two-phase commit is correct?",
+      "choices": [
+        "It removes the need for idempotency keys on retries, because the coordinator remembers every transfer it has seen",
+        "It guarantees that the two writes become visible at exactly the same instant on every replica of both partitions",
+        "It is free of coordination cost because the two partitions commit independently as soon as they are ready",
+        "It gives atomicity across partitions but adds round trips and can block participants holding locks if the coordinator fails after prepare"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "2PC makes the two writes atomic (all commit or none) at the cost of extra latency and the blocking window between prepare and commit. It does not make commits simultaneous, and clients that retry after a timeout still need idempotency. Common alternatives are co-locating the data, a saga, or an immutable transfer record posted by an idempotent consumer (A6).",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#9-secondary-indexes-across-partitions-and-cross-partition-queries"
+    },
+    {
+      "id": "A4-068",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "capacity",
+        "sharding"
+      ],
+      "difficulty": 2,
+      "prompt": "A transactions store holds 12 TB including indexes. A partition should hold at most 400 GB and be kept at most 75% full. Write and read rates are well within one primary's capacity. How many partitions are needed? Answer as a number of partitions (use 1 TB = 1,024 GB).",
+      "value": 41,
+      "tolerance": 0.1,
+      "unit": "partitions",
+      "explanation": "Usable per partition = 400 × 0.75 = 300 GB. 12 × 1,024 / 300 = 40.96 → 41 partitions. Storage is the deciding constraint (partitions = max of storage-, write- and read-bound), so this is partitioning for operability, not throughput.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#10-combining-replication-and-partitioning-sizing-failure-domains-and-a-cheat-sheet"
+    },
+    {
+      "id": "A4-069",
+      "type": "numeric",
+      "tags": [
+        "availability",
+        "capacity",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A cluster places one replica of every partition in each of three AZs. One AZ is lost at peak. What percentage of the cluster's read capacity remains? Answer as a percentage.",
+      "value": 67,
+      "tolerance": 0.05,
+      "unit": "%",
+      "explanation": "Two of three replica sets remain: 2/3 ≈ 67%. To survive an AZ loss at peak the cluster must be provisioned so that peak load is at most about 2/3 of the usable-capacity target, i.e. roughly 45% or less steady-state at peak, before counting re-replication traffic.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#10-combining-replication-and-partitioning-sizing-failure-domains-and-a-cheat-sheet"
+    },
+    {
+      "id": "A4-070",
+      "type": "single",
+      "tags": [
+        "sharding",
+        "failover",
+        "availability"
+      ],
+      "difficulty": 2,
+      "prompt": "A design places the leaders of all 27 partitions in AZ a, with followers in AZ b and AZ c. What is the main risk?",
+      "choices": [
+        "Followers in other AZs cannot replicate from a leader in a remote zone because cross-AZ latency is too high",
+        "AZ a will run out of disk because it stores the leaders' data and more of the data than the other zones",
+        "Losing AZ a stops writes everywhere until all 27 failovers finish; spread leaders so an AZ loss affects only a third of the partitions",
+        "Reads become impossible because followers cannot be queried while the leader of their partition is up"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Leader placement determines which failures stop writes. With all leaders in one AZ, that AZ's failure is a total write outage until every partition fails over. Spreading leaders makes the blast radius a third of the partitions and the failovers parallel. Cross-AZ replication works (at a latency cost); storage is similar across zones; followers can serve reads.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#10-combining-replication-and-partitioning-sizing-failure-domains-and-a-cheat-sheet"
+    },
+    {
+      "id": "A4-071",
+      "type": "single",
+      "tags": [
+        "capacity",
+        "rebalancing",
+        "availability"
+      ],
+      "difficulty": 3,
+      "prompt": "A cluster runs with disks at 85% full. A node fails; re-replication starts immediately to restore the replication factor and the surviving disks fill to 100%, turning replicas read-only. What planning rule was violated?",
+      "choices": [
+        "Keep at least about 30% free disk for rebalancing and re-replication, and delay and throttle re-replication so it cannot eat the headroom",
+        "Keep the disks as full as possible, so that there is less data to move per node whenever a node is lost",
+        "Prefer synchronous replication, which prevents nodes from filling up because followers apply writes immediately",
+        "Use a replication factor of 5 so that no node ever needs to be re-replicated after a single node has failed"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Failure plus re-replication multiplies disk and IO demand exactly when capacity is reduced, so headroom (and throttled, delayed repair) is a capacity requirement, not an optimisation. RF 5 raises storage needs. Full disks make the problem worse. Synchronous replication affects acknowledgement, not disk usage.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#10-combining-replication-and-partitioning-sizing-failure-domains-and-a-cheat-sheet"
+    },
+    {
+      "id": "A4-072",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "sharding",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "For a banking transactions store with 12 million new rows/day, five years of history and peak writes of 1,400 TPS, which constraint usually decides the number of partitions?",
+      "choices": [
+        "The number of credit unions, because each of them needs its own dedicated partition for isolation reasons",
+        "Storage and operability (backup, restore and migration time), because write TPS is well within one primary's capacity",
+        "Read QPS, because each replica can serve only about 100 reads per second before queries start to queue",
+        "Write TPS, because a single primary can handle only about 100 writes per second before it saturates its log and starts queueing commits"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "At 1,400 TPS one primary is comfortable (≈ 1k–10k write TPS in NUMBERS.md); about 22 B rows (≈ 9 TB) is what forces partitioning, because backups, replica builds and migrations become impractical. Reads are served by replicas and caches at tens of thousands of QPS each. Per-tenant partitions are a placement choice, not a sizing constraint.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#10-combining-replication-and-partitioning-sizing-failure-domains-and-a-cheat-sheet"
+    },
+    {
+      "id": "A4-073",
+      "type": "multi",
+      "tags": [
+        "sharding",
+        "replication",
+        "availability"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL placement rules for a sharded, replicated store that survives an AZ loss.",
+      "choices": [
+        "Put the partition map on the same nodes as the data with no separate replication",
+        "Spread partition leaders evenly across nodes and AZs",
+        "No two replicas of the same partition share an AZ (or rack or host)",
+        "Place all replicas of a partition in one AZ to minimise replication latency",
+        "Re-replication and rebalancing must preserve the failure-domain constraints"
+      ],
+      "answer": [
+        1,
+        2,
+        4
+      ],
+      "explanation": "Replica spread across failure domains is what makes AZ loss survivable; leader spread limits the blast radius of one failure; maintenance operations must not undo the placement. Co-locating all replicas of a partition removes any benefit of replication against zone failure, and an unreplicated partition map is a new single point of failure.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#10-combining-replication-and-partitioning-sizing-failure-domains-and-a-cheat-sheet"
+    },
+    {
+      "id": "A4-074",
+      "type": "single",
+      "tags": [
+        "sharding",
+        "hot-key",
+        "capacity"
+      ],
+      "difficulty": 3,
+      "prompt": "The largest tenant holds 50% of the data and 60% of the writes and is placed on partitions proportional to its data. Compared with the average partition, how loaded are its write paths, and what does this suggest?",
+      "choices": [
+        "About 0.8× the average, because large tenants have more partitions and therefore more headroom per partition",
+        "Impossible to say without knowing the replication factor, because that determines how writes are distributed among the replicas of each partition",
+        "About 1.2× the average (60% of writes over 50% of partitions); fine here, but 5% of data with 30% of writes would be badly skewed",
+        "Exactly the average, because hashing within the tenant spreads the load uniformly across all partitions of the cluster"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Load per partition = share of writes ÷ share of partitions = 60% / 50% = 1.2×. Hashing spreads a tenant's load evenly across its own partitions, not across the cluster, so tenant-level skew in the (writes ÷ data) ratio shows up as partition skew. Replication factor does not change write distribution across partitions.",
+      "ref": "unit-3-hot-keys-indexes-sizing.md#10-combining-replication-and-partitioning-sizing-failure-domains-and-a-cheat-sheet"
+    }
+  ]
+}

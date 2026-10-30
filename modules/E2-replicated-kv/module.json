@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "id": "E2",
+  "slug": "replicated-kv",
+  "title": "Build: replicated KV store",
+  "track": "E",
+  "status": "written",
+  "core": true,
+  "summary": "Leader/follower replication over HTTP between real processes: a checksummed WAL, pull replication, async vs semi-sync, lag measurement, lease-based failover with epochs as fencing tokens, divergent-log truncation and read-your-writes tokens, all tested by killing, partitioning and freezing processes.",
+  "hours": {
+    "core": 20,
+    "stretch": 4,
+    "total": 24
+  },
+  "prerequisites": [
+    "A4",
+    "A5",
+    "B0"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/E2-replicated-kv",
+    "readme": "modules/E2-replicated-kv/README.md",
+    "quiz": "modules/E2-replicated-kv/quiz.json",
+    "design_exercise": "modules/E2-replicated-kv/design-exercise.md",
+    "teachback": "modules/E2-replicated-kv/teachback.md",
+    "lab": "labs/e2",
+    "solution": "solutions/e2"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "A durable single node: the write-ahead log",
+      "file": "modules/E2-replicated-kv/unit-1-durable-node.md",
+      "hours": {
+        "core": 4.5,
+        "stretch": 0.5
+      },
+      "labs": [
+        "wal",
+        "rkv"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Leader/follower replication and lag",
+      "file": "modules/E2-replicated-kv/unit-2-replication-lag.md",
+      "hours": {
+        "core": 5.5,
+        "stretch": 0.5
+      },
+      "labs": [
+        "rkv"
+      ]
+    },
+    {
+      "n": 3,
+      "title": "Failure injection, failover and fencing",
+      "file": "modules/E2-replicated-kv/unit-3-failover-fencing.md",
+      "hours": {
+        "core": 6,
+        "stretch": 1
+      },
+      "labs": [
+        "rkv"
+      ]
+    },
+    {
+      "n": 4,
+      "title": "Read-your-writes and the design review",
+      "file": "modules/E2-replicated-kv/unit-4-read-your-writes.md",
+      "hours": {
+        "core": 4,
+        "stretch": 2
+      },
+      "labs": [
+        "rkv"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "wal",
+      "title": "Write-ahead log: CRC-32C framed records, fsync before ack, torn-tail and corruption recovery, contiguous indexes, durable truncation",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "rkv",
+      "title": "Replicated KV as real processes: node (leader/follower, pull replication, async/semi-sync, lag, read-your-writes) and coordinator (leases, failover, epochs, demotion), tested with SIGKILL, SIGSTOP, partitions and torn WALs",
+      "unit": 1,
+      "core": true
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Implement a write-ahead log with checksummed, length-prefixed records and explain exactly which crash states recovery must handle (torn tail, corrupt record, missing directory entry) and why an ack must come after fsync.",
+      "core": true
+    },
+    {
+      "text": "Build pull-based log shipping where the follower's fetch position is its acknowledgement, and explain why pull beats push for catch-up, backpressure and failure handling.",
+      "core": true
+    },
+    {
+      "text": "Choose between async and semi-sync replication for a requirement by stating the RPO, the write latency and the availability cost of each, and demonstrate the acknowledged-write loss of async on a real crash.",
+      "core": true
+    },
+    {
+      "text": "Measure replication lag in records and seconds from the leader's side, and explain why a follower's self-reported lag lies during a partition.",
+      "core": true
+    },
+    {
+      "text": "Design lease-based failure detection and failover: detection time, the wait for the old lease, choosing the most up-to-date follower, and the clock assumption leases depend on.",
+      "core": true
+    },
+    {
+      "text": "Use epochs as fencing tokens so that a returning or paused old leader can neither acknowledge writes nor corrupt followers, and implement epoch-based log matching that truncates a divergent suffix.",
+      "core": true
+    },
+    {
+      "text": "Provide read-your-writes on followers with a version token and a bounded wait-then-redirect, and explain what it does not give you (monotonic reads across replicas, linearizability).",
+      "core": true
+    },
+    {
+      "text": "Write a design rationale that predicts the outcome of each failure-injection scenario, then compare the predictions with what the tests and break-it runs observed.",
+      "core": true
+    },
+    {
+      "text": "Explain why a single sentinel is a single point of failure for failover and how a majority-based design (Raft, a Sentinel quorum, a consensus-backed lease) removes it, and estimate the cost of group commit and pipelined fetches.",
+      "core": false
+    }
+  ]
+}

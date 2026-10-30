@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "id": "B2",
+  "slug": "patterns",
+  "title": "Patterns that matter",
+  "track": "B",
+  "status": "written",
+  "core": true,
+  "summary": "Strategy, observer, state, factory/registry, adapter and decorator: the pain each solves, the idiomatic Go form, how each breaks, and when a pattern is over-engineering.",
+  "hours": {
+    "core": 5,
+    "stretch": 1,
+    "total": 6
+  },
+  "prerequisites": [
+    "B1"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/B2-patterns",
+    "readme": "modules/B2-patterns/README.md",
+    "quiz": "modules/B2-patterns/quiz.json",
+    "design_exercise": "modules/B2-patterns/design-exercise.md",
+    "teachback": "modules/B2-patterns/teachback.md",
+    "lab": "labs/b2",
+    "solution": "solutions/b2"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Patterns that matter",
+      "file": "modules/B2-patterns/unit-1-patterns.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "strategy",
+        "observer",
+        "state",
+        "factory",
+        "adapter",
+        "decorator"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "strategy",
+      "title": "Fee engine: func-type strategies, marginal tiers, runtime registration, strategy called outside the lock",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "observer",
+      "title": "Event bus: re-entrant sync callbacks, panic containment, channel subscriptions that never block or double-close",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "state",
+      "title": "Transfer lifecycle: transition table with guards, duplicate vs illegal events, atomic Apply",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "factory",
+      "title": "Provider registry: fail-closed lookup, constructors outside the lock, startup Build that reports every bad tenant",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "adapter",
+      "title": "Two vendor APIs behind one port: integer money, error taxonomy, fail-closed mapping, shared contract suite",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "decorator",
+      "title": "Vendor client decorators: Chain, retry, circuit breaker (single probe), timeout, logging, order tests",
+      "unit": 1,
+      "core": true
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Choose between a switch, a function parameter, a map of funcs and an interface for varying behaviour, and say when the answer flips.",
+      "core": true
+    },
+    {
+      "text": "Implement a strategy-based fee engine in integer minor units with correct rounding, runtime replacement and a call path that holds no lock.",
+      "core": true
+    },
+    {
+      "text": "Implement an observer bus with synchronous callbacks and channel subscriptions that survives re-entrant, slow, panicking and racing subscribers, and explain when an in-process observer is the wrong tool for audit.",
+      "core": true
+    },
+    {
+      "text": "Model a transfer lifecycle as a transition table with guards, distinguish duplicate from illegal events, and test it exhaustively and under concurrency.",
+      "core": true
+    },
+    {
+      "text": "Build a provider registry that fails closed, validates every tenant at startup, and explain init() order and forgotten-import bugs.",
+      "core": true
+    },
+    {
+      "text": "Write vendor adapters behind one domain port with a classified error taxonomy that keeps the cause, fail-closed mapping and a shared contract test suite.",
+      "core": true
+    },
+    {
+      "text": "Compose retry, circuit-breaker, timeout and logging decorators and predict the effect of their order, including retry amplification.",
+      "core": true
+    },
+    {
+      "text": "Judge when a pattern is over-engineering, and narrate a minimal design plus a mid-way requirement change in an LLD round without reciting pattern names.",
+      "core": true
+    },
+    {
+      "text": "Port the registry to generics and build net/http middleware and RoundTripper chains.",
+      "core": false
+    }
+  ]
+}

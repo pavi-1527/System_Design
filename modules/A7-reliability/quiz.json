@@ -1,0 +1,1220 @@
+{
+  "module": "A7",
+  "title": "Reliability: timeouts, retries, circuit breakers, rate limiting, bulkheads, multi-region",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "A7-001",
+      "type": "single",
+      "tags": [
+        "timeouts",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A member app waits 5 s. The API gateway route timeout is 60 s, the transfers service calls the adapter with no timeout, and the adapter's timeout to the core is 30 s. The core hangs and 400 req/s keep arriving. Which single change does the most to limit the damage?",
+      "choices": [
+        "Raise the client timeout to 30 s so members stop retrying",
+        "Propagate the caller's deadline and derive every hop's timeout from the time remaining",
+        "Grow the adapter's connection pool until it can hold every stalled call",
+        "Add a second retry at the gateway so each request gets two chances"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Propagating the deadline makes every hop stop when the member does, so in-flight work is bounded by arrival rate x a short derived timeout (hundreds of calls) instead of 400 x 30 s = 12,000. A longer client timeout keeps each stalled call alive even longer and only raises in-flight work. A bigger pool just hosts more useless work until the next resource (descriptors, the core's own limit) runs out, and it does nothing for callers that have left. Another retry multiplies the load on a core that is already hung.",
+      "ref": "unit-1-timeouts-retries.md#1-timeouts-and-deadline-budgets"
+    },
+    {
+      "id": "A7-002",
+      "type": "numeric",
+      "tags": [
+        "timeouts",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A dependency hangs, so every call to it waits for the adapter's 8 s timeout before failing. 250 requests/s keep arriving. At steady state, how many calls are in flight?",
+      "value": 2000,
+      "tolerance": 0.1,
+      "unit": "calls",
+      "explanation": "Little's law: in flight = arrival rate x time in system = 250 req/s x 8 s = 2,000. This is why a timeout is a capacity control as well as a correctness control: halving the timeout halves the number of stuck calls, and a 30 s timeout at the same rate would hold 7,500.",
+      "ref": "unit-1-timeouts-retries.md#1-timeouts-and-deadline-budgets"
+    },
+    {
+      "id": "A7-003",
+      "type": "single",
+      "tags": [
+        "timeouts",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A service receives a request with 800 ms left on its deadline and makes three sequential calls, each configured with a 1 s timeout. Each call actually takes 300 ms. What is wrong?",
+      "choices": [
+        "Nothing: every call finished inside its own timeout",
+        "The timeouts are too long; setting each to exactly 300 ms would fix it",
+        "The per-call timeouts add up to 3 s, more than the budget; each call's timeout must come from the time remaining, and the last call should be skipped or degraded",
+        "The service should retry the third call because it will probably time out"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "No timeout ever fires, yet the handler needs about 900 ms on an 800 ms deadline, so the caller has gone before the last call returns. Fixed timeouts cannot protect a budget; only the remaining time can. So 'nothing is wrong' misses that the caller left, setting each timeout to 300 ms would be a coincidence that breaks as soon as latency changes, and retrying the third call adds load for a response nobody will read.",
+      "ref": "unit-1-timeouts-retries.md#1-timeouts-and-deadline-budgets"
+    },
+    {
+      "id": "A7-004",
+      "type": "single",
+      "tags": [
+        "timeouts",
+        "idempotency"
+      ],
+      "difficulty": 3,
+      "prompt": "The core's latency is p50 300 ms, p99 1.2 s, p99.9 8 s. You make two calls: GET balance (idempotent, a retry is cheap) and POST transfer (carries an idempotency key; an ambiguous outcome costs a reconciliation). Which timeouts are the most defensible, assuming the member's deadline allows them?",
+      "choices": [
+        "Both at 300 ms, because short timeouts always protect the pool",
+        "GET about 1.5 s with a retry; POST just above p99.9 (about 9 s) with the key",
+        "Both at 30 s, the safest value for the core",
+        "GET about 9 s and POST about 1.5 s, since writes are more important to fail fast"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A false timeout costs little for a GET (retry) and a lot for a POST (an ambiguous outcome), so the write gets the higher percentile and the key, and the read the lower. 300 ms is the median, so it would kill about half of all healthy calls. 30 s lets a hung core hold a slot for 30 s per request, exhausting pools. The last option inverts the reasoning: a false timeout on the transfer is the expensive one.",
+      "ref": "unit-1-timeouts-retries.md#1-timeouts-and-deadline-budgets"
+    },
+    {
+      "id": "A7-005",
+      "type": "multi",
+      "tags": [
+        "timeouts",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL statements about deadline propagation that are true.",
+      "choices": [
+        "A deadline is an absolute time, so each hop can derive its own timeout from what is left",
+        "Three services that each use a fixed 2 s timeout can spend up to 6 s on a request whose first caller gave up after 2 s",
+        "A service with 40 ms left, calling a dependency whose p50 is 120 ms, should still make the call because it might be fast",
+        "gRPC carries the remaining time to the next service in the grpc-timeout header"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "True: absolute deadlines let every hop compute what is left; fixed per-hop timeouts restart at every hop and add up; gRPC propagates the remaining time. False: a call that cannot finish within the remaining time is pure load, so a budget-aware service fails fast, serves a cached value or skips the call.",
+      "ref": "unit-1-timeouts-retries.md#1-timeouts-and-deadline-budgets"
+    },
+    {
+      "id": "A7-006",
+      "type": "single",
+      "tags": [
+        "timeouts",
+        "circuit-breaker"
+      ],
+      "difficulty": 1,
+      "prompt": "Why must calls have timeouts before a circuit breaker can protect you from a hung vendor?",
+      "choices": [
+        "Without timeouts a hung call never completes, so there are no failures for the breaker to count",
+        "Breakers only work with HTTP/2",
+        "Timeouts make calls faster",
+        "Breakers need timeouts to compute the retry delay"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A breaker learns from outcomes. A call with no timeout against a hung vendor never produces an outcome, so nothing is recorded as a failure and the breaker never opens while the pool fills up with stuck calls. Breakers are protocol-independent, timeouts do not make healthy calls faster, and the retry delay comes from the backoff policy, not from the breaker.",
+      "ref": "unit-1-timeouts-retries.md#1-timeouts-and-deadline-budgets"
+    },
+    {
+      "id": "A7-007",
+      "type": "single",
+      "tags": [
+        "retries",
+        "idempotency"
+      ],
+      "difficulty": 1,
+      "prompt": "Which failure is safe to retry for a POST /v1/transfers that carries NO idempotency key?",
+      "choices": [
+        "A read timeout after the request was sent",
+        "A 502 from the gateway",
+        "Connection refused while dialling the core",
+        "A connection reset after the request body was written"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Only a failure that proves nothing reached the server is safe without a key. A refused connection was never established. A read timeout, a gateway 502 and a reset after the body was written are all ambiguous: the server may have processed the request, so a blind retry can post the transfer twice.",
+      "ref": "unit-1-timeouts-retries.md#2-retries-backoff-jitter-and-when-retrying-is-safe"
+    },
+    {
+      "id": "A7-008",
+      "type": "numeric",
+      "tags": [
+        "retries",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Each attempt against a dependency fails independently with probability 0.5, and the client allows up to 2 retries. On average, how many attempts does one request make?",
+      "value": 1.75,
+      "tolerance": 0.05,
+      "unit": "attempts",
+      "explanation": "Expected attempts = 1 + p + p^2 = 1 + 0.5 + 0.25 = 1.75: the first attempt always happens, the second happens when the first failed (0.5), the third when the first two failed (0.25). At p = 1 it is 3, at p = 0.05 about 1.05: retries cost most when the dependency can least afford them.",
+      "ref": "unit-1-timeouts-retries.md#2-retries-backoff-jitter-and-when-retrying-is-safe"
+    },
+    {
+      "id": "A7-009",
+      "type": "numeric",
+      "tags": [
+        "retries",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A user action passes through 4 layers and every layer retries up to 2 times. The bottom dependency always fails. How many calls reach it for one user action?",
+      "value": 81,
+      "tolerance": 0.05,
+      "unit": "calls",
+      "explanation": "Each layer makes r + 1 = 3 attempts, and each attempt of a layer triggers a full sequence in the layer below: 3^4 = 81. With one shared 10% budget the measured figure for a 4-layer stack was about 1.4 calls per action.",
+      "ref": "unit-1-timeouts-retries.md#3-retry-budgets-amplification-and-metastable-failures"
+    },
+    {
+      "id": "A7-010",
+      "type": "single",
+      "tags": [
+        "retries"
+      ],
+      "difficulty": 2,
+      "prompt": "100 workers retry a hot-row conflict with exponential backoff and no jitter (the row serves one success per 10 ms slot). What does adding full jitter change?",
+      "choices": [
+        "It makes every individual retry faster",
+        "It spreads the losers across time so far fewer collide each round: about 730 calls in total instead of 5,050 in the reference experiment",
+        "It reduces the number of workers that need to retry",
+        "It turns the backoff from exponential into linear"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Without jitter all losers retry at the same instants, so each round has one winner and the rest collide again: 100 + 99 + ... + 1 = 5,050 calls. Random waits at every step spread the retries so each slot has about one caller. Jitter does not speed up an individual retry (full jitter's mean wait is half the cap), does not change who needs to retry, and does not change the growth of the cap.",
+      "ref": "unit-1-timeouts-retries.md#2-retries-backoff-jitter-and-when-retrying-is-safe"
+    },
+    {
+      "id": "A7-011",
+      "type": "single",
+      "tags": [
+        "retries"
+      ],
+      "difficulty": 2,
+      "prompt": "Which jitter strategy randomises the wait but never waits less than half of the exponential cap?",
+      "choices": [
+        "Full jitter",
+        "Equal jitter",
+        "Decorrelated jitter",
+        "No jitter"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Equal jitter waits cap/2 + U(0, cap/2). Full jitter waits U(0, cap), so it can retry almost at once. Decorrelated jitter derives each wait from the previous one (min(max, U(base, 3 x prev))) and has no half-cap floor. No jitter waits exactly the cap and is not random at all, which is what synchronises clients.",
+      "ref": "unit-1-timeouts-retries.md#2-retries-backoff-jitter-and-when-retrying-is-safe"
+    },
+    {
+      "id": "A7-012",
+      "type": "single",
+      "tags": [
+        "retries",
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "A vendor returns 503 with Retry-After: 30. Your client's own backoff would wait 400 ms, and the caller's deadline has 10 s left. What should the client do?",
+      "choices": [
+        "Wait 400 ms and retry",
+        "Retry immediately: Retry-After is only advice",
+        "Give up now with the last error: Retry-After is a floor and 30 s does not fit in the deadline",
+        "Sleep 30 s anyway so the vendor sees a polite client"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Retry-After is a minimum wait, so retrying after 400 ms or immediately ignores the vendor's instruction and earns another rejection. Sleeping 30 s inside a 10 s deadline wastes the caller's time and the retry-budget token, since the caller will have gone before the attempt. The right move is to fail fast (or fall back) because the wait cannot fit.",
+      "ref": "unit-1-timeouts-retries.md#2-retries-backoff-jitter-and-when-retrying-is-safe"
+    },
+    {
+      "id": "A7-013",
+      "type": "multi",
+      "tags": [
+        "retries"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL errors a retry classifier should treat as permanent (do not retry).",
+      "choices": [
+        "400 invalid_account on a transfer",
+        "503 with Retry-After on an idempotent GET",
+        "422 from request validation",
+        "Connection refused when dialling the vendor"
+      ],
+      "answer": [
+        0,
+        2
+      ],
+      "explanation": "A 400 or 422 means the request itself is wrong and will be wrong again: retrying is pure load. A 503 with Retry-After is the canonical transient error for an idempotent call, and a refused connection is transient and provably nothing-was-sent, so both are retryable.",
+      "ref": "unit-1-timeouts-retries.md#2-retries-backoff-jitter-and-when-retrying-is-safe"
+    },
+    {
+      "id": "A7-014",
+      "type": "single",
+      "tags": [
+        "retries",
+        "idempotency"
+      ],
+      "difficulty": 3,
+      "prompt": "A transfer POST times out at 10 s. The client retries with the SAME idempotency key. In fact the core posted the transfer at 11 s. What should the second attempt return?",
+      "choices": [
+        "A second posting, because the first attempt timed out",
+        "The original posting's result: the key makes the server (or the core) deduplicate",
+        "409 with no further detail",
+        "Nothing until the client generates a new idempotency key"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The point of the key is that a retry of the same intent returns the first outcome instead of executing again. Posting a second time is the duplicate the key exists to prevent. A bare 409 would leave the client unsure whether money moved. Generating a new key per attempt defeats the protection entirely: each attempt would look like a new intent.",
+      "ref": "unit-1-timeouts-retries.md#2-retries-backoff-jitter-and-when-retrying-is-safe"
+    },
+    {
+      "id": "A7-015",
+      "type": "numeric",
+      "tags": [
+        "retries",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A retry budget earns 0.1 token per request and each retry costs one whole token. It starts empty and is shared by all callers. What is the most retries it can allow over 1,000 requests?",
+      "value": 100,
+      "tolerance": 0.05,
+      "unit": "retries",
+      "explanation": "The invariant is retries <= ratio x requests + initial tokens = 0.1 x 1,000 + 0 = 100. That is why a budget turns multiplicative amplification into roughly additive: it ties retries to traffic, not to how many layers each request crosses.",
+      "ref": "unit-1-timeouts-retries.md#3-retry-budgets-amplification-and-metastable-failures"
+    },
+    {
+      "id": "A7-016",
+      "type": "single",
+      "tags": [
+        "retries",
+        "load-shedding"
+      ],
+      "difficulty": 3,
+      "prompt": "After a 5 s capacity dip, a server (100 req/s capacity, FIFO queue of 4,000, clients wait 1 s and retry twice) stays at zero goodput even though demand (80 req/s) is below capacity. Which change recovers it fastest?",
+      "choices": [
+        "Doubling capacity to 200 req/s",
+        "Dropping queued requests whose client's deadline has already passed",
+        "Raising the client timeout to 10 s",
+        "Allowing a third retry so more requests eventually get through"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The queue holds 40 s of work for clients that left, so every completion is wasted and each abandonment triggers another attempt. Skipping expired requests for free removes the zombie work immediately (the simulation recovers within about 2 s). Doubling capacity does not remove the retry loop, which can generate up to (1 + retries) x demand = 240 attempts/s, and it still has to chew through the backlog. A 10 s timeout is shorter than a 40 s queue delay, so the clients still abandon. A third retry adds more load.",
+      "ref": "unit-1-timeouts-retries.md#3-retry-budgets-amplification-and-metastable-failures"
+    },
+    {
+      "id": "A7-017",
+      "type": "multi",
+      "tags": [
+        "retries",
+        "load-shedding"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL that characterise a metastable failure.",
+      "choices": [
+        "A trigger (a failover, a cache flush) that has ended while the system stays degraded",
+        "A sustaining effect such as retries or a queue of abandoned work",
+        "It clears by itself as soon as the trigger is removed",
+        "The system is overloaded at a load level it handled before the incident"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "A metastable failure has a trigger and a self-sustaining loop: the system stays bad after the trigger is gone, at a load it handled fine before. It does not clear when the trigger is removed (that would be an ordinary overload); recovery requires reducing load or breaking the amplifier.",
+      "ref": "unit-1-timeouts-retries.md#3-retry-budgets-amplification-and-metastable-failures"
+    },
+    {
+      "id": "A7-018",
+      "type": "single",
+      "tags": [
+        "retries",
+        "timeouts"
+      ],
+      "difficulty": 2,
+      "prompt": "Which use of a hedged request is correct?",
+      "choices": [
+        "Send a second copy of an idempotent read to a different replica after about the p95 latency, and cancel the loser",
+        "Hedge POST /transfers after 50 ms so one of the two copies is fast",
+        "Send the second copy to the same slow replica immediately",
+        "Hedge at the median latency so half of all requests are duplicated for lower latency"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Hedging attacks random, independent slowness for idempotent reads: wait until the request is already in the tail (about p95, so only about 5% are duplicated), use a different replica, and cancel the loser. Hedging a keyless write duplicates the effect. A copy to the same slow replica gains nothing, and hedging at the median adds about 50% load for little extra benefit.",
+      "ref": "unit-1-timeouts-retries.md#4-stretch--hedged-requests"
+    },
+    {
+      "id": "A7-019",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "timeouts"
+      ],
+      "difficulty": 2,
+      "prompt": "A search fans out to 50 independent shards. Each shard is slower than its own p99 on 1% of calls. What percentage of searches see at least one such slow shard?",
+      "value": 39.5,
+      "tolerance": 0.1,
+      "unit": "%",
+      "explanation": "1 - 0.99^50 = 1 - 0.605 = 0.395, about 39.5%. With 100 shards it is 63%. Fan-out turns each shard's rare tail into a common event, which is the case for hedging and for per-shard timeouts.",
+      "ref": "unit-1-timeouts-retries.md#4-stretch--hedged-requests"
+    },
+    {
+      "id": "A7-020",
+      "type": "single",
+      "tags": [
+        "circuit-breaker"
+      ],
+      "difficulty": 1,
+      "prompt": "What does a circuit breaker do while it is open?",
+      "choices": [
+        "Retries every call three times with backoff",
+        "Rejects calls immediately without calling the dependency",
+        "Queues calls until the dependency recovers",
+        "Calls the dependency but ignores its answers"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "An open breaker fails fast: calls are rejected in microseconds with a distinct error, so no goroutine, connection or timeout is spent on a dependency believed to be down. It does not retry (that is the retry layer), does not queue (queues add latency and memory), and does not call the dependency, because the point is to stop doing so.",
+      "ref": "unit-2-breakers-rate-limits.md#1-circuit-breakers"
+    },
+    {
+      "id": "A7-021",
+      "type": "single",
+      "tags": [
+        "circuit-breaker",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A vendor hangs for 2 s per call from t = 10 s and traffic is 100 calls/s. The breaker trips at 50% failures over a 10 s rolling window with at least 20 calls. In the reference experiment it opened at 16 s, not at about 12 s. Why?",
+      "choices": [
+        "The minimum of 20 calls was not reached until 16 s",
+        "Failures only appear 2 s after their calls start, and the window still holds earlier successes that dilute the failure ratio until about 16 s",
+        "Circuit breakers only evaluate their state every 10 s",
+        "The breaker waits for the vendor's health check to fail first"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The first failures surface at t = 12 s and the 10 s window still contains about 800 successes from before the outage, so the ratio only reaches 50% when failures outweigh the remaining successes, around t = 16 s. The 20-call minimum was reached within a fraction of a second. The breaker evaluates on every recorded outcome, and it does not depend on a separate health check. A shorter window or a consecutive-failures rule opens at about 12 s.",
+      "ref": "unit-2-breakers-rate-limits.md#1-circuit-breakers"
+    },
+    {
+      "id": "A7-022",
+      "type": "multi",
+      "tags": [
+        "circuit-breaker"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL outcomes that should NOT count as failures toward opening a circuit breaker.",
+      "choices": [
+        "The caller cancelled because the member closed the app",
+        "A 404 returned correctly for a check image that does not exist",
+        "The adapter's own bulkhead rejected the call before it was sent",
+        "A read timeout from the vendor"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "The breaker asks whether the dependency is unhealthy, so only evidence about the dependency counts. A caller leaving says nothing about the vendor, a correct 404 means the vendor answered properly, and your own bulkhead's rejection never reached the vendor (counting it lets the adapter open its own breaker). A read timeout is the most common way a vendor fails and does count.",
+      "ref": "unit-2-breakers-rate-limits.md#1-circuit-breakers"
+    },
+    {
+      "id": "A7-023",
+      "type": "single",
+      "tags": [
+        "circuit-breaker"
+      ],
+      "difficulty": 3,
+      "prompt": "A breaker half-opens at the instant 200 callers arrive. Its probe limit is 2. What should happen?",
+      "choices": [
+        "All 200 calls go through so the breaker learns the truth quickly",
+        "Two calls reach the dependency; the other 198 are rejected immediately with the open error",
+        "The 198 wait in a queue inside the breaker until the probes finish",
+        "The breaker closes immediately because the open period has elapsed"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Half-open exists to test recovery without hammering a dependency that may be fragile: only the probe limit gets through and the rest are rejected fast. Letting all 200 through is the thundering herd the state exists to prevent. Queueing inside the breaker adds latency and memory and defeats fail-fast. Closing without evidence would simply resume full traffic on a dependency not yet shown healthy.",
+      "ref": "unit-2-breakers-rate-limits.md#1-circuit-breakers"
+    },
+    {
+      "id": "A7-024",
+      "type": "single",
+      "tags": [
+        "circuit-breaker",
+        "retries"
+      ],
+      "difficulty": 3,
+      "prompt": "In a vendor adapter you stack a retry loop and a circuit breaker around the call. Which arrangement is right?",
+      "choices": [
+        "The breaker outside the retry loop, so one open check covers all attempts",
+        "The retry loop outside the breaker, each attempt consulting the breaker, with the breaker's open error treated as non-retryable",
+        "The retry loop outside the breaker, retrying the breaker's open error with backoff until it closes",
+        "No breaker: timeouts plus retries are equivalent"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Retry outermost owns the deadline and makes a fresh decision per attempt; each attempt is counted once by the breaker, and an open breaker is a deliberate refusal that must not be retried. A breaker outside the retry loop counts one failure per whole retry sequence and makes each half-open probe a full loop. Retrying the open error burns budget and backoff time on a layer that is refusing on purpose. Timeouts plus retries bound each call but remember nothing across calls, which is what a breaker adds.",
+      "ref": "unit-2-breakers-rate-limits.md#1-circuit-breakers"
+    },
+    {
+      "id": "A7-025",
+      "type": "numeric",
+      "tags": [
+        "circuit-breaker",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "200 instances each run their own breaker with OpenFor = 10 s and send one probe per cycle to a vendor that is still down. Roughly how many probes per second reach the vendor if the instances are unsynchronised?",
+      "value": 20,
+      "tolerance": 0.1,
+      "unit": "probes/s",
+      "explanation": "Probe load = instances / OpenFor = 200 / 10 s = 20 probes/s. If the instances are aligned the same 200 probes arrive in a single instant, which is why OpenFor should be jittered per instance, kept long enough for fragile vendors and the probe limit kept low.",
+      "ref": "unit-2-breakers-rate-limits.md#1-circuit-breakers"
+    },
+    {
+      "id": "A7-026",
+      "type": "single",
+      "tags": [
+        "circuit-breaker"
+      ],
+      "difficulty": 3,
+      "prompt": "Why does the lab's breaker bump a generation number on every state change?",
+      "choices": [
+        "So the results of calls admitted before a state change cannot close, re-open or count against the new state",
+        "So callers can see how many times the breaker has tripped",
+        "So half-open probes expire after a timeout",
+        "To keep the per-bucket counters from overflowing"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A call admitted while closed may finish after the breaker has tripped or half-opened; its result describes the old state. Each call remembers the generation it was admitted under and a result from an older generation is dropped, so a straggler's success cannot close a half-open breaker. It is not a trip counter for callers, not a probe expiry mechanism, and unrelated to counter overflow.",
+      "ref": "unit-2-breakers-rate-limits.md#1-circuit-breakers"
+    },
+    {
+      "id": "A7-027",
+      "type": "single",
+      "tags": [
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "A partner knows your fixed one-second window boundaries and sends 100 requests 10 ms before a boundary and 100 more 10 ms after it. The limit is 100 per second. How many do a fixed-window limiter and a sliding-window log admit in those 20 ms?",
+      "choices": [
+        "Fixed 100, log 200",
+        "Fixed 200, log 100",
+        "Both 100",
+        "Both 200"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The fixed window resets its count at the boundary, so it admits 100 + 100 = 200 in 20 ms: twice the limit. The sliding-window log remembers every accepted request in the last second regardless of boundaries, so it admits 100. The token-bucket and sliding-counter variants land at about 100 as well (102 and 101 in the lab experiment). The other pairings cannot be right: a log never admits more than a fixed window in this pattern (so 'fixed 100, log 200' is backwards), and the two algorithms do not behave the same ('both 100' and 'both 200' ignore the boundary reset that is the whole point).",
+      "ref": "unit-2-breakers-rate-limits.md#2-rate-limiting-algorithms"
+    },
+    {
+      "id": "A7-028",
+      "type": "numeric",
+      "tags": [
+        "rate-limiting",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A token bucket has rate 20 tokens/s and burst 10 and starts full. At most how many requests can it admit in the first 0.5 s?",
+      "value": 20,
+      "tolerance": 0.05,
+      "unit": "requests",
+      "explanation": "A token bucket admits at most burst + rate x T in any span T: 10 + 20 x 0.5 = 20. Burst is what can land at once, rate is what is sustained.",
+      "ref": "unit-2-breakers-rate-limits.md#2-rate-limiting-algorithms"
+    },
+    {
+      "id": "A7-029",
+      "type": "numeric",
+      "tags": [
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "A token bucket (rate 4 tokens/s) currently holds 0.2 tokens and a request needs 1 token. How long until the request would be allowed, in milliseconds (before rounding up to whole seconds for the Retry-After header)?",
+      "value": 200,
+      "tolerance": 0.05,
+      "unit": "ms",
+      "explanation": "Retry-After for a token bucket is (needed - tokens) / rate = (1 - 0.2) / 4 = 0.2 s = 200 ms. The header carries whole seconds, so it would say 1 (rounded up, never down).",
+      "ref": "unit-2-breakers-rate-limits.md#2-rate-limiting-algorithms"
+    },
+    {
+      "id": "A7-030",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "You need a per-API-key limit of 1,000 req/s for 1,000,000 active keys, and you can tolerate occasional bursts of about 1.5x at window edges. Which limiter fits the memory budget?",
+      "choices": [
+        "Sliding-window log: exact, but at least 8 KB per key (several GB at this scale)",
+        "Sliding-window counter or token bucket: O(1) state per key (a few hundred bytes)",
+        "Fixed window, because it is exact in every span",
+        "Any of them: memory per key is the same for all limiters"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The log stores a timestamp per accepted request: 1,000 x 8 B = 8 KB per key at least (about 4.2 KB measured for a limit of only 100 in Go), so it needs gigabytes at a million keys. The counter and the bucket keep a few numbers per key (about 160 B measured). Fixed window is cheap but admits 2x at boundaries, beyond the tolerance, and is not exact across spans. Memory per key clearly differs between limiters.",
+      "ref": "unit-2-breakers-rate-limits.md#2-rate-limiting-algorithms"
+    },
+    {
+      "id": "A7-031",
+      "type": "multi",
+      "tags": [
+        "rate-limiting"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL true statements about a token bucket.",
+      "choices": [
+        "Idle time never banks more than the burst size",
+        "Tokens can be refilled lazily from the clock at each call, with no timer per key",
+        "In any span T it admits at most rate x T requests",
+        "A completely full bucket for a key can be deleted without changing any later decision"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "A bucket is capped at its burst, refills lazily from elapsed time, and a full bucket is indistinguishable from a key never seen (new keys start full), so a sweeper may delete it. The third statement is wrong: in a span T it can admit burst + rate x T, which is 2x the rate for T = 1 s when burst equals the rate.",
+      "ref": "unit-2-breakers-rate-limits.md#2-rate-limiting-algorithms"
+    },
+    {
+      "id": "A7-032",
+      "type": "single",
+      "tags": [
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "Why should the seconds in a Retry-After header be rounded UP from the computed wait?",
+      "choices": [
+        "Because the header must hold an even number",
+        "Because a client told to return early gets another 429, wasting a request and delaying recovery",
+        "Because rounding down would hide the limit from the client",
+        "Because rounding up makes the limit stricter for all other clients"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The header carries whole seconds, so some rounding is unavoidable, and rounding down tells the client to come back before it can succeed: another 429. Parity is irrelevant, rounding does not hide the limit, and it does not affect other clients' limits.",
+      "ref": "unit-2-breakers-rate-limits.md#2-rate-limiting-algorithms"
+    },
+    {
+      "id": "A7-033",
+      "type": "numeric",
+      "tags": [
+        "rate-limiting",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A tenant's limit is 1,000 req/s, enforced locally as limit / 10 = 100 req/s on each of 10 nodes. Sticky routing pins the tenant to 3 of the nodes. What is the tenant's effective limit?",
+      "value": 300,
+      "tolerance": 0.05,
+      "unit": "req/s",
+      "explanation": "Effective limit = nodes touched x per-node limit = 3 x 100 = 300 req/s, 30% of what the tenant was promised. In the simulation, pinning to 2 nodes rejected 75% of an 800 req/s tenant. Local limits are only as good as the routing assumption behind them.",
+      "ref": "unit-2-breakers-rate-limits.md#3-rate-limiting-in-a-fleet-shared-vs-local-counters-fairness-and-what-to-tell-the-client"
+    },
+    {
+      "id": "A7-034",
+      "type": "single",
+      "tags": [
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "The platform is healthy, but one partner exceeds its agreed quota. Which response is right?",
+      "choices": [
+        "503 Service Unavailable with no header",
+        "429 Too Many Requests with Retry-After",
+        "200 with an error described in the body",
+        "403 Forbidden"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "429 says 'you exceeded your allowance, slow down' and Retry-After says when to return. A 503 says the service cannot serve anyone right now and would push every client's breaker and retry budget. A 200 with an error body hides the problem from monitoring and clients. A 403 means not permitted at all, rather than 'too fast'.",
+      "ref": "unit-2-breakers-rate-limits.md#3-rate-limiting-in-a-fleet-shared-vs-local-counters-fairness-and-what-to-tell-the-client"
+    },
+    {
+      "id": "A7-035",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "load-shedding"
+      ],
+      "difficulty": 2,
+      "prompt": "Which response best tells clients 'the service is shedding load, come back soon' when the cause is global overload and not one client's quota?",
+      "choices": [
+        "429 Too Many Requests",
+        "503 Service Unavailable with Retry-After",
+        "400 Bad Request",
+        "500 Internal Server Error"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "503 with Retry-After signals a condition not attributable to this client, and it feeds clients' breakers and retry budgets. 429 is for a specific client's allowance, 400 says the request is wrong, and 500 suggests a bug and gives no guidance about when to return.",
+      "ref": "unit-2-breakers-rate-limits.md#3-rate-limiting-in-a-fleet-shared-vs-local-counters-fairness-and-what-to-tell-the-client"
+    },
+    {
+      "id": "A7-036",
+      "type": "numeric",
+      "tags": [
+        "rate-limiting"
+      ],
+      "difficulty": 3,
+      "prompt": "A core can sustain 300 req/s. Tenants A, B and C demand 500, 80 and 40 req/s. Under max-min fairness, how much does A get?",
+      "value": 180,
+      "tolerance": 0.05,
+      "unit": "req/s",
+      "explanation": "Max-min fairness satisfies the smallest demands first and splits the rest: C gets all 40, B all 80, and A gets 300 - 40 - 80 = 180. A single FIFO would give each roughly in proportion to demand (A about 242, B about 39, C about 19) and starve the well-behaved tenants.",
+      "ref": "unit-2-breakers-rate-limits.md#3-rate-limiting-in-a-fleet-shared-vs-local-counters-fairness-and-what-to-tell-the-client"
+    },
+    {
+      "id": "A7-037",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "The Redis cluster behind your rate limiters becomes unreachable. Which pairing of failure policy and limiter is most defensible?",
+      "choices": [
+        "Fail closed for the general API limiter and fail open for the login-attempt limiter",
+        "Fail open with a local fallback limit for the general API limiter; fail closed for the login/OTP attempt limiter",
+        "Fail open for both so users are never blocked",
+        "Fail closed for both so nobody gets through unprotected"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A protective API limit failing open (with a local fallback bound) keeps the API available at the cost of reduced protection; a security limit such as login or OTP attempts must fail closed, or an outage becomes a brute-force window. The reverse pairing breaks the API for everyone while opening the security hole. Failing open for both opens the security hole; failing closed for both turns a limiter outage into a full API outage.",
+      "ref": "unit-2-breakers-rate-limits.md#3-rate-limiting-in-a-fleet-shared-vs-local-counters-fairness-and-what-to-tell-the-client"
+    },
+    {
+      "id": "A7-038",
+      "type": "single",
+      "tags": [
+        "bulkhead",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "One pool of 20 slots serves both the FX vendor (5 ms) and the check-image vendor. The image vendor hangs for 2 s and its adapter ignores the context; only 16% of FX calls succeed. What fixes the cause?",
+      "choices": [
+        "A separate bulkhead per vendor, sized from each vendor's load and contract",
+        "Growing the shared pool to 60 slots",
+        "Shortening the client deadline to 200 ms",
+        "Retrying the failed FX calls three times"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The cause is a shared resource: stuck image calls hold the slots FX needs. Per-vendor bulkheads confine the damage to the vendor that caused it. A bigger shared pool is filled too (100 image req/s x 2 s = 200 slots). A shorter client deadline does not release slots held by an adapter that ignores its context. Retries add load to an exhausted pool.",
+      "ref": "unit-3-isolation-degradation-dr.md#1-bulkheads-cells-and-shuffle-sharding"
+    },
+    {
+      "id": "A7-039",
+      "type": "numeric",
+      "tags": [
+        "bulkhead",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "An FX vendor receives 50 req/s at a p99 latency of 300 ms. By Little's law, how many concurrent calls does it need at p99?",
+      "value": 15,
+      "tolerance": 0.05,
+      "unit": "slots",
+      "explanation": "Concurrency = arrival rate x latency = 50 x 0.3 = 15. Add headroom (say 1.5x, about 22) and cap by the vendor's contract and by the physical resource being divided.",
+      "ref": "unit-3-isolation-degradation-dr.md#1-bulkheads-cells-and-shuffle-sharding"
+    },
+    {
+      "id": "A7-040",
+      "type": "numeric",
+      "tags": [
+        "bulkhead",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A bulkhead has 10 slots, calls take 200 ms and clients give up after 500 ms. Using queue <= slots x (deadline - service time) / service time, what is the largest wait queue in which a queued call can still succeed?",
+      "value": 15,
+      "tolerance": 0.05,
+      "unit": "waiters",
+      "explanation": "10 x (500 - 200) / 200 = 15. A waiter at position k finishes after about ceil(k/10) service times plus its own, so beyond 15 the wait exceeds what the deadline allows and those callers time out instead of being rejected quickly.",
+      "ref": "unit-3-isolation-degradation-dr.md#1-bulkheads-cells-and-shuffle-sharding"
+    },
+    {
+      "id": "A7-041",
+      "type": "single",
+      "tags": [
+        "bulkhead"
+      ],
+      "difficulty": 3,
+      "prompt": "Adding a 20-entry wait queue in front of a 10-slot bulkhead (calls take 200 ms, deadline 500 ms) made the image vendor's results worse in the experiment (95 timeouts instead of 0). Why?",
+      "choices": [
+        "Queued callers beyond about 15 cannot finish inside the deadline, so they time out instead of being rejected immediately",
+        "The queue made the vendor itself slower",
+        "Queues always lower throughput",
+        "Rejecting a call is slower than queueing it"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Queue entries beyond slots x (deadline - W) / W = 15 wait too long to be served in time, so the queue converts fast rejections (which the caller could handle with a fallback) into slow timeouts. The vendor's speed is unchanged, queues do not lower throughput by themselves, and rejection is the fastest outcome.",
+      "ref": "unit-3-isolation-degradation-dr.md#1-bulkheads-cells-and-shuffle-sharding"
+    },
+    {
+      "id": "A7-042",
+      "type": "numeric",
+      "tags": [
+        "bulkhead",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "With shuffle sharding each tenant is assigned 2 of 8 workers. How many distinct shards (worker pairs) exist?",
+      "value": 28,
+      "tolerance": 0.05,
+      "unit": "shards",
+      "explanation": "C(8, 2) = 8 x 7 / 2 = 28. A bad tenant that takes down its own two workers fully overlaps with only 1/28 of other tenants, instead of 1/4 with four fixed groups of two.",
+      "ref": "unit-3-isolation-degradation-dr.md#1-bulkheads-cells-and-shuffle-sharding"
+    },
+    {
+      "id": "A7-043",
+      "type": "single",
+      "tags": [
+        "bulkhead"
+      ],
+      "difficulty": 2,
+      "prompt": "A stateful platform is split into 4 cells, with tenants spread evenly. A bug triggered by one tenant crashes its cell. About how many tenants are affected?",
+      "choices": [
+        "All of them",
+        "About a quarter: the tenants in the same cell",
+        "Only the offending tenant",
+        "About half"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Blast radius of a cell architecture is 1 / (number of cells): the tenants sharing the crashed cell, about 25%. The other cells are independent stacks, so not everyone is affected; but the offender's cellmates are, so it is not only the offending tenant; and half would need two cells to be affected.",
+      "ref": "unit-3-isolation-degradation-dr.md#1-bulkheads-cells-and-shuffle-sharding"
+    },
+    {
+      "id": "A7-044",
+      "type": "single",
+      "tags": [
+        "load-shedding"
+      ],
+      "difficulty": 2,
+      "prompt": "A server in overload has a 40 s FIFO backlog while its clients time out after 1 s. The CPU shows 100% busy and it completes about 100 requests per second. What is its goodput?",
+      "choices": [
+        "About 100 req/s, since the CPU is fully used",
+        "About 50 req/s",
+        "About 0: nearly every completion is for a client that has already left",
+        "It cannot be known without a profile"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Goodput counts only responses that reach a client still waiting. With a 40 s queue delay and 1 s client timeouts, every completion is for an abandoned request, so utilisation is 100% and goodput is about zero. That is why overload needs shedding or deadline-aware dropping, not just more throughput. Nothing in the scenario supports 'about 50 req/s' (the completions are not half useful, they are almost all useless), and no profile is needed: queue delay against the client timeout decides it.",
+      "ref": "unit-3-isolation-degradation-dr.md#2-load-shedding-adaptive-concurrency-and-graceful-degradation"
+    },
+    {
+      "id": "A7-045",
+      "type": "numeric",
+      "tags": [
+        "load-shedding",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A service's degraded capacity is 50 req/s and its clients time out after 0.8 s. Using the rule 'queue limit <= degraded capacity x timeout', what is the largest sensible bound on its queue?",
+      "value": 40,
+      "tolerance": 0.05,
+      "unit": "requests",
+      "explanation": "50 x 0.8 = 40: a queue of 40 means a 0.8 s wait at 50 req/s, just inside the timeout. A bigger queue serves requests after their clients left. In the simulation, bounds up to 30 (30 req/s x 1 s) kept goodput at capacity and 50 or more wasted work.",
+      "ref": "unit-3-isolation-degradation-dr.md#2-load-shedding-adaptive-concurrency-and-graceful-degradation"
+    },
+    {
+      "id": "A7-046",
+      "type": "multi",
+      "tags": [
+        "load-shedding"
+      ],
+      "difficulty": 3,
+      "prompt": "The platform is overloaded. Select ALL that should be shed or degraded BEFORE a member's money-movement request.",
+      "choices": [
+        "A payroll partner's batch upload",
+        "The marketing banner service",
+        "The audit-event write for the transfer",
+        "The load balancer's health check",
+        "Balance reads that can be served from a cache"
+      ],
+      "answer": [
+        0,
+        1,
+        4
+      ],
+      "explanation": "Shed by how much the loss hurts and how easily the caller can wait: optional features, asynchronous partner batches (which can retry later) and stale-able reads go first. The audit write is a compliance obligation and must never be shed, and the health check must keep answering truthfully and cheaply or the load balancer ejects healthy instances.",
+      "ref": "unit-3-isolation-degradation-dr.md#2-load-shedding-adaptive-concurrency-and-graceful-degradation"
+    },
+    {
+      "id": "A7-047",
+      "type": "single",
+      "tags": [
+        "load-shedding"
+      ],
+      "difficulty": 3,
+      "prompt": "Why does an AIMD concurrency limiter allow at most one multiplicative decrease per cooldown period?",
+      "choices": [
+        "To avoid driving the limit to its minimum on the many simultaneous failures of a single overload event",
+        "Because the clock cannot be read more often",
+        "To make the increases faster",
+        "To keep the limit an integer"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "One overload event makes many in-flight calls fail together. Halving the limit for each would collapse it to the minimum and starve the service while the additive increase climbs back. The cooldown treats the burst as one event. It is not about clock reads, increase speed or integer limits.",
+      "ref": "unit-3-isolation-degradation-dr.md#2-load-shedding-adaptive-concurrency-and-graceful-degradation"
+    },
+    {
+      "id": "A7-048",
+      "type": "single",
+      "tags": [
+        "load-shedding",
+        "timeouts"
+      ],
+      "difficulty": 2,
+      "prompt": "Under overload, an adaptive-LIFO queue serves the newest request first. Why does that raise goodput?",
+      "choices": [
+        "Newer requests are cheaper to process",
+        "The oldest requests are the most likely to belong to clients that have already timed out, so serving them is wasted work",
+        "LIFO queues use less memory",
+        "It guarantees fairness between clients"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "In a long queue the oldest entries have waited longest and their clients have most likely given up; serving them wastes capacity and delays fresh requests that can still succeed. LIFO does not make requests cheaper or use less memory, and it is deliberately unfair, which is why it is adaptive (FIFO while the queue is short).",
+      "ref": "unit-3-isolation-degradation-dr.md#2-load-shedding-adaptive-concurrency-and-graceful-degradation"
+    },
+    {
+      "id": "A7-049",
+      "type": "single",
+      "tags": [
+        "dr"
+      ],
+      "difficulty": 2,
+      "prompt": "Requirements: RPO about 1 minute, RTO about 10 minutes, cost-sensitive. Which DR tier fits best?",
+      "choices": [
+        "Backup and restore",
+        "Pilot light",
+        "Warm standby",
+        "Multi-AZ in one region only"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Warm standby (a scaled-down full stack always running, data replicating) delivers RTO of minutes and RPO of the replication lag. Backup and restore has an RPO of the backup interval and an RTO of hours; pilot light keeps compute off, so starting and scaling it takes tens of minutes or more; multi-AZ protects against zone failures but not a regional loss.",
+      "ref": "unit-3-isolation-degradation-dr.md#3-multi-az-multi-region-rporto-and-dr-tiers"
+    },
+    {
+      "id": "A7-050",
+      "type": "numeric",
+      "tags": [
+        "dr",
+        "availability",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "You run 4 availability zones and want to lose one without any scaling action (static stability). At most what utilisation per zone can you run?",
+      "value": 75,
+      "tolerance": 0.05,
+      "unit": "%",
+      "explanation": "Losing one of N zones moves its load onto the other N - 1, so each zone must stay at or below (N - 1) / N: 3/4 = 75% for four zones (66% for three, 50% for two). The idle headroom is the price of not needing the control plane during an incident.",
+      "ref": "unit-3-isolation-degradation-dr.md#3-multi-az-multi-region-rporto-and-dr-tiers"
+    },
+    {
+      "id": "A7-051",
+      "type": "numeric",
+      "tags": [
+        "dr",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A database replicates asynchronously with 3 s of lag and takes 40 writes/s. If the region is destroyed, about how many acknowledged writes are lost?",
+      "value": 120,
+      "tolerance": 0.05,
+      "unit": "writes",
+      "explanation": "RPO under asynchronous replication is the lag at the moment of failure: 3 s x 40 writes/s = 120 writes that were acknowledged to clients and exist nowhere else. Each one needs reconciling against the system of record.",
+      "ref": "unit-3-isolation-degradation-dr.md#3-multi-az-multi-region-rporto-and-dr-tiers"
+    },
+    {
+      "id": "A7-052",
+      "type": "numeric",
+      "tags": [
+        "dr",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A failover runs these steps one after another: health check every 5 s with 4 consecutive failures to declare the region down; DNS TTL 30 s; database promotion 75 s; 120 s for caches to warm. What is the worst-case RTO in seconds?",
+      "value": 245,
+      "tolerance": 0.1,
+      "unit": "s",
+      "explanation": "Detection 5 x 4 = 20 s, plus 30 s of DNS, plus 75 s of promotion, plus 120 s of warm-up = 245 s. Real RTO adds clients that cache DNS longer than the TTL, connection pinning and any human decision time.",
+      "ref": "unit-3-isolation-degradation-dr.md#3-multi-az-multi-region-rporto-and-dr-tiers"
+    },
+    {
+      "id": "A7-053",
+      "type": "single",
+      "tags": [
+        "dr",
+        "availability"
+      ],
+      "difficulty": 3,
+      "prompt": "Two regions run active-active with asynchronous multi-master replication and last-writer-wins. A $1,000 account gets a $700 withdrawal processed in region A and, 80 ms later, a $600 withdrawal in region B. What can happen, and what is the usual fix?",
+      "choices": [
+        "Both succeed locally; last-writer-wins then keeps one and erases the other, leaving a wrong balance. Fix: a single writer per account (home region) or consensus-replicated writes",
+        "Region B rejects its withdrawal because it sees region A's write instantly",
+        "The database detects the conflict and merges the balances correctly",
+        "Nothing: last-writer-wins always produces the right balance"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Each region validates against its own, stale copy and accepts the write; replication then keeps only one of the two balances, so $1,300 left an account that held $1,000 and the ledger is wrong. Asynchronous replication cannot enforce an invariant such as balance >= 0 across regions. B cannot see A's write within 80 ms, the database does not know how to merge, and LWW is exactly what loses a write.",
+      "ref": "unit-3-isolation-degradation-dr.md#3-multi-az-multi-region-rporto-and-dr-tiers"
+    },
+    {
+      "id": "A7-054",
+      "type": "single",
+      "tags": [
+        "dr"
+      ],
+      "difficulty": 3,
+      "prompt": "A primary database cannot be reached by the health checker but may still be serving some clients. Which action best prevents split brain during failover?",
+      "choices": [
+        "Promote the replica immediately to minimise the RTO",
+        "Lower the DNS TTL",
+        "Fence the old primary (revoke its credentials or network path, or power it off), use fencing tokens, then promote",
+        "Run the health check more frequently"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Split brain happens when two primaries accept writes. Making it impossible for the old primary to write before the new one starts (fencing, with tokens the storage layer enforces) prevents it. Immediate promotion of an unreachable-but-alive primary causes it. A lower TTL speeds the traffic shift but not safety, and more frequent checks only detect 'unreachable' faster, which is not the same as 'dead'.",
+      "ref": "unit-3-isolation-degradation-dr.md#3-multi-az-multi-region-rporto-and-dr-tiers"
+    },
+    {
+      "id": "A7-055",
+      "type": "single",
+      "tags": [
+        "dr",
+        "idempotency"
+      ],
+      "difficulty": 3,
+      "prompt": "After a regional failover the idempotency store had NOT replicated to the new region. Members' apps retry pending transfers with their original keys. What happens?",
+      "choices": [
+        "Nothing: idempotency keys are global",
+        "Retries may execute again, because the new region has no record of the earlier attempts, unless the downstream system also deduplicates on the key",
+        "All retries are rejected with 422",
+        "The database repairs the missing records itself"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The idempotency record is the memory that turns a retry into a replay. Without it in the new region a retried POST looks like a new intent and runs again; the defence is replicating the store (it is part of the ledger's data) and passing a derived key to the core, which deduplicates independently. Keys are only global if their store is. A 422 would be the response for a key reused with a different body, and databases do not invent lost records.",
+      "ref": "unit-3-isolation-degradation-dr.md#3-multi-az-multi-region-rporto-and-dr-tiers"
+    },
+    {
+      "id": "A7-056",
+      "type": "single",
+      "tags": [
+        "availability",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Three replicas each have 99.9% availability and fail independently, but a deploy/config pipeline takes all three down together 0.02% of the time. What is the service's availability?",
+      "choices": [
+        "99.9999999%",
+        "99.98%",
+        "99.7%",
+        "99.9%"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A = (1 - c)(1 - u^k) = (1 - 0.0002)(1 - 0.001^3) = 0.9998 x 0.999999999 = about 99.98%. The independent part is negligible; the ceiling is 1 - c. The nine-nines figure assumes independence, 99.7% would be three replicas in series, and 99.9% would be a single replica.",
+      "ref": "unit-3-isolation-degradation-dr.md#4-availability-with-correlated-failures-chaos-engineering-and-deploy-safety"
+    },
+    {
+      "id": "A7-057",
+      "type": "numeric",
+      "tags": [
+        "availability",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A common-cause failure (bad deploys, expired certificates) takes the whole service down 0.02% of the time. How many minutes of downtime per year is that?",
+      "value": 105,
+      "tolerance": 0.05,
+      "unit": "min",
+      "explanation": "0.0002 x 525,600 minutes per year = 105 minutes. At a 99.99% SLA (52.6 min/yr) this alone is twice the entire budget, which is why the investment goes into shrinking the common cause (canaries, rollback, certificate monitoring) rather than into more replicas.",
+      "ref": "unit-3-isolation-degradation-dr.md#4-availability-with-correlated-failures-chaos-engineering-and-deploy-safety"
+    },
+    {
+      "id": "A7-058",
+      "type": "multi",
+      "tags": [
+        "availability",
+        "deployments"
+      ],
+      "difficulty": 3,
+      "prompt": "A canary receives 1% of traffic (10 req/s). You want to detect a subtle regression (error rate 0.1% to 0.5%). Select ALL changes that improve detection.",
+      "choices": [
+        "Sending more traffic to the canary",
+        "Extending the bake time",
+        "Comparing against a concurrently running baseline instead of last week's numbers",
+        "Raising the alert threshold to 20 errors per minute",
+        "Deploying to the largest credit union first"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Detection of a small difference is a statistics problem: more samples (traffic or time) and a baseline that shares the canary's conditions raise power. A higher threshold of 20 errors per minute would miss a regression that produces about 3 errors per minute at 10 req/s. Starting with the largest credit union raises the blast radius, not the statistical power of the comparison.",
+      "ref": "unit-3-isolation-degradation-dr.md#4-availability-with-correlated-failures-chaos-engineering-and-deploy-safety"
+    },
+    {
+      "id": "A7-059",
+      "type": "single",
+      "tags": [
+        "chaos",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "Which describes a well-formed chaos experiment?",
+      "choices": [
+        "Randomly kill production servers and see what happens",
+        "State a steady-state hypothesis (a measurable output), inject a bounded fault with a small blast radius and an abort condition, and compare",
+        "Run load tests until something breaks",
+        "Review the runbook without touching the system"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Chaos engineering is hypothesis-driven: define the steady state, inject a specific bounded fault, watch the same metrics, and stop if the steady state breaks. Random killing without a hypothesis or abort path is just an outage, load testing to destruction finds capacity limits not failure-path behaviour, and reading a runbook tests nothing.",
+      "ref": "unit-3-isolation-degradation-dr.md#4-availability-with-correlated-failures-chaos-engineering-and-deploy-safety"
+    },
+    {
+      "id": "A7-060",
+      "type": "single",
+      "tags": [
+        "deployments",
+        "availability"
+      ],
+      "difficulty": 3,
+      "prompt": "You must ship a risky change to a platform with 40 credit unions of very different sizes. Which rollout is best?",
+      "choices": [
+        "Deploy to all at once during the quietest hour",
+        "Rings: an internal tenant, a small friendly credit union, a few small ones, the rest, the largest last, with bake time, automatic comparison to baseline and automatic rollback",
+        "Deploy to the largest credit union first because it has the most traffic to test with",
+        "Deploy alphabetically, one credit union per night, with manual review only"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Rings keep the blast radius small, put the riskiest exposure last, and automatic analysis and rollback shrink detection and recovery time. All-at-once has the largest radius whatever the hour. Starting with the largest credit union maximises damage if the change is bad. Alphabetical order has no relation to risk and manual-only review is slow and error-prone.",
+      "ref": "unit-3-isolation-degradation-dr.md#4-availability-with-correlated-failures-chaos-engineering-and-deploy-safety"
+    },
+    {
+      "id": "A7-061",
+      "type": "single",
+      "tags": [
+        "reliability",
+        "circuit-breaker"
+      ],
+      "difficulty": 3,
+      "prompt": "Order the layers of a vendor adapter from outermost to innermost.",
+      "choices": [
+        "Circuit breaker, retry with budget, bulkhead, rate limiter, HTTP call",
+        "Retry with budget, circuit breaker, bulkhead, rate limiter, HTTP call",
+        "Rate limiter, bulkhead, retry with budget, circuit breaker, HTTP call",
+        "Bulkhead, rate limiter, circuit breaker, retry with budget, HTTP call"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Retry is outermost so it owns the deadline and consults every protective layer on each attempt; the breaker counts each attempt once; the bulkhead and limiter sit inside it so their own rejections can be ignored by the breaker and treated as non-retryable by the retry layer. The other orders count a whole retry sequence as one breaker event, charge limiter tokens and bulkhead slots outside the retry loop, or place the retry loop inside the protections it should be consulting per attempt.",
+      "ref": "unit-3-isolation-degradation-dr.md#5-capstone-the-resilient-vendor-adapter"
+    },
+    {
+      "id": "A7-062",
+      "type": "multi",
+      "tags": [
+        "reliability",
+        "retries"
+      ],
+      "difficulty": 3,
+      "prompt": "In the composed adapter, select ALL errors the retry layer should NOT retry.",
+      "choices": [
+        "The circuit breaker's open error",
+        "The bulkhead's full error",
+        "A vendor 503 with Retry-After on an idempotent call",
+        "A vendor 400 validation error"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "Open and full are deliberate local refusals: retrying them spends budget and backoff on a layer that is saying no (and in the capstone, retrying them turned 93 graceful fallbacks into 77). A 400 is permanent. A 503 with Retry-After on an idempotent call is the canonical retryable transient error.",
+      "ref": "unit-3-isolation-degradation-dr.md#5-capstone-the-resilient-vendor-adapter"
+    },
+    {
+      "id": "A7-063",
+      "type": "single",
+      "tags": [
+        "reliability",
+        "retries"
+      ],
+      "difficulty": 3,
+      "prompt": "A resilient adapter with a 10% retry budget fails 71 of 400 requests against a vendor that persistently fails 30% of calls, while a naive retry-3-times adapter fails 9. What is the most likely cause?",
+      "choices": [
+        "The circuit breaker opened by mistake",
+        "The retry budget is exhausted: a persistent 30% failure rate demands far more than 10% retries, so most failures are not retried",
+        "The bulkhead is too small",
+        "The rate limiter is set above the vendor's contract"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A 10% budget allows about 45 retries over 400 requests (10% plus a few initial tokens) while a 30% failure rate needs well over 100, so most failures go unretried. A budget protects against widespread failure; for a persistently flaky vendor the ratio must match the base error rate (a 40% budget cut failures to 11 at the same vendor-call cost). Nothing in the scenario indicates a mistaken breaker, an undersized bulkhead or a mis-set limiter.",
+      "ref": "unit-3-isolation-degradation-dr.md#5-capstone-the-resilient-vendor-adapter"
+    }
+  ]
+}

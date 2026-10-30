@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "id": "A8",
+  "slug": "observability-slo",
+  "title": "Observability, SLOs, capacity planning",
+  "track": "A",
+  "status": "written",
+  "core": true,
+  "summary": "Knowing your system is healthy: metrics, logs, traces, percentiles done right, SLOs and error budgets, burn-rate alerts, capacity planning.",
+  "hours": {
+    "core": 10,
+    "stretch": 2,
+    "total": 12
+  },
+  "prerequisites": [
+    "A7"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/A8-observability-slo",
+    "readme": "modules/A8-observability-slo/README.md",
+    "quiz": "modules/A8-observability-slo/quiz.json",
+    "design_exercise": "modules/A8-observability-slo/design-exercise.md",
+    "teachback": "modules/A8-observability-slo/teachback.md",
+    "lab": "labs/a8",
+    "solution": "solutions/a8"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Seeing the system",
+      "file": "modules/A8-observability-slo/unit-1-seeing-the-system.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "histogram"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Promising and planning",
+      "file": "modules/A8-observability-slo/unit-2-slos-capacity.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "burnrate"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "histogram",
+      "title": "Mergeable latency histogram with a relative-error bound, Prometheus-style quantiles, fleet aggregation",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "burnrate",
+      "title": "Rolling SLO tracker, error budget, burn rate and multi-window burn-rate alert evaluator",
+      "unit": 2,
+      "core": true
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Choose between metrics, logs and traces for a debugging question; estimate time-series cardinality and log volume; design trace and log correlation across sync and async hops.",
+      "core": true
+    },
+    {
+      "text": "Apply the golden signals, RED and USE; page on user-visible symptoms (SLO burn, synthetic probes) and keep causes on dashboards and tickets.",
+      "core": true
+    },
+    {
+      "text": "Explain why averages hide the tail and why percentiles cannot be averaged; compute fleet-wide percentiles correctly by merging counts.",
+      "core": true
+    },
+    {
+      "text": "Compare histogram designs (fixed buckets with interpolation, log-linear with relative error, HDR, t-digest), place bucket edges on SLO thresholds, and derive a sketch's bucket count and error bound.",
+      "core": true
+    },
+    {
+      "text": "Implement a concurrency-safe, mergeable latency histogram with a guaranteed relative error, plus a Prometheus-style quantile estimator (labs/a8/histogram).",
+      "core": true
+    },
+    {
+      "text": "Measure latency correctly: coordinated omission, open vs closed-loop load generation, and where to take the SLI measurement.",
+      "core": true
+    },
+    {
+      "text": "Define SLIs, SLOs and SLAs for a money-movement API (valid vs good events, request- vs time-based, per-tenant fairness) and compute error budgets.",
+      "core": true
+    },
+    {
+      "text": "Compute burn rates and time to exhaustion, derive multi-window multi-burn-rate alert thresholds, and evaluate alert quality (precision, recall, detection and reset time).",
+      "core": true
+    },
+    {
+      "text": "Implement a rolling SLO tracker and a multi-window burn-rate evaluator with no sleeps (labs/a8/burnrate).",
+      "core": true
+    },
+    {
+      "text": "Plan capacity: queueing knee, Little's law for pools, headroom for AZ loss and deploys, forecasting with calendar peaks, and open-loop load tests.",
+      "core": true
+    },
+    {
+      "text": "Design telemetry pipelines that drop rather than block, sample sensibly, and keep sensitive data and audit records out of debug telemetry.",
+      "core": false
+    },
+    {
+      "text": "Compose SLOs across serial dependencies and define freshness SLOs for asynchronous pipelines.",
+      "core": false
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "C16",
+  "slug": "collaborative-editing",
+  "title": "Case study (STRETCH): collaborative editing",
+  "track": "C",
+  "status": "planned",
+  "core": false,
+  "summary": "OT vs CRDTs, presence, offline edits, document storage.",
+  "hours": {
+    "core": 5,
+    "stretch": 1,
+    "total": 6
+  },
+  "prerequisites": [
+    "A5"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/C16-collaborative-editing",
+    "readme": "modules/C16-collaborative-editing/README.md",
+    "quiz": "modules/C16-collaborative-editing/quiz.json",
+    "design_exercise": "modules/C16-collaborative-editing/design-exercise.md",
+    "teachback": "modules/C16-collaborative-editing/teachback.md"
+  }
+}

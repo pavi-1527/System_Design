@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "id": "C7",
+  "slug": "notification-service",
+  "title": "Case study: notification service",
+  "track": "C",
+  "status": "written",
+  "core": true,
+  "summary": "Multi-channel delivery (push, SMS, email, in-app): requirements and estimation, API and data model, priority lanes, provider failover with circuit breakers, retries that respect cost, dedupe and preferences, delivery receipts and the audit trail.",
+  "hours": {
+    "core": 5,
+    "stretch": 1,
+    "total": 6
+  },
+  "prerequisites": [
+    "A6",
+    "A7"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/C7-notification-service",
+    "readme": "modules/C7-notification-service/README.md",
+    "quiz": "modules/C7-notification-service/quiz.json",
+    "design_exercise": "modules/C7-notification-service/design-exercise.md",
+    "teachback": "modules/C7-notification-service/teachback.md",
+    "lab": "labs/c7",
+    "solution": "solutions/c7"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Guided design: requirements, estimation, API, data model, high-level design",
+      "file": "modules/C7-notification-service/unit-1-guided-design.md",
+      "hours": {
+        "core": 2.5,
+        "stretch": 0.5
+      },
+      "labs": []
+    },
+    {
+      "n": 2,
+      "title": "Deep dives: provider failover and retries; dedupe, preferences, rate limits and priority lanes",
+      "file": "modules/C7-notification-service/unit-2-deep-dives.md",
+      "hours": {
+        "core": 2.5,
+        "stretch": 0.5
+      },
+      "labs": [
+        "dispatch"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "dispatch",
+      "title": "Notification dispatcher: dedupe, priority lanes, preferences and frequency caps, provider failover with circuit breakers, bounded retries, dead letters",
+      "unit": 2,
+      "core": true
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Scope a notification service in six minutes: the clarifying questions whose answers change the design (categories, channels, triggers, preferences, delivery semantics, tenancy, retention) and non-functional requirements with numbers.",
+      "core": true
+    },
+    {
+      "text": "Estimate notification volume (average, peak, a campaign spike), provider throughput limits, queue backlog and drain time with Little's law, and delivery-log storage with retention and replication, and tie each number to a decision.",
+      "core": true
+    },
+    {
+      "text": "Design the API (idempotent create, dedupe and collapse keys, TTL, status, campaigns, preferences, provider receipt webhooks) and a data model whose partition keys follow the access patterns, with an append-only attempt log.",
+      "core": true
+    },
+    {
+      "text": "Draw the high-level design with the urgent and campaign paths and the receipt path traced, and justify every box by a requirement or a number.",
+      "core": true
+    },
+    {
+      "text": "Design provider failover: per-provider circuit breakers, timeouts as unknown outcomes, bounded retries with backoff and jitter, retry budgets, and a per-category decision on whether a duplicate or a miss is worse.",
+      "core": true
+    },
+    {
+      "text": "Distinguish idempotency keys, dedupe keys, collapse keys and frequency caps; evaluate preferences and quiet hours at send time; isolate priority lanes and tenants so an OTP is never behind a campaign.",
+      "core": true
+    },
+    {
+      "text": "Implement the dispatcher (labs/c7/dispatch): dedupe under concurrent duplicates, priority lanes, opt-out, quiet hours, a token-bucket frequency cap, provider failover with breakers, bounded retries and a dead-letter list, passing under -race.",
+      "core": true
+    },
+    {
+      "text": "Explain what 'delivered' means per channel, how provider receipts and webhooks update the delivery log, and which metrics and alerts tell you the service is failing before users do.",
+      "core": true
+    },
+    {
+      "text": "Design templates, localisation and open/click tracking without leaking PII into logs, and reason about what tracking numbers actually measure.",
+      "core": false
+    }
+  ]
+}

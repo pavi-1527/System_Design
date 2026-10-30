@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>System Design Course</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Ctext x='16' y='21' font-family='monospace' font-size='13' font-weight='700' text-anchor='middle' fill='white'%3Esd%3C/text%3E%3C/svg%3E">
+<script>
+  // Apply the saved theme before first paint so the page doesn't flash.
+  try {
+    const t = localStorage.getItem("sd-theme");
+    if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
+<link rel="stylesheet" href="/static/vendor/hljs-github.min.css" id="hljs-light">
+<link rel="stylesheet" href="/static/vendor/hljs-github-dark.min.css" id="hljs-dark">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><span class="brand-mark">sd</span><span>System Design</span></a>
+  <nav class="nav" aria-label="Main">
+    <a href="/" data-nav="roadmap">Roadmap</a>
+    <a href="/progress" data-nav="progress">Progress</a>
+    <a href="/review" data-nav="review">Review <span class="count" id="due-count" hidden></span></a>
+    <a href="/estimate" data-nav="estimate">Estimate</a>
+  </nav>
+  <span class="spacer"></span>
+  <button class="icon-btn" id="theme-btn" type="button" title="Switch theme"></button>
+</header>
+<main id="app"><div class="loading">Loading…</div></main>
+<script src="/static/vendor/markdown-it.min.js"></script>
+<script src="/static/vendor/highlight.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

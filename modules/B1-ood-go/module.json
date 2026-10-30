@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "id": "B1",
+  "slug": "ood-go",
+  "title": "Pragmatic OOD in Go",
+  "track": "B",
+  "status": "written",
+  "core": true,
+  "summary": "Interfaces, composition and SOLID the Go way: small interfaces at the consumer, constructors, errors as values, package boundaries, testability.",
+  "hours": {
+    "core": 10,
+    "stretch": 2,
+    "total": 12
+  },
+  "prerequisites": [
+    "B0"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/B1-ood-go",
+    "readme": "modules/B1-ood-go/README.md",
+    "quiz": "modules/B1-ood-go/quiz.json",
+    "design_exercise": "modules/B1-ood-go/design-exercise.md",
+    "teachback": "modules/B1-ood-go/teachback.md",
+    "lab": "labs/b1",
+    "solution": "solutions/b1"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Shaping types",
+      "file": "modules/B1-ood-go/unit-1-shaping-types.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "checkout"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Boundaries and errors",
+      "file": "modules/B1-ood-go/unit-2-boundaries-errors.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "dispatch"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "checkout",
+      "title": "Refactor a god-object order manager: consumer-side interfaces, validating constructor, injected fakes and clock, parity with legacy",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "dispatch",
+      "title": "Refactor a string-error, global-state event dispatcher: typed errors, wrapping, injected time, concurrency-safe, extensible by tests",
+      "unit": 2,
+      "core": true
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Diagnose a god object by its reasons to change and ambient state, and refactor it behind a characterisation (parity) test one seam at a time.",
+      "core": true
+    },
+    {
+      "text": "Explain Go's object model without inheritance: method sets, embedding as composition (promotion, no virtual dispatch), and when to embed versus use a named field.",
+      "core": true
+    },
+    {
+      "text": "Define small interfaces at the consumer, accept interfaces and return structs, and say when not to define an interface.",
+      "core": true
+    },
+    {
+      "text": "Design constructors that enforce invariants: required dependencies, functional options versus a config struct, defensive copies, immutability, and a deliberate zero-value story.",
+      "core": true
+    },
+    {
+      "text": "Choose pointer or value receivers, avoid copying locks, and explain and avoid the typed-nil-in-interface trap.",
+      "core": true
+    },
+    {
+      "text": "Use errors as values: sentinel, typed and behaviour errors, %w wrapping with errors.Is/As/Join, handle-once logging, and mapping domain errors to transport codes at the edge only.",
+      "core": true
+    },
+    {
+      "text": "Structure packages by domain with the dependency pointing at the core, break import cycles, and avoid util/common packages.",
+      "core": true
+    },
+    {
+      "text": "Translate each SOLID principle into idiomatic Go and write a contract test for a plug-in interface.",
+      "core": true
+    },
+    {
+      "text": "Design for tests: seams for time, IDs, network and filesystem, fakes versus mocks, table-driven tests, golden files and httptest.",
+      "core": true
+    },
+    {
+      "text": "Run a 45-minute LLD round: model entities and responsibilities, pick the one or two interfaces that matter, and absorb a mid-way requirement change by adding code behind an existing seam.",
+      "core": true
+    },
+    {
+      "text": "Choose between generics and interfaces for containers and plug-in points.",
+      "core": false
+    },
+    {
+      "text": "Recognise and unwind premature abstraction using a checklist (second implementation, test seam, behaviour versus data).",
+      "core": false
+    }
+  ]
+}

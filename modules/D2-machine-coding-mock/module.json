@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "D2",
+  "slug": "machine-coding-mock",
+  "title": "Mock: 90-minute machine coding",
+  "track": "D",
+  "status": "written",
+  "core": true,
+  "summary": "Timed 90-minute machine-coding mocks on unseen problems: stages announced by the tutor at 0:00, 0:30 and 0:55, scored on a seven-dimension rubric after mechanical checks (-race -count=20, a mutation, acceptance tests) and a probe walk-through; three passing mocks on distinct problems clear the gate.",
+  "hours": {"core": 10, "stretch": 0, "total": 10},
+  "prerequisites": ["B3"],
+  "gate": {"requires": ["mocks"], "mocks_required": 3, "mock_formats": ["mc-90"]},
+  "paths": {
+    "dir": "modules/D2-machine-coding-mock",
+    "readme": "modules/D2-machine-coding-mock/README.md"
+  },
+  "units": [
+    {"n": 1, "title": "Running the round under observation", "file": "modules/D2-machine-coding-mock/unit-1-running-the-round.md", "hours": {"core": 5, "stretch": 0}, "labs": []},
+    {"n": 2, "title": "Defending the code: walk-through, probes and re-attempts", "file": "modules/D2-machine-coding-mock/unit-2-defending-the-code.md", "hours": {"core": 5, "stretch": 0}, "labs": []}
+  ],
+  "labs": [],
+  "outcomes": [
+    {"text": "Run an unseen 90-minute machine-coding problem against the clock: API and lock model written by 0:10, Stage 1 green by 0:30, Stage 2 green by 0:55, feature freeze at 1:20, with tests written alongside the code.", "core": true},
+    {"text": "Land interviewer-announced Stage 2 and Stage 3 requirements as additions behind seams chosen in the first ten minutes, and report how much stage-1 code each one changed.", "core": true},
+    {"text": "Survive the tutor's mechanical checks: gofmt and vet clean, go test -race -count=20 green, a deliberate mutation caught by a test, and the acceptance checklist mostly passing.", "core": true},
+    {"text": "Deliver the five-part concurrency note (shared state and owners, bounds, lifecycle, failure handling, evidence) in about two minutes, and make every claim in it match the code.", "core": true},
+    {"text": "Answer machine-coding probes (10× load, slow or panicking dependency, lock order, next requirement, test quality, why not channels or sync.Map) with a specific mechanism, a number where one exists, and the condition under which the answer flips.", "core": true},
+    {"text": "Score your own mock on the seven-dimension rubric within one level of the tutor, and apply the overall rule including the Stage 1 hard floor.", "core": true},
+    {"text": "Turn each below-meets mock into a targeted re-attempt on a different problem, using the mock log's top gaps.", "core": true}
+  ]
+}

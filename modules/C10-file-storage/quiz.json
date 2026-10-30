@@ -1,0 +1,1308 @@
+{
+  "module": "C10",
+  "title": "Case study: file storage and sync",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "C10-001",
+      "type": "single",
+      "tags": [
+        "design",
+        "requirements",
+        "sync"
+      ],
+      "difficulty": 2,
+      "prompt": "You have time for one more clarifying question before designing 'a file storage service like Dropbox'. Which answer changes the design the most?",
+      "choices": [
+        "Whether every device must mirror a folder (sync) or users only upload, download and share through a web drive",
+        "Whether image files should get thumbnails",
+        "Which file types are most common among users",
+        "How many engineers will maintain the service"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Sync versus a plain drive decides whether a change journal, cursors, a notification fleet, a client state machine and conflict handling exist at all. Thumbnails are an async pipeline hanging off the commit, not an architectural driver. File-type mix matters for dedupe ratios but is a parameter you estimate later. Team size affects how you split services, not the core storage and sync design.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions-that-change-the-design"
+    },
+    {
+      "id": "C10-002",
+      "type": "multi",
+      "tags": [
+        "design",
+        "requirements"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the requirements that would make this a *different* system rather than a bigger one.",
+      "choices": [
+        "Users only upload, download and share; no device mirrors a folder",
+        "Real-time co-editing of the same document by many people",
+        "Client-side end-to-end encryption with per-user keys",
+        "Ten times more users",
+        "Maximum file size doubles from 50 GB to 100 GB",
+        "Adding an Android client alongside desktop and iOS"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "No sync removes the journal, cursors, notifications and conflicts; co-editing replaces opaque files and conflicted copies with operation logs or CRDTs (C16); per-user E2E encryption removes cross-user dedupe, server-side scanning and previews. Ten times the users is the same design with more shards and disks. A larger maximum file size changes session lengths and part counts, not the architecture. Another client platform reuses the same APIs (mobile may prefer OS push for notifications, a detail).",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions-that-change-the-design"
+    },
+    {
+      "id": "C10-003",
+      "type": "single",
+      "tags": [
+        "design",
+        "requirements",
+        "chunking"
+      ],
+      "difficulty": 2,
+      "prompt": "The product is narrowed to a notes app whose attachments are at most 10 MB. Which change to the design does that justify?",
+      "choices": [
+        "Resumable sessions and parallel chunk uploads become optional, but file bytes still belong in a blob store separate from the metadata database",
+        "File bytes can move into the metadata database, since 10 MB rows are small",
+        "The change journal is no longer needed because files are small",
+        "Conflict handling can be dropped because small files rarely conflict"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A 10 MB file uploads in one request on most networks, so the resumability machinery is optional. The metadata/blob split still holds: 10 MB rows multiplied by millions of attachments would still dominate backups, replication and the buffer cache. Sync still needs the journal regardless of file size, and concurrent edits are about editing behaviour, not size.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions-that-change-the-design"
+    },
+    {
+      "id": "C10-004",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "conflict-resolution",
+        "requirements"
+      ],
+      "difficulty": 2,
+      "prompt": "Product decides that for this app 'the most recent save wins' is acceptable when two devices edit the same file. What should define 'most recent'?",
+      "choices": [
+        "The server's commit order: the per-namespace sequence assigned in the commit transaction",
+        "The file's modification time on the device that saved it",
+        "The HTTP Date header the client sent with the commit",
+        "The time the user opened the file for editing"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Only the server's commit sequence is a single, consistent order. Device modification times and client-sent Date headers come from device clocks, which drift and are sometimes set by hand, so an edit made later can lose to an earlier one. The time a user opened the file says nothing about the order of saves. Even then, say out loud that LWW discards edits and keep versions so they are recoverable.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions-that-change-the-design"
+    },
+    {
+      "id": "C10-005",
+      "type": "single",
+      "tags": [
+        "design",
+        "consistency",
+        "durability"
+      ],
+      "difficulty": 2,
+      "prompt": "In the design from this module, when should the client show a file as 'saved'?",
+      "choices": [
+        "When the commit call succeeds, which only happens after every chunk is durable in the blob store and verified against its hash",
+        "When the last chunk upload returns 201",
+        "When the file is written to the local disk",
+        "When the other devices have downloaded the new version"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A version exists only once its metadata commit succeeds, and the commit requires every chunk to be present and verified (bytes first, metadata last). After the last chunk upload the bytes are durable but no version references them yet; the commit can still fail (stale base, expired session). Local disk is not the service. Waiting for other devices would make 'saved' depend on whether they are online.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-clarifying-questions-that-change-the-design"
+    },
+    {
+      "id": "C10-006",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "storage"
+      ],
+      "difficulty": 1,
+      "prompt": "A sync service has 100 M registered users storing ≈ 5 GB of logical data each on average. Estimate the logical data. Answer in PB.",
+      "value": 500,
+      "tolerance": 0.2,
+      "unit": "PB",
+      "explanation": "100 × 10^6 users × 5 × 10^9 B = 5 × 10^17 B = 500 PB. This is before dedupe (≈ 25% assumed in the unit, giving ≈ 375 PB unique) and before redundancy (× 3 replicated or × 1.4 erasure coded).",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C10-007",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "storage",
+        "erasure-coding"
+      ],
+      "difficulty": 2,
+      "prompt": "After dedupe a service holds 375 PB of unique data. Estimate the raw disk needed with Reed–Solomon (10, 4) erasure coding. Answer in PB.",
+      "value": 525,
+      "tolerance": 0.15,
+      "unit": "PB",
+      "explanation": "RS(10, 4) stores 14 fragments for every 10 of data: overhead 14/10 = 1.4. 375 PB × 1.4 = 525 PB. 3× replication would need ≈ 1,125 PB (≈ 1.1 EB), so coding saves ≈ 600 PB of disks.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C10-008",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "qps"
+      ],
+      "difficulty": 2,
+      "prompt": "A file sync service has 10 M daily active users, each saving ≈ 30 file versions a day. Assume peak = 3× average. Estimate peak commits per second. Answer in commits/s.",
+      "value": 10400,
+      "tolerance": 0.25,
+      "unit": "commits/s",
+      "explanation": "10 M × 30 = 300 M versions/day. 300 × 10^6 ÷ 86,400 s ≈ 3,470 commits/s average; × 3 ≈ 10,400/s at peak. Each commit is a single-shard metadata transaction of a handful of rows.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C10-009",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "bandwidth",
+        "chunking"
+      ],
+      "difficulty": 2,
+      "prompt": "Users save 300 M file versions a day averaging 3 MB each if uploaded whole. With content-defined chunking and dedupe, only 25% of those bytes are new chunks. Estimate the average upload bandwidth with chunking. Answer in Gbps.",
+      "value": 20.8,
+      "tolerance": 0.25,
+      "unit": "Gbps",
+      "explanation": "300 M × 3 MB = 900 TB/day whole; 25% new = 225 TB/day. 225 × 10^12 B ÷ 86,400 s ≈ 2.6 GB/s; × 8 ≈ 20.8 Gbps average (≈ 62 Gbps at a 3× peak). Whole-file uploads would be ≈ 83 Gbps average. Forgetting × 8 (bytes to bits) is the classic 8× error.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C10-010",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "capacity",
+        "sync"
+      ],
+      "difficulty": 2,
+      "prompt": "A sync service has 25 M daily active users with 1.6 devices each, all holding long-poll connections at peak. A notification server holds ≈ 100k idle connections. How many notification servers are needed (before redundancy)? Answer in servers.",
+      "value": 400,
+      "tolerance": 0.2,
+      "unit": "servers",
+      "explanation": "25 M × 1.6 = 40 M devices; 40 M ÷ 100k per server = 400 servers. The fleet is sized by idle connections (memory), not by request rate; counting users (25 M) instead of devices undercounts by 1.6×.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C10-011",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "sharding",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "Metadata for a sync service is ≈ 110 TB and peaks at ≈ 14k commits/s. A shard comfortably holds ≈ 1–2 TB and handles ≈ 1k–10k write transactions/s. What sets the number of shards?",
+      "choices": [
+        "Storage: ≈ 50–100 shards for 110 TB, at which point each shard sees only a few hundred commits per second",
+        "The commit rate: 14k/s needs about 2–3 shards, so storage can be ignored",
+        "The notification rate, because each notification reads the metadata shard",
+        "The number of regions, one shard per region"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "110 TB at 1–2 TB per shard is ≈ 55–110 shards; 14k commits/s spread over them is ≈ 150–250 per shard, far under capacity. Sizing by write rate alone (2–3 shards) leaves 40–50 TB per shard, which is unmanageable for backups, failover and rebuilds. Notification-triggered reads are served largely from a journal-tail cache, and regions are a placement question, not a sharding formula.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C10-012",
+      "type": "single",
+      "tags": [
+        "design",
+        "bandwidth",
+        "api-design"
+      ],
+      "difficulty": 2,
+      "prompt": "An architect proposes that clients upload file bytes to the metadata API servers, which forward them to the blob store, so that authorisation stays in one place. Peak upload is ≈ 45 Gbps. What's the main problem?",
+      "choices": [
+        "The API fleet becomes a bandwidth tier; folder listings and commits queue behind bulk bytes, so a presigned, per-chunk URL straight to the blob tier is better",
+        "Blob stores can't accept data that has passed through another server",
+        "TLS cannot be terminated twice on the same request path",
+        "The metadata database will run out of space because it buffers the bytes"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Proxying 45 Gbps turns the API servers into NIC- and memory-bound byte pumps, and every metadata call shares those servers: that's a missing bulkhead. Presigned URLs keep authorisation in the API (it issues them per missing chunk) while bytes flow directly. Blob stores accept data from any authorised client, double TLS termination is routine (it just costs CPU), and proxying doesn't put bytes in the database.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C10-013",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "concurrency",
+        "bandwidth"
+      ],
+      "difficulty": 2,
+      "prompt": "Peak upload is 40 Gbps in 4 MiB chunks, and each chunk upload takes ≈ 2 s end to end. Using Little's law, how many chunk uploads are in flight at peak? Answer in uploads.",
+      "value": 2400,
+      "tolerance": 0.25,
+      "unit": "uploads",
+      "explanation": "40 Gbps ÷ 8 = 5 GB/s. 5 × 10^9 B/s ÷ 4.19 × 10^6 B per chunk ≈ 1,190 chunks/s. L = λ × W ≈ 1,190 × 2 s ≈ 2,400 in flight. Small for the blob tier, which is sized by bandwidth across its NICs rather than by concurrent requests.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C10-014",
+      "type": "single",
+      "tags": [
+        "chunking",
+        "estimation",
+        "sync"
+      ],
+      "difficulty": 3,
+      "prompt": "Your estimate says chunking plus dedupe cuts upload bytes by ≈ 5×, but a teammate notes the average saved file is only 2 MB and chunks are 4 MiB. Where does the saving come from?",
+      "choices": [
+        "Large files, which hold most of the bytes and re-upload only changed chunks, plus identical re-saves and copies that dedupe entirely",
+        "Small files, because each 2 MB file is split into many smaller chunks",
+        "Compression applied to every chunk before upload",
+        "The server skipping verification of chunks it already has"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A 2 MB file is a single chunk, so editing it re-uploads the whole chunk; delta sync helps file counts little. Bytes are dominated by a minority of large files where an edit touches one or two chunks, and many saves are byte-identical re-saves or copies that dedupe to nothing. Small files are not split below the chunk size. Compression is orthogonal (and helps little on already-compressed formats). Skipping verification saves CPU, not bandwidth.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C10-015",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "conflict-resolution",
+        "sync"
+      ],
+      "difficulty": 2,
+      "prompt": "A laptop commits version 7 of budget.xlsx with base_version 6 and receives 409 stale_base, latest_version 8. What should the client do?",
+      "choices": [
+        "Fetch version 8, compare it with its own edit, and if they are concurrent keep both (one as a conflicted copy) and commit with the merged history",
+        "Retry the commit with base_version 8 so it succeeds",
+        "Discard its local edit and download version 8",
+        "Retry the same request with exponential backoff until it succeeds"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A 409 means someone else committed after the version this edit started from; the client must reconcile. Retrying with base 8 without looking silently overwrites the other person's edit (last writer wins by retry). Discarding the local edit loses the user's work. Retrying the same request will get the same 409 forever, because the base version is still stale.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model-metadata-versus-blobs"
+    },
+    {
+      "id": "C10-016",
+      "type": "multi",
+      "tags": [
+        "idempotency",
+        "api-design",
+        "integrity"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the properties that make a chunk upload (PUT to a content-addressed name) safe to retry.",
+      "choices": [
+        "The object's name is the SHA-256 of its bytes, so a retry writes the same bytes to the same key",
+        "The blob tier re-hashes the body and rejects it if it doesn't match the name",
+        "Storing bytes that are already present is a no-op that returns success",
+        "The server assigns a fresh random object id to every PUT request",
+        "Each attempt carries a new random UUID in an Idempotency-Key header"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Content addressing makes the PUT naturally idempotent: same bytes, same key, and an existing object is simply acknowledged; re-hashing guarantees nothing else can be stored under that name. A fresh random id per request would create a duplicate object per retry. A new UUID per attempt dedupes nothing; an idempotency key must be the same across retries of the same operation.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model-metadata-versus-blobs"
+    },
+    {
+      "id": "C10-017",
+      "type": "single",
+      "tags": [
+        "data-model",
+        "design"
+      ],
+      "difficulty": 1,
+      "prompt": "Why does the data model identify files by a stable file_id rather than by path?",
+      "choices": [
+        "Renames and moves change one row instead of every descendant, and an edit made on another device follows the file across a concurrent rename",
+        "Paths are too long to index in a relational database",
+        "file_id lets the blob store find chunks without the manifest",
+        "Paths can't contain Unicode characters"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "With path as identity, renaming a folder with 40,000 files rewrites 40,000 rows, and a rename racing an edit splits into a delete plus an orphaned edit. Path length is a non-issue for indexes. Chunks are found through the version's manifest, not through file_id. Unicode paths are handled fine (with normalisation) in either model.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model-metadata-versus-blobs"
+    },
+    {
+      "id": "C10-018",
+      "type": "single",
+      "tags": [
+        "data-model",
+        "sharding",
+        "garbage-collection"
+      ],
+      "difficulty": 3,
+      "prompt": "Metadata is sharded by namespace and the chunk index is sharded by chunk hash. Where should incrementing chunk reference counts for a new version happen?",
+      "choices": [
+        "Asynchronously, by an idempotent consumer of a chunk-refs outbox event written in the commit, with GC protected by session pins and a grace period",
+        "Inside the commit, using a two-phase commit across every chunk-index shard the manifest touches",
+        "In the namespace's shard, keeping a private copy of each chunk's count per namespace",
+        "Nowhere: never delete chunks, so counts are unnecessary"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Keeping the commit single-shard and applying counts asynchronously (idempotent per version and chunk) keeps the hot path fast, at the cost of lag that GC must tolerate. 2PC across many shards on every one of ≈ 14k commits/s is slow and fragile. Per-namespace counts can't tell whether another namespace still references a deduplicated chunk. Never deleting means expired versions and orphans grow storage forever.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model-metadata-versus-blobs"
+    },
+    {
+      "id": "C10-019",
+      "type": "single",
+      "tags": [
+        "sync",
+        "consistency",
+        "api-design"
+      ],
+      "difficulty": 2,
+      "prompt": "A sync API returns changes with GET /files?modified_after=<last poll timestamp>. Which failure does a per-namespace sequence assigned in the commit transaction prevent?",
+      "choices": [
+        "Commits that share a timestamp or become visible out of timestamp order are skipped forever by clients whose cursor falls between them",
+        "Clients downloading whole files instead of changed chunks",
+        "Two devices committing at the same time",
+        "Notification servers running out of connections"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Timestamps collide and commit visibility doesn't follow timestamp order across transactions and shards, so a timestamp cursor can step past a change that becomes visible later. A gap-free sequence per namespace, assigned inside the commit, gives each change a unique, ordered position. Chunk-level downloads, concurrent commits (conflict detection) and connection limits are separate concerns.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model-metadata-versus-blobs"
+    },
+    {
+      "id": "C10-020",
+      "type": "single",
+      "tags": [
+        "security",
+        "api-design",
+        "multitenancy"
+      ],
+      "difficulty": 2,
+      "prompt": "How do you keep presigned upload URLs from becoming free, anonymous storage for attackers?",
+      "choices": [
+        "Issue them only inside an authorised session, one per missing chunk, with the object name bound to the hash, a size limit, a short expiry, and uncommitted bytes counted against the user's quota until GC",
+        "Give each user one long-lived URL that can write any key under their prefix",
+        "Allow uploads only from IP addresses that previously logged in",
+        "Make the URLs unguessable by using 256-bit random tokens with no expiry"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Scope (exact hash, method, size), time (minutes) and accounting (quota until GC) bound the abuse to a user's own quota of garbage that disappears. A long-lived prefix URL is exactly free storage once leaked. IP allow-lists break mobile users and don't bound size. Unguessable but non-expiring URLs are still unlimited once shared.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model-metadata-versus-blobs"
+    },
+    {
+      "id": "C10-021",
+      "type": "single",
+      "tags": [
+        "data-model",
+        "multitenancy",
+        "sync"
+      ],
+      "difficulty": 2,
+      "prompt": "How should a folder shared with 30 users be modelled?",
+      "choices": [
+        "As its own namespace, mounted into each member's tree, with one journal and one ordering that every member's devices sync",
+        "By copying the folder's entries into each member's root namespace",
+        "As a symbolic link that each client resolves by reading the owner's namespace without permission checks",
+        "As an access-control list on the owner's root namespace only"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "One namespace gives one copy of the truth and a single commit order; mounts place it in each member's tree and membership drives authorisation and notification fan-out. Copies drift as soon as anyone edits. Unchecked links break object-level authorisation. An ACL on the owner's root forces members to sync the owner's whole namespace or invent partial views with no ordering of their own.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model-metadata-versus-blobs"
+    },
+    {
+      "id": "C10-022",
+      "type": "single",
+      "tags": [
+        "design",
+        "availability",
+        "sync"
+      ],
+      "difficulty": 2,
+      "prompt": "The notification fleet is down for 15 minutes. What do users experience in the module's design?",
+      "choices": [
+        "Saves still commit; other devices don't hear about changes and fall back to polling the change feed with jittered backoff, so sync is slower but nothing is lost",
+        "Saves fail, because the commit waits for notifications to be delivered",
+        "Changes made during the outage are lost, because notifications carried them",
+        "Every device must re-download its entire tree when the fleet returns"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Notifications are hints published from an outbox after the commit; the journal is the truth. Commits never wait on the fleet, notifications carry no data, and devices resume from their cursors, so no re-download is needed. Only latency degrades, from seconds to minutes.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-upload-download-and-sync-paths-traced"
+    },
+    {
+      "id": "C10-023",
+      "type": "single",
+      "tags": [
+        "design",
+        "messaging",
+        "outbox"
+      ],
+      "difficulty": 2,
+      "prompt": "The commit handler calls the notification service synchronously after the database commit. Which failure does this design cause that an outbox avoids?",
+      "choices": [
+        "A notification-service outage or slowdown makes saves slow or fail, and a crash between commit and call loses the notification",
+        "Two devices can commit the same file concurrently",
+        "Chunks are uploaded before the commit",
+        "Long-poll connections time out every 60 seconds"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A synchronous call couples save latency and availability to the notification fleet, and the dual write (commit, then call) can lose the notification on a crash. Writing an outbox row in the commit transaction and relaying it at-least-once fixes both. Concurrent commits are handled by base-version checks; chunks before commit is the desired order; long-poll timeouts are normal.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-upload-download-and-sync-paths-traced"
+    },
+    {
+      "id": "C10-024",
+      "type": "multi",
+      "tags": [
+        "design",
+        "bandwidth"
+      ],
+      "difficulty": 1,
+      "prompt": "Select ALL the components that carry file bytes in the module's high-level design.",
+      "choices": [
+        "Blob front-ends receiving presigned chunk PUTs",
+        "The CDN or chunk cache serving chunk downloads",
+        "The metadata API servers",
+        "The notification servers",
+        "The metadata database shards"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "Bytes go client → blob front-ends on upload and blob store/CDN → client on download. The metadata API handles sessions, manifests and commits but never proxies bytes; notification servers carry only 'namespace changed' hints; metadata shards store manifests (chunk hashes), not content.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-upload-download-and-sync-paths-traced"
+    },
+    {
+      "id": "C10-025",
+      "type": "single",
+      "tags": [
+        "design",
+        "reliability",
+        "caching"
+      ],
+      "difficulty": 3,
+      "prompt": "After a notification-fleet deploy, 30 M devices reconnect within seconds and each immediately calls the change feed. What's the best mitigation?",
+      "choices": [
+        "Randomised exponential backoff on reconnect, a server-sent backoff hint, restarting servers in small batches, and answering up-to-date cursors from a cache",
+        "Scale the metadata database to 10× its normal size for deploy windows",
+        "Tell clients to reconnect as fast as possible to minimise sync lag",
+        "Replace long-polling with clients polling every 5 seconds"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "This is a thundering herd; spreading reconnects over time and serving 'nothing new' from a cache keeps the burst off the shards. Scaling the database for a self-inflicted spike is expensive and fragile. Faster reconnects make the herd worse. 5-second polling is a permanent herd of millions of requests per second.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-upload-download-and-sync-paths-traced"
+    },
+    {
+      "id": "C10-026",
+      "type": "single",
+      "tags": [
+        "replication",
+        "durability",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "A metadata shard's primary fails and an asynchronously replicated follower is promoted. What does a sync user risk, and what's the mitigation?",
+      "choices": [
+        "A save the client was told succeeded can disappear; use semi-synchronous replication so a commit waits for at least one replica, and have devices whose cursor is ahead of the new primary re-list",
+        "Nothing, because the blob store still has the chunks",
+        "Duplicate files, because chunk uploads are retried",
+        "Notification servers lose their connections permanently"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Async replication can lose the last acknowledged commits on failover; for a sync product that's a saved file vanishing. Semi-sync bounds that loss. The chunks surviving doesn't help: without the version row no device knows they form the file. Chunk retries are idempotent by hash. Notification connections are independent of the metadata failover.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-upload-download-and-sync-paths-traced"
+    },
+    {
+      "id": "C10-027",
+      "type": "single",
+      "tags": [
+        "design",
+        "sync"
+      ],
+      "difficulty": 2,
+      "prompt": "Why do notifications carry only 'namespace X changed' instead of the change itself?",
+      "choices": [
+        "A lost or reordered hint then costs only latency: devices always pull ordered, complete changes from the journal by cursor",
+        "Notification servers can't hold more than a few bytes per connection",
+        "It's required by the HTTP long-poll protocol",
+        "Changes are encrypted and notification servers can't read them"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Hints are best-effort (connections drop, servers restart, mobile OSes kill sockets); making them carry data would make every loss a data loss. The cursor pull is the correctness mechanism. Memory per connection and HTTP don't forbid payloads (small ones are a legitimate optimisation backed by the journal). Encryption is unrelated.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-upload-download-and-sync-paths-traced"
+    },
+    {
+      "id": "C10-028",
+      "type": "single",
+      "tags": [
+        "chunking",
+        "sync"
+      ],
+      "difficulty": 2,
+      "prompt": "A 1 MiB block of bytes is inserted at the 20% mark of a 1 GiB file stored as fixed 4 MiB chunks. Roughly how many of the file's chunks must be uploaded again?",
+      "choices": [
+        "≈ 205 (everything after the insertion shifts)",
+        "≈ 1–2",
+        "≈ 51",
+        "≈ 10"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "1 GiB is 256 chunks of 4 MiB; the insertion at ≈ 205 MiB shifts every later byte, so every boundary after it cuts different bytes: ≈ 205 chunks plus the one containing the insertion. ≈ 1–2 is what content-defined chunking achieves. ≈ 51 is the number of chunks *before* the insertion (the ones that survive). ≈ 10 has no basis.",
+      "ref": "unit-2-deep-dives.md#5-chunking-and-deduplication"
+    },
+    {
+      "id": "C10-029",
+      "type": "single",
+      "tags": [
+        "chunking"
+      ],
+      "difficulty": 2,
+      "prompt": "What property lets content-defined chunking resynchronise after an insertion?",
+      "choices": [
+        "A cut point depends only on the last few dozen bytes (the rolling hash window), so after the inserted region the chunker finds the same cut points as before",
+        "Cut points are placed at multiples of the average chunk size",
+        "The server tells the client where the previous version's boundaries were",
+        "Cut points are chosen randomly per upload, so they average out"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "With the gear hash, h = h<<1 + gear[b] forgets bytes older than 64 positions, so a boundary is a local property of the content. Multiples of a size are fixed-size chunking. Server-provided boundaries would make chunking depend on the previous version and couldn't dedupe across files. Random cuts would never reproduce the same chunks, destroying dedupe.",
+      "ref": "unit-2-deep-dives.md#5-chunking-and-deduplication"
+    },
+    {
+      "id": "C10-030",
+      "type": "single",
+      "tags": [
+        "chunking"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does a content-defined chunker enforce a maximum chunk size?",
+      "choices": [
+        "On data where the boundary pattern never matches (long runs of zeros, some compressed regions), chunks would otherwise grow without bound, ruining upload granularity and memory use",
+        "To make every chunk exactly the same size",
+        "Because SHA-256 can't hash inputs larger than a few MiB",
+        "To make the expected chunk size a power of two"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Max bounds degenerate cases; Min prevents tiny chunks; the hash mask sets the average. A maximum doesn't make sizes equal (that would be fixed chunking). SHA-256 hashes arbitrarily long inputs. The power-of-two requirement is on the average (the mask), not the maximum.",
+      "ref": "unit-2-deep-dives.md#5-chunking-and-deduplication"
+    },
+    {
+      "id": "C10-031",
+      "type": "single",
+      "tags": [
+        "chunking",
+        "testing"
+      ],
+      "difficulty": 2,
+      "prompt": "In labs/c10/chunker you set DefaultCDC to {Min: 4096, Avg: 4096, Max: 4096} and rerun the insertion test. What happens?",
+      "choices": [
+        "Every cut is forced at 4,096 bytes, which is fixed-size chunking in disguise; the CDC share falls to roughly the fixed-size share and the test fails",
+        "Nothing changes, because the average is still 4 KiB",
+        "CDCChunks returns ErrInvalid because Min equals Max",
+        "The share rises to 100% because every chunk is the same size"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "With Min = Max, the chunker can't cut before 4,096 bytes and must cut at 4,096, so boundaries are offsets again and the insertion shifts them (≈ 20% shared on the reference solution). The parameters are valid (0 < Min <= Avg <= Max with Avg a power of two), so there's no ErrInvalid. Equal sizes don't help: the bytes inside each chunk change after the insertion.",
+      "ref": "unit-2-deep-dives.md#5-chunking-and-deduplication"
+    },
+    {
+      "id": "C10-032",
+      "type": "numeric",
+      "tags": [
+        "chunking",
+        "estimation",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "A store holds 100 PB of unique data in content-defined chunks averaging 64 KiB. Each chunk-index entry takes ≈ 100 B. Estimate the size of the chunk index. Answer in TB.",
+      "value": 153,
+      "tolerance": 0.25,
+      "unit": "TB",
+      "explanation": "100 × 10^15 B ÷ 65,536 B ≈ 1.5 × 10^12 chunks; × 100 B ≈ 1.5 × 10^14 B ≈ 150 TB. At 4 MiB chunks the same data needs ≈ 2.4 × 10^10 entries ≈ 2.4 TB, which is why multi-PB services use MiB-scale chunks.",
+      "ref": "unit-2-deep-dives.md#5-chunking-and-deduplication"
+    },
+    {
+      "id": "C10-033",
+      "type": "single",
+      "tags": [
+        "dedupe",
+        "privacy",
+        "security"
+      ],
+      "difficulty": 3,
+      "prompt": "A researcher fills in a public offer-letter template with a target's name and tries salaries in $1,000 steps; one guess 'uploads' instantly with nothing to send. What's the root cause and the right fix?",
+      "choices": [
+        "Global client-side dedupe reveals whether anyone stores a chunk; scope dedupe per tenant or user, or dedupe server-side after the upload, for sensitive data",
+        "SHA-256 is too weak; switch to SHA-512",
+        "The researcher's rate of requests was too high; add a rate limit and the problem is solved",
+        "The data wasn't encrypted at rest"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The 'missing' list (and the instant upload) is an existence oracle across users. Removing the oracle (narrower scope, or always uploading and deduping after) fixes it. The hash's strength isn't involved: the attacker computes hashes of guesses they made. Rate limiting slows a small search space like salaries but doesn't close the channel. Encryption at rest doesn't change what the dedupe check reveals.",
+      "ref": "unit-2-deep-dives.md#5-chunking-and-deduplication"
+    },
+    {
+      "id": "C10-034",
+      "type": "multi",
+      "tags": [
+        "dedupe",
+        "security"
+      ],
+      "difficulty": 3,
+      "prompt": "An API lets a client commit a manifest of chunk hashes without uploading chunks the server already holds. Select ALL the measures that stop 'I know the hash' from becoming 'I can download the file'.",
+      "choices": [
+        "Allow a manifest to reference only chunks uploaded in this session or already held in the caller's own scope; otherwise demand the bytes",
+        "Issue chunk download URLs only for chunks of manifests the caller is authorised to read",
+        "Require a proof-of-ownership challenge that needs the actual bytes before linking an existing chunk to a new user",
+        "Switch the chunk hash from SHA-256 to SHA-512",
+        "Avoid writing chunk hashes to logs so nobody learns them"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "The fix is that a hash is never a capability: referencing requires owning the bytes (upload or proof of ownership), and downloading requires an authorised manifest. A longer hash changes nothing about this logic. Keeping hashes out of logs is good hygiene but is security by obscurity: hashes also appear in shared manifests, client caches and public file listings.",
+      "ref": "unit-2-deep-dives.md#5-chunking-and-deduplication"
+    },
+    {
+      "id": "C10-035",
+      "type": "single",
+      "tags": [
+        "dedupe",
+        "chunking",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "You're designing photo and video backup for phones. Which chunking and dedupe approach fits best?",
+      "choices": [
+        "Fixed-size parts for resumable uploads plus a per-user whole-file hash so a new phone doesn't re-upload a library the service already has",
+        "Content-defined chunking with 8 KiB chunks for maximum dedupe across users",
+        "Global client-side dedupe, because many users take the same photos",
+        "No chunking: upload each file in one request regardless of size"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Photos and videos are written once and rarely edited, so CDC finds little to share and tiny chunks explode the index; personal photos rarely duplicate across users, so global dedupe saves little and leaks. What matters is resumability on mobile links and recognising a library already backed up by the same user. Single-request uploads fail on large videos over flaky networks.",
+      "ref": "unit-2-deep-dives.md#5-chunking-and-deduplication"
+    },
+    {
+      "id": "C10-036",
+      "type": "single",
+      "tags": [
+        "dedupe",
+        "chunking",
+        "operations"
+      ],
+      "difficulty": 2,
+      "prompt": "Six months after launch, an engineer wants to change the CDC average chunk size from 1 MiB to 2 MiB. What's the main consequence?",
+      "choices": [
+        "New uploads stop deduplicating against everything stored before, because new boundaries produce new chunk hashes",
+        "Existing files become unreadable",
+        "Manifests become twice as large",
+        "Upload sessions in progress fail with ErrInvalid"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Chunk identities come from boundaries, so different parameters give different chunks for the same bytes: no dedupe against the old corpus, and old and new versions of a file share nothing. Existing manifests still reference existing chunks, so files stay readable. Larger chunks make manifests smaller, not larger. Sessions validate manifests, not chunker parameters. That's why parameters are versioned in manifests and changed rarely.",
+      "ref": "unit-2-deep-dives.md#5-chunking-and-deduplication"
+    },
+    {
+      "id": "C10-037",
+      "type": "single",
+      "tags": [
+        "dedupe",
+        "multitenancy",
+        "privacy",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "A platform stores statements and KYC documents for 40 credit unions. Which dedupe scope is right?",
+      "choices": [
+        "Per tenant: duplicates within one credit union dedupe, nothing is shared or observable across tenants",
+        "Global, because identical bytes are identical regardless of owner",
+        "Per file with a random salt shared across all tenants",
+        "Global, but only for files larger than 10 MB"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Global dedupe would let one tenant learn whether another stores a given document, and it creates shared fate across tenants (one chunk's loss or corruption hits many banks). Per-tenant scope keeps the within-tenant savings and isolation. A salt shared by all tenants is equivalent to global dedupe. A size threshold doesn't remove the side channel for large files.",
+      "ref": "unit-2-deep-dives.md#5-chunking-and-deduplication"
+    },
+    {
+      "id": "C10-038",
+      "type": "single",
+      "tags": [
+        "reliability",
+        "api-design",
+        "sync"
+      ],
+      "difficulty": 2,
+      "prompt": "Rolling the upload service drops 60,000 in-flight uploads, and clients restart 2 GB files from byte zero. What design change fixes this?",
+      "choices": [
+        "Keep session state (manifest, missing set, last activity) in a durable store so any server can resume any session and clients only send what's missing",
+        "Deploy the upload service less often",
+        "Increase the client's HTTP timeout to 24 hours",
+        "Upload each file in a single request so there's no session to lose"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Sessions in process memory die with the process; durable sessions plus a 'what's missing?' call make deploys invisible apart from the chunk in flight. Deploying less often only reduces frequency. Longer timeouts don't survive a process restart. Single-request uploads make the problem worse: any interruption restarts the whole file.",
+      "ref": "unit-2-deep-dives.md#6-resumable-uploads-integrity-and-the-commit-protocol"
+    },
+    {
+      "id": "C10-039",
+      "type": "single",
+      "tags": [
+        "integrity",
+        "dedupe",
+        "security"
+      ],
+      "difficulty": 3,
+      "prompt": "A client with failing RAM hashes a chunk correctly but sends different bytes. The blob tier stores the body under the claimed hash, and 1,200 users who later 'upload' the same chunk get the corrupted copy. Which control would have prevented it?",
+      "choices": [
+        "The blob front-end re-hashing every body and rejecting it when the hash doesn't match the name",
+        "Replicating every chunk five times instead of three",
+        "Weekly scrubbing of all chunks",
+        "TLS on the upload connection"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Only verifying the bytes against their name at write time stops wrong bytes entering a shared, deduplicated chunk. Replication faithfully copies the wrong bytes. A scrubber would notice later (and repair only if a good copy exists, which it doesn't), after the damage spread. TLS protects bytes in transit; the corruption happened before they left the client's memory.",
+      "ref": "unit-2-deep-dives.md#6-resumable-uploads-integrity-and-the-commit-protocol"
+    },
+    {
+      "id": "C10-040",
+      "type": "single",
+      "tags": [
+        "garbage-collection",
+        "dedupe",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "A chunk's reference count reaches zero. A minute later, another user's begin reports it as present ('don't send it'), then GC deletes it, then that user's commit references it. Which mechanism closes this race?",
+      "choices": [
+        "Begin pins chunks it reports as present for the session's lifetime, and GC only deletes chunks with zero references, no pins and an age beyond a grace period, deciding atomically with begin",
+        "Run GC only at night",
+        "Make the client retry the commit if downloads later fail",
+        "Increase the replication factor of chunks with zero references"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The race is between 'present' and 'delete'; a pin (the lab's keep set of live sessions) or a tombstone-and-grace protocol makes them unable to interleave. Running at night only makes the race rarer. Retrying a commit can't restore deleted bytes. Replication of a chunk you're about to delete is irrelevant.",
+      "ref": "unit-2-deep-dives.md#6-resumable-uploads-integrity-and-the-commit-protocol"
+    },
+    {
+      "id": "C10-041",
+      "type": "multi",
+      "tags": [
+        "garbage-collection",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL the windows a GC grace period must exceed.",
+      "choices": [
+        "The maximum upload-session TTL, since a session told 'present' may commit until it expires",
+        "The worst plausible lag of the asynchronous refcount pipeline",
+        "A margin for clock skew between GC and the metadata tier",
+        "The CDN's cache TTL for chunk downloads",
+        "The long-poll timeout of notification connections"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Anything that might still create a reference to a chunk GC sees as unreferenced must fit inside the grace period: live sessions, refcount updates still in flight, and skew between the clocks involved. CDN TTLs concern cached copies, not references (and immutable chunks never need invalidation). Long-poll timeouts carry hints, not references.",
+      "ref": "unit-2-deep-dives.md#6-resumable-uploads-integrity-and-the-commit-protocol"
+    },
+    {
+      "id": "C10-042",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "garbage-collection",
+        "testing"
+      ],
+      "difficulty": 2,
+      "prompt": "In labs/c10/chunker, Uploader.Commit is changed to add references every time it's called. A client times out waiting for the first commit and retries. What's the consequence?",
+      "choices": [
+        "Every chunk is referenced twice and LogicalBytes doubles; a later Release leaves the chunks referenced forever, a storage leak GC never reclaims",
+        "The second commit fails with ErrIncomplete",
+        "The file becomes unreadable because its chunks are deleted",
+        "Nothing, because the store deduplicates the chunks"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Commit must be idempotent per session; otherwise retries (which are normal after timeouts) double-count, and counts that never return to zero leak storage. ErrIncomplete only applies while chunks are missing. Nothing is deleted; the problem is the opposite. Chunk dedupe concerns stored bytes, not reference counts. TestUpload_ChunksArriveInAnyOrderAndRepeatedly catches it.",
+      "ref": "unit-2-deep-dives.md#6-resumable-uploads-integrity-and-the-commit-protocol"
+    },
+    {
+      "id": "C10-043",
+      "type": "single",
+      "tags": [
+        "integrity",
+        "testing"
+      ],
+      "difficulty": 2,
+      "prompt": "In labs/c10/chunker, Store.Get is changed to return stored bytes without re-hashing them. A chunk is bit-rotted with Corrupt. What still catches the corruption, and what doesn't?",
+      "choices": [
+        "Assemble still fails thanks to the whole-file hash, but any path that serves single chunks (a device fetching only the chunks it lacks, a range read, a CDN fill) hands out wrong bytes",
+        "Nothing catches it anywhere; Assemble returns the corrupted file",
+        "PutChunk refuses to store the next chunk",
+        "Commit fails with ErrMissingChunk"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Assemble checks every chunk via Get, every size, and the hash of the assembled bytes, so the whole-file hash still notices. But chunk-level reads are the common path in sync (delta downloads), and without per-chunk verification they serve silently wrong bytes. PutChunk and Commit don't read stored bytes, so they're unaffected. Verify at every layer that knows the expected hash.",
+      "ref": "unit-2-deep-dives.md#6-resumable-uploads-integrity-and-the-commit-protocol"
+    },
+    {
+      "id": "C10-044",
+      "type": "numeric",
+      "tags": [
+        "integrity",
+        "estimation",
+        "durability"
+      ],
+      "difficulty": 2,
+      "prompt": "A scrubber must re-read 400 PB of raw data every 14 days, spread evenly over 40,000 disks. Estimate the read rate per disk. Answer in MB/s.",
+      "value": 8.3,
+      "tolerance": 0.25,
+      "unit": "MB/s",
+      "explanation": "14 days ≈ 1.21 × 10^6 s. 400 × 10^15 B ÷ 1.21 × 10^6 s ≈ 3.3 × 10^11 B/s cluster-wide; ÷ 40,000 disks ≈ 8.3 × 10^6 B/s ≈ 8 MB/s per disk, a few percent of an HDD's ≈ 100–200 MB/s sequential bandwidth. Scrubbing is cheap insurance against latent sector errors.",
+      "ref": "unit-2-deep-dives.md#6-resumable-uploads-integrity-and-the-commit-protocol"
+    },
+    {
+      "id": "C10-045",
+      "type": "single",
+      "tags": [
+        "integrity",
+        "durability"
+      ],
+      "difficulty": 2,
+      "prompt": "Why aren't TCP checksums, disk ECC and 3× replication enough to guarantee you never serve corrupted file content?",
+      "choices": [
+        "Corruption also happens in RAM, controllers, firmware and your own code above those layers, replication copies whatever bytes it was given, and latent errors are only found by reading; only end-to-end hashes checked on write, read and by a scrubber catch them",
+        "They are enough; content hashes are only needed for dedupe",
+        "TCP checksums are disabled in most datacenters",
+        "Disk ECC only works on SSDs"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "This is the end-to-end argument: the endpoints that know what the bytes should be must check them. TCP's 16-bit checksum misses some errors and covers only the wire; disk ECC covers only the medium; replication can't tell a good copy from a bad one without a checksum. TCP checksums are not disabled, and HDDs have ECC too.",
+      "ref": "unit-2-deep-dives.md#6-resumable-uploads-integrity-and-the-commit-protocol"
+    },
+    {
+      "id": "C10-046",
+      "type": "single",
+      "tags": [
+        "sync",
+        "reliability",
+        "api-design"
+      ],
+      "difficulty": 2,
+      "prompt": "A client uploads all chunks; the network drops before the commit response arrives. When it reconnects, the session has expired. What should it do?",
+      "choices": [
+        "Begin a new session with the same manifest; every chunk is already stored so nothing is missing; commit, handling a possible stale-base conflict",
+        "Re-upload every chunk, because expired sessions delete their chunks immediately",
+        "Assume the first commit succeeded and mark the file saved",
+        "Ask the user to save the file again"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Begin deduplicates against everything in the store, including the chunks this client just uploaded (still protected by the grace period), so the retry costs one metadata round trip. Expiry doesn't delete chunks instantly; GC waits out the grace period. Assuming success without the commit response risks a lost save; if the first commit did land, the new commit will see a base-version change and the client reconciles. The user shouldn't have to do anything.",
+      "ref": "unit-2-deep-dives.md#6-resumable-uploads-integrity-and-the-commit-protocol"
+    },
+    {
+      "id": "C10-047",
+      "type": "single",
+      "tags": [
+        "vector-clocks",
+        "conflict-resolution",
+        "sync"
+      ],
+      "difficulty": 2,
+      "prompt": "Laptop and phone last synced budget.xlsx at {laptop: 3}. The laptop edits offline to {laptop: 4}. The phone edits and commits {laptop: 3, phone: 1}. The laptop reconnects. What should happen?",
+      "choices": [
+        "Concurrent: keep both versions, one as 'budget.xlsx (conflicted copy from phone)', and commit with a merged vector that dominates both",
+        "Take the remote version, because the phone committed first",
+        "Keep the local version, because its laptop counter is higher",
+        "Pick whichever version has the later modification time"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Each vector has an entry greater than the other's (laptop 4 > 3; phone 1 > 0), so neither edit saw the other: a conflict. 'Committed first' is order, not causality, and taking the remote discards the laptop's edit. Comparing one counter ignores the phone's edit. Modification times are device clocks and decide nothing reliably.",
+      "ref": "unit-2-deep-dives.md#7-the-sync-protocol-and-conflicts"
+    },
+    {
+      "id": "C10-048",
+      "type": "single",
+      "tags": [
+        "vector-clocks",
+        "sync"
+      ],
+      "difficulty": 2,
+      "prompt": "A device holds a file at {a: 2, b: 1}. The server's version is {a: 2, b: 2}. What does Resolve return?",
+      "choices": [
+        "TakeRemote: the local version is Before the remote one",
+        "KeepLocal: the versions are equal on a",
+        "Conflict: the vectors differ",
+        "KeepLocal: local is After remote"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Every local entry is ≤ the remote one and b is strictly smaller, so local Before remote: the remote already includes the local history plus another edit by b, and the device should take it. Equality on one entry doesn't make the vectors equal. Differing vectors are only a conflict when each has an entry greater than the other's. Local is not After: it has nothing the remote lacks.",
+      "ref": "unit-2-deep-dives.md#7-the-sync-protocol-and-conflicts"
+    },
+    {
+      "id": "C10-049",
+      "type": "single",
+      "tags": [
+        "vector-clocks",
+        "conflict-resolution"
+      ],
+      "difficulty": 3,
+      "prompt": "The laptop resolves a conflict between {desktop: 5, laptop: 2} and {desktop: 4, laptop: 3}. Which vector should its new version carry?",
+      "choices": [
+        "{desktop: 5, laptop: 4}: the entry-wise merge, incremented for the laptop's own write",
+        "{desktop: 5, laptop: 3}: the merge alone",
+        "{desktop: 6, laptop: 4}: increment every entry",
+        "{desktop: 9, laptop: 5}: the entry-wise sum"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Merge gives {5, 3}, which dominates both parents; the resolving write then increments its own entry, so it's distinguishable from any other device's resolution of the same pair (two different resolutions both carrying {5, 3} would compare Equal and one would be silently dropped). Incrementing desktop claims an edit desktop never made. Summing counts double-counts shared history and breaks comparisons.",
+      "ref": "unit-2-deep-dives.md#7-the-sync-protocol-and-conflicts"
+    },
+    {
+      "id": "C10-050",
+      "type": "single",
+      "tags": [
+        "sync",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A sync client stores its new cursor when it receives a page of changes and then applies the page. The laptop lid closes in between. What happens?",
+      "choices": [
+        "Those changes are never applied: the device believes it's up to date, shows stale files, and its next edit of one of them commits with a stale base",
+        "Nothing: the next notification re-delivers the same changes",
+        "The server detects the gap and resends the page automatically",
+        "The device downloads the changes twice"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The cursor says 'applied through N', so the next pull starts after N and the page is skipped for good. Notifications are hints about new changes, not replays of old ones, and the server can't know the client didn't apply what it fetched. Downloading twice is the harmless outcome of the opposite order (apply then advance), which is why apply must be idempotent and both should happen in one local transaction.",
+      "ref": "unit-2-deep-dives.md#7-the-sync-protocol-and-conflicts"
+    },
+    {
+      "id": "C10-051",
+      "type": "numeric",
+      "tags": [
+        "conflict-resolution",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A service handles 300 M commits a day and ≈ 0.04% of commits race another edit of the same file. If it used last-commit-wins, how many edits would it silently discard per day? Answer in edits.",
+      "value": 120000,
+      "tolerance": 0.2,
+      "unit": "edits",
+      "explanation": "300 × 10^6 × 0.0004 = 1.2 × 10^5 ≈ 120,000 discarded edits a day, each discovered later as 'my changes disappeared'. That's the case for conflicted copies: about 120,000 extra files a day that users can merge, instead of 120,000 lost edits.",
+      "ref": "unit-2-deep-dives.md#7-the-sync-protocol-and-conflicts"
+    },
+    {
+      "id": "C10-052",
+      "type": "single",
+      "tags": [
+        "conflict-resolution",
+        "clocks",
+        "sync"
+      ],
+      "difficulty": 2,
+      "prompt": "Where is last-writer-wins acceptable in a file sync product?",
+      "choices": [
+        "For low-value metadata such as a 'starred' flag or a folder colour, ordered by the server's commit sequence",
+        "For file contents, ordered by device modification time",
+        "For file contents whenever conflicts are rare",
+        "Nowhere: every field needs version vectors"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "LWW is fine where losing a concurrent update is harmless and the order comes from one authority (the server). File contents by device time loses real edits to clock skew. 'Rare' conflicts are still ≈ 100k+ lost edits a day at scale. Version vectors on every trivial flag would be overkill.",
+      "ref": "unit-2-deep-dives.md#7-the-sync-protocol-and-conflicts"
+    },
+    {
+      "id": "C10-053",
+      "type": "single",
+      "tags": [
+        "sync",
+        "concurrency",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "A teammate proposes locking a file whenever someone opens it, to prevent conflicts. Why isn't that the correctness mechanism?",
+      "choices": [
+        "The devices that cause conflicts are offline ones that can't take the lock, and a crashed or disconnected holder blocks everyone until a timeout, after which there are two editors again",
+        "Locks are too slow to acquire over HTTP",
+        "Databases can't store locks",
+        "Locks only work for text files"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Offline editing and crashed clients defeat pessimistic locking; correctness must come from detecting concurrency at commit time and keeping both versions. Locks can be useful as advisory hints ('Priya is editing'). Latency, storage and file type aren't the issue.",
+      "ref": "unit-2-deep-dives.md#7-the-sync-protocol-and-conflicts"
+    },
+    {
+      "id": "C10-054",
+      "type": "multi",
+      "tags": [
+        "sync",
+        "data-model"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the state a sync client should keep in its local database.",
+      "choices": [
+        "A cursor per namespace, advanced in the same local transaction that applies changes",
+        "For each file, the last synced version, its version vector and its chunk list",
+        "An index of the chunk hashes the device already holds, for chunk-level delta downloads",
+        "A wall-clock timestamp of the last notification, used as the cursor",
+        "Every other user's manifests for every namespace in the tenant"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Cursors, per-file synced state and a local chunk index make sync crash-safe and incremental (downloads skip chunks the device has from any file). A notification timestamp is not a position in the journal and reintroduces the timestamp-cursor bug. Other users' manifests outside the namespaces the device syncs are neither needed nor authorised.",
+      "ref": "unit-2-deep-dives.md#7-the-sync-protocol-and-conflicts"
+    },
+    {
+      "id": "C10-055",
+      "type": "numeric",
+      "tags": [
+        "erasure-coding",
+        "durability",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A 16 TB disk fails in a cluster that stores sealed data with Reed–Solomon (10, 4). Roughly how much data must be read across the cluster to rebuild its contents? Answer in TB.",
+      "value": 160,
+      "tolerance": 0.2,
+      "unit": "TB",
+      "explanation": "Each lost fragment is rebuilt from any 10 surviving fragments of its stripe, so rebuilding 16 TB reads ≈ 10 × 16 = 160 TB. Under 3× replication the rebuild reads one surviving copy, ≈ 16 TB. That 10× repair traffic is the price of 1.4× instead of 3× storage, and the reason LRC codes add local parity.",
+      "ref": "unit-2-deep-dives.md#8-durability-hot-shares-and-cold-tiering"
+    },
+    {
+      "id": "C10-056",
+      "type": "single",
+      "tags": [
+        "erasure-coding",
+        "replication",
+        "durability"
+      ],
+      "difficulty": 2,
+      "prompt": "Why not erasure-code chunks as soon as they're written?",
+      "choices": [
+        "Fresh data arrives in small writes, is read immediately by other devices and is often superseded within minutes; replicate open volumes and code them when sealed",
+        "Erasure coding can't protect against disk failures",
+        "Erasure-coded data can't be read without decoding every fragment",
+        "Erasure coding needs more raw storage than replication"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Coding tiny, hot, short-lived writes wastes CPU and makes the hottest reads degrade across many disks; sealed volumes are the right unit. EC does protect against disk failures (any 4 of 14 for RS(10, 4)). A healthy read of systematic RS data reads the data fragment directly; decoding is only for degraded reads. EC uses less raw storage (≈ 1.4× vs 3×).",
+      "ref": "unit-2-deep-dives.md#8-durability-hot-shares-and-cold-tiering"
+    },
+    {
+      "id": "C10-057",
+      "type": "single",
+      "tags": [
+        "erasure-coding",
+        "availability",
+        "durability"
+      ],
+      "difficulty": 3,
+      "prompt": "Sealed data must survive the loss of one of three availability zones. Which layout does that at the lowest raw overhead among these?",
+      "choices": [
+        "RS(6, 3) with 3 fragments in each zone (≈ 1.5×)",
+        "RS(10, 4) with fragments spread as evenly as possible over the 3 zones (≈ 1.4×)",
+        "RS(10, 4) entirely inside one zone (≈ 1.4×)",
+        "3× replication with all copies in one zone (3×)"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "With RS(6, 3) laid out 3 per zone, a zone loss removes 3 fragments, exactly what the code tolerates. RS(10, 4) over 3 zones puts ≈ 5 fragments in some zone, so a zone loss exceeds the 4 it tolerates. Anything confined to one zone dies with the zone, regardless of overhead.",
+      "ref": "unit-2-deep-dives.md#8-durability-hot-shares-and-cold-tiering"
+    },
+    {
+      "id": "C10-058",
+      "type": "single",
+      "tags": [
+        "durability",
+        "replication",
+        "partitioning"
+      ],
+      "difficulty": 3,
+      "prompt": "A storage team switches from placing each chunk's 3 replicas on random disks to a fixed set of disk groups (copysets). What changes?",
+      "choices": [
+        "Simultaneous triple failures lose data far less often, but each loss event loses many more chunks",
+        "Data loss becomes impossible",
+        "Repair becomes faster because every disk participates in every rebuild",
+        "Storage overhead drops from 3× to 1.5×"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "With random placement almost every triple of disks holds some chunk's full set of copies, so any triple failure loses data; with few groups, a random triple rarely matches one, but a match loses a whole group's contents. Loss is still possible. Constrained placement *reduces* rebuild parallelism (fewer disks share a failed disk's data), which is one of its costs. The replication factor is unchanged.",
+      "ref": "unit-2-deep-dives.md#8-durability-hot-shares-and-cold-tiering"
+    },
+    {
+      "id": "C10-059",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "fan-out",
+        "caching"
+      ],
+      "difficulty": 3,
+      "prompt": "A shared folder has 60,000 member devices; a commit every two minutes wakes them all, and each calls the change feed on the same metadata shard within a second. Which combination fixes it?",
+      "choices": [
+        "Fan out at the notification edge, add a random wake-up jitter, serve the journal's tail from a per-namespace cache with request coalescing, and serve the new chunks from a CDN",
+        "Add read replicas to the shard and keep everything else the same",
+        "Lengthen the long-poll timeout from 60 s to 10 minutes",
+        "Include the full file contents in the notification so devices don't call the shard"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "All 60,000 devices want the same answer, so cache and coalesce it (one shard read per new sequence number), spread the arrivals with jitter, and let immutable chunks come from the CDN. Read replicas add capacity but still serve 60,000 identical reads per commit and leave origin egress untouched. The long-poll timeout affects idle reconnects, not the burst after a change. Contents in notifications make lost notifications lost data and multiply payload bytes.",
+      "ref": "unit-2-deep-dives.md#8-durability-hot-shares-and-cold-tiering"
+    },
+    {
+      "id": "C10-060",
+      "type": "single",
+      "tags": [
+        "tiering",
+        "dedupe",
+        "cost"
+      ],
+      "difficulty": 2,
+      "prompt": "A chunk is referenced by a file a user opens daily and by a five-year-old version of another file. How should tiering treat it?",
+      "choices": [
+        "Keep it hot: with dedupe, a chunk (or the volume holding it) is tiered by its hottest reference",
+        "Move it cold, because one of its references is five years old",
+        "Make a cold copy for the old version and a hot copy for the current file",
+        "Delete it, since versions older than the retention window are purged"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Tiering must decide per chunk or volume by the most demanding reference, or today's file becomes slow. Moving it cold penalises the active file. Duplicating it per tier undoes dedupe for no benefit. Retention purges versions past the window, but the chunk is still referenced by the active file, so it stays.",
+      "ref": "unit-2-deep-dives.md#8-durability-hot-shares-and-cold-tiering"
+    },
+    {
+      "id": "C10-061",
+      "type": "single",
+      "tags": [
+        "durability",
+        "banking",
+        "garbage-collection"
+      ],
+      "difficulty": 2,
+      "prompt": "Bank statements must be retained for seven years and placed under legal hold when litigation starts. How does that interact with the storage design?",
+      "choices": [
+        "Retention and holds keep the versions referenced, so GC never collects their chunks; deletions before the date are refused, ideally enforced by an immutable (WORM) storage mode",
+        "Statements are copied to a separate system and deleted from the sync service",
+        "GC checks a hold flag on each chunk before deleting it",
+        "Holds disable deduplication for the whole tenant"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Holds are references: as long as a version is retained or held, its chunks have a non-zero count and GC leaves them alone, and a WORM mode stops even administrators shortening retention. Copying elsewhere is possible but isn't required by the design. Chunks don't know about holds; versions do. Dedupe within the tenant is unaffected because shared chunks simply have more references.",
+      "ref": "unit-2-deep-dives.md#8-durability-hot-shares-and-cold-tiering"
+    },
+    {
+      "id": "C10-062",
+      "type": "single",
+      "tags": [
+        "design",
+        "pitfalls"
+      ],
+      "difficulty": 2,
+      "prompt": "A candidate's design stores file bytes in a Postgres bytea column 'because Postgres handles large objects'. Which consequence will the interviewer push on?",
+      "choices": [
+        "Backups, replication, vacuum and failover all scale with petabytes of bytes, and large reads evict the metadata working set; metadata and blobs need different stores",
+        "Postgres can't store binary data",
+        "Postgres doesn't support transactions on large objects",
+        "Bytea columns can't be indexed, so files can't be found"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The problem is operational and economic: the bytes are thousands of times the metadata, with the opposite access pattern and failure concerns. Postgres can store binary data, supports transactions, and finds rows by indexed metadata columns, so the other choices misstate the issue.",
+      "ref": "unit-2-deep-dives.md#common-mistakes"
+    }
+  ]
+}

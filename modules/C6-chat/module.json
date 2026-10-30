@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "id": "C6",
+  "slug": "chat",
+  "title": "Case study: chat / messaging",
+  "track": "C",
+  "status": "written",
+  "core": true,
+  "summary": "Ten million open sockets, one writer per conversation, idempotent sends, sync from a cursor, receipts as cursors, fan-out thresholds and presence by subscription, with a conversation-core lab.",
+  "hours": {
+    "core": 7,
+    "stretch": 2,
+    "total": 9
+  },
+  "prerequisites": [
+    "A1",
+    "A5",
+    "A6"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/C6-chat",
+    "readme": "modules/C6-chat/README.md",
+    "quiz": "modules/C6-chat/quiz.json",
+    "design_exercise": "modules/C6-chat/design-exercise.md",
+    "teachback": "modules/C6-chat/teachback.md",
+    "lab": "labs/c6",
+    "solution": "solutions/c6"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Guided design: requirements, estimation, API and data model, the send and sync paths",
+      "file": "modules/C6-chat/unit-1-guided-design.md",
+      "hours": {
+        "core": 3.5,
+        "stretch": 0.5
+      },
+      "labs": []
+    },
+    {
+      "n": 2,
+      "title": "Deep dives: connections at scale, ordering and delivery guarantees, offline sync, fan-out and presence, the lab",
+      "file": "modules/C6-chat/unit-2-deep-dives.md",
+      "hours": {
+        "core": 3.5,
+        "stretch": 1.5
+      },
+      "labs": [
+        "chat"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "chat",
+      "title": "Conversation core: single-writer dense sequencing, idempotent sends, sync from a cursor, bounded drop-when-full subscriptions, monotonic read cursors",
+      "unit": 2,
+      "core": true
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Scope a messaging prompt in six minutes: ask the clarifying questions that change the design (group size, online and offline delivery, ordering and duplicates, receipts and presence, retention and E2E), name the dominant NFR (open connections) and the hardest guarantee (same order, no loss, no visible duplicates), and state an explicit out-of-scope list.",
+      "core": true
+    },
+    {
+      "text": "Estimate concurrent connections and their memory, gateway count, peak sends and deliveries, storage with replication and retention, heartbeat rate and the reconnect wave of a deploy, and tie each number to the decision it drives.",
+      "core": true
+    },
+    {
+      "text": "Design the client protocol and data model: transport per client type, an idempotent send frame keyed by (conversation, sender, client message id) with an ack carrying seq, after_seq catch-up and before_seq history, and messages keyed (conversation_id, seq) partitioned by conversation.",
+      "core": true
+    },
+    {
+      "text": "Draw the send and sync paths (L4 balancer, stateful gateways, session registry, stateless chat service, partitioned log store, best-effort per-gateway bus, push for offline members), justify every box, ack after the durable write, and connect before syncing.",
+      "core": true
+    },
+    {
+      "text": "Operate the connection tier: rolling drains sized to the auth and sync budget, exponential backoff with full jitter, heartbeats with a registry TTL, bounded per-connection queues that drop and ask for a resync, resumable sessions and token expiry on long-lived sockets.",
+      "core": true
+    },
+    {
+      "text": "Guarantee order and delivery: one writer per conversation assigning dense seqs with the durable write, gap detection on the client, idempotent sends with dedupe atomic with the insert, dedupe by seq on delivery, exactly-once as an end-to-end property, and receipts as monotonic cursors (delivered per device, read per user).",
+      "core": true
+    },
+    {
+      "text": "Design reconnect sync and group fan-out: one inbox-cursor call then per-conversation after_seq, fan-out on write below a member threshold derived from burst arithmetic and on read above it, push digests and receipt counts for channels, and presence as soft state published only to subscribers.",
+      "core": true
+    },
+    {
+      "text": "Implement the conversation core in Go that passes its tests under -race: dense seqs under concurrent senders, idempotent sends under concurrent retries, sync from a cursor, bounded subscriptions that never block senders, leak-free close and cancellation, monotonic read cursors.",
+      "core": true
+    },
+    {
+      "text": "Extend the design to two regions (a home region per conversation, what crosses, what you refuse) and to end-to-end encryption (what the server keeps as metadata, what it loses, how sync and new devices change).",
+      "core": false
+    }
+  ]
+}

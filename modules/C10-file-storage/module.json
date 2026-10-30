@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "id": "C10",
+  "slug": "file-storage",
+  "title": "Case study: file storage and sync",
+  "track": "C",
+  "status": "written",
+  "core": true,
+  "summary": "Chunking, dedupe, metadata vs blob stores, sync conflicts, resumable uploads.",
+  "hours": {
+    "core": 7,
+    "stretch": 2,
+    "total": 9
+  },
+  "prerequisites": [
+    "A4",
+    "A6"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/C10-file-storage",
+    "readme": "modules/C10-file-storage/README.md",
+    "quiz": "modules/C10-file-storage/quiz.json",
+    "design_exercise": "modules/C10-file-storage/design-exercise.md",
+    "teachback": "modules/C10-file-storage/teachback.md",
+    "lab": "labs/c10",
+    "solution": "solutions/c10"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Guided design: requirements, estimation, API and data model, high-level design",
+      "file": "modules/C10-file-storage/unit-1-guided-design.md",
+      "hours": {
+        "core": 3,
+        "stretch": 0.5
+      },
+      "labs": []
+    },
+    {
+      "n": 2,
+      "title": "Deep dives: chunking and dedupe; resumable uploads, integrity and commits; sync and conflicts; durability, hot shares and tiering",
+      "file": "modules/C10-file-storage/unit-2-deep-dives.md",
+      "hours": {
+        "core": 4,
+        "stretch": 1.5
+      },
+      "labs": [
+        "chunker",
+        "syncvv"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "chunker",
+      "title": "Storage core: fixed and content-defined chunking, a deduplicating reference-counted chunk store with verification, manifests, resumable upload sessions, exactly-once commit, expiry and GC",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "syncvv",
+      "title": "Version vectors and conflict resolution with conflicted copies (STRETCH)",
+      "unit": 2,
+      "core": false
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Scope a file storage and sync service in six minutes: the clarifying questions whose answers change the design (sync versus drive, file sizes and networks, edit patterns, sharing, offline edits, sync latency, versions, durability) and non-functional requirements with numbers.",
+      "core": true
+    },
+    {
+      "text": "Estimate logical, unique and raw storage (replication versus erasure coding), commit rate, upload bandwidth with and without delta sync, notification fan-out and connections, and metadata size and shard count, and tie each number to a decision.",
+      "core": true
+    },
+    {
+      "text": "Design the API and data model: upload sessions with manifests and missing chunks, presigned direct-to-blob uploads, a conditional idempotent commit, a cursor-based change feed; a metadata store sharded by namespace with stable file ids, versions, a journal and shared namespaces, and a content-addressed chunk index.",
+      "core": true
+    },
+    {
+      "text": "Draw the high-level design with the upload, download and sync paths traced, notifications published through an outbox as hints, and every box justified by a requirement or a number.",
+      "core": true
+    },
+    {
+      "text": "Choose between fixed-size and content-defined chunking and a chunk size from index, manifest and bandwidth arithmetic, and decide the dedupe scope given the existence side channel and hash-as-capability risks.",
+      "core": true
+    },
+    {
+      "text": "Design resumable uploads and the commit protocol: durable sessions, idempotent chunk uploads and commits, bytes-first commits, orphan GC with pins and grace periods, and hash verification on write, on read and by a scrubber.",
+      "core": true
+    },
+    {
+      "text": "Implement the storage core (labs/c10/chunker): fixed and content-defined chunking with a gear hash, a deduplicating, reference-counted, verifying chunk store, manifests, and resumable upload sessions that accept chunks in any order and in parallel, commit exactly once, expire and are garbage collected, passing under -race.",
+      "core": true
+    },
+    {
+      "text": "Design the sync protocol (per-namespace journal and cursors, long-poll or push hints, crash-safe apply, chunk-level delta download) and explain how concurrent edits are detected with base versions or version vectors and resolved with conflicted copies, and when last-writer-wins is acceptable.",
+      "core": true
+    },
+    {
+      "text": "Choose between replication and erasure coding and place data across racks and zones, and protect hot shared folders and public links with edge fan-out, jitter, caching and a CDN.",
+      "core": true
+    },
+    {
+      "text": "Implement version vectors and conflict resolution (labs/c10/syncvv): compare, merge and decide take, keep or conflicted copy.",
+      "core": false
+    },
+    {
+      "text": "Design cold tiering, retention and legal holds, and reason about erasure-coding repair traffic and cross-region layouts with numbers.",
+      "core": false
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "learner": {
+    "name": ""
+  },
+  "modules": {},
+  "review": {
+    "cards": {},
+    "log": []
+  },
+  "estimate": {
+    "attempts": []
+  },
+  "activity": [],
+  "tutor_notes": []
+}

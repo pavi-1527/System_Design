@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "C1",
+  "slug": "url-shortener",
+  "title": "Case study: URL shortener",
+  "track": "C",
+  "status": "written",
+  "core": true,
+  "summary": "Read-heavy key-value design run through the 45-minute framework: unique codes without coordination, a redirect hot path that survives viral links and cache restarts, an async analytics and abuse pipeline.",
+  "hours": {"core": 5, "stretch": 1, "total": 6},
+  "prerequisites": ["A1", "A2", "A3"],
+  "gate": {"requires": ["quiz", "lab", "design", "teachback"]},
+  "paths": {
+    "dir": "modules/C1-url-shortener",
+    "readme": "modules/C1-url-shortener/README.md",
+    "quiz": "modules/C1-url-shortener/quiz.json",
+    "design_exercise": "modules/C1-url-shortener/design-exercise.md",
+    "teachback": "modules/C1-url-shortener/teachback.md",
+    "lab": "labs/c1",
+    "solution": "solutions/c1"
+  },
+  "units": [
+    {"n": 1, "title": "Guided design: requirements, estimation, API and model, HLD, three deep dives", "file": "modules/C1-url-shortener/unit-1-url-shortener.md", "hours": {"core": 5, "stretch": 1}, "labs": ["keygen"]}
+  ],
+  "labs": [
+    {"package": "keygen", "title": "Unique short codes: base 62, keyed permutation, counter ranges with compare-and-swap, random codes with insert-if-absent", "unit": 1, "core": true}
+  ],
+  "outcomes": [
+    {"text": "Scope a shortener prompt in ≤ 6 minutes: core operations, NFRs with numbers, out-of-scope list, and the four clarifying questions (guessability, analytics, aliases, takedown SLA) whose answers change the architecture.", "core": true},
+    {"text": "Estimate peak creates, peak redirects, storage with replication, the base-62 code length and its headroom, cache memory for the hot set and egress, and state which decision each number drives.", "core": true},
+    {"text": "Design the API (idempotent create, a browser-followable 302 redirect with explicit caching semantics, 404 vs 410) and a data model whose partition key follows the dominant access pattern, and defend the store choice with a flip condition.", "core": true},
+    {"text": "Draw a minimal, justified high-level design with both paths traced and rates on the arrows, and say what each box does when it fails.", "core": true},
+    {"text": "Choose an ID scheme (random codes with insert-if-absent vs counter ranges with a keyed permutation vs a global counter vs URL hashing vs a key pool) using collision arithmetic, coordination cost, crash behaviour and guessability.", "core": true},
+    {"text": "Implement base-62 codes, a bijective mixer, compare-and-swap range allocation with a per-node generator, and random codes with atomic insert-if-absent, and show with a break-it what a non-atomic counter does (labs/c1/keygen).", "core": true},
+    {"text": "Design the redirect hot path: in-process L1 with request coalescing for a viral key, negative caching against enumeration, lazy expiry, a measurable takedown fan-out, and fail-open behaviour on a store outage.", "core": true},
+    {"text": "Design the click-analytics pipeline (async events, durable log, stream aggregates, nightly exact recompute, HyperLogLog for uniques) and the abuse controls (reputation scanning off the create path, open-redirect validation, rate limits, takedown), and explain what breaks at 10× and 100×.", "core": true},
+    {"text": "Estimate the monthly cost and name the lines that scale with clicks rather than links, and sketch the multi-region evolution.", "core": false}
+  ]
+}

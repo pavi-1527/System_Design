@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "C15",
+  "slug": "metrics-monitoring",
+  "title": "Case study (STRETCH): metrics and monitoring system",
+  "track": "C",
+  "status": "planned",
+  "core": false,
+  "summary": "Time-series ingestion, downsampling, cardinality, alerting pipeline.",
+  "hours": {
+    "core": 5,
+    "stretch": 1,
+    "total": 6
+  },
+  "prerequisites": [
+    "A6",
+    "A8"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/C15-metrics-monitoring",
+    "readme": "modules/C15-metrics-monitoring/README.md",
+    "quiz": "modules/C15-metrics-monitoring/quiz.json",
+    "design_exercise": "modules/C15-metrics-monitoring/design-exercise.md",
+    "teachback": "modules/C15-metrics-monitoring/teachback.md"
+  }
+}

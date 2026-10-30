@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "id": "C12",
+  "slug": "search-autocomplete",
+  "title": "Case study: search autocomplete",
+  "track": "C",
+  "status": "written",
+  "core": true,
+  "summary": "Keystroke-rate estimation, a precomputed top-K prefix index held in RAM, cacheable suggest API, decayed counts and sketches, immutable snapshots swapped atomically, safety filters, with a prefix-index lab.",
+  "hours": {
+    "core": 5,
+    "stretch": 1,
+    "total": 6
+  },
+  "prerequisites": [
+    "A3",
+    "A4"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/C12-search-autocomplete",
+    "readme": "modules/C12-search-autocomplete/README.md",
+    "quiz": "modules/C12-search-autocomplete/quiz.json",
+    "design_exercise": "modules/C12-search-autocomplete/design-exercise.md",
+    "teachback": "modules/C12-search-autocomplete/teachback.md",
+    "lab": "labs/c12",
+    "solution": "solutions/c12"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Guided design: requirements, estimation, API, data model, high-level design",
+      "file": "modules/C12-search-autocomplete/unit-1-guided-design.md",
+      "hours": {
+        "core": 2.5,
+        "stretch": 0.5
+      },
+      "labs": []
+    },
+    {
+      "n": 2,
+      "title": "Deep dives: the prefix index, the freshness pipeline and snapshot publishing, the lab",
+      "file": "modules/C12-search-autocomplete/unit-2-deep-dives.md",
+      "hours": {
+        "core": 2.5,
+        "stretch": 0.5
+      },
+      "labs": [
+        "suggest"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "suggest",
+      "title": "Prefix index with precomputed top-K, atomically swappable serving snapshot, half-life decaying counter",
+      "unit": 2,
+      "core": true
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Scope an autocomplete prompt in six minutes: ask the questions that change the design (volume, what is completed, personalisation, freshness, latency, K and prefix length, locales, what must never be suggested, behaviour when suggest is down), state NFRs as numbers and an explicit out-of-scope list.",
+      "core": true
+    },
+    {
+      "text": "Estimate keystroke-rate lookups (searches × keystrokes × peak, before and after client mitigation), index memory from distinct prefixes and bytes per node, serving nodes, egress, log volume and snapshot distribution, and tie each number to a decision, above all replicate-whole vs partition.",
+      "core": true
+    },
+    {
+      "text": "Design a cacheable suggest API (GET, normalised q echoed, empty list for an empty prefix, Cache-Control with stale-* directives, capped limit, edge rate limits), the client's debounce, prefix cache and sequencing, and the three data sets (raw events, aggregated counts, serving snapshot) with their keys and stores.",
+      "core": true
+    },
+    {
+      "text": "Draw the read path (client → CDN → load balancer → replicas holding the index in RAM) and the write path (submitted searches → log → aggregation → build → validate → versioned snapshot → canaried rollout), justify every box with a requirement or a number, and walk one keystroke through it against the latency budget.",
+      "core": true
+    },
+    {
+      "text": "Choose an index layout (trie with precomputed top-K ids, hash map of prefixes, sorted array + scan, FST) with lookup cost and bytes per node, explain why top-K at query time is backwards for a hot path, and explain how a pointer-free layout avoids garbage-collector pauses.",
+      "core": true
+    },
+    {
+      "text": "Design freshness: exponential decay with a half-life instead of resets or hard windows, exact batch counts for the main tier, a count-min sketch plus heavy hitters for a per-minute trending tier, and the lookup-time merge of the two.",
+      "core": true
+    },
+    {
+      "text": "Publish a new index with no lock on the read path: immutable versioned snapshots, validation and golden prefixes, atomic pointer swap, canary and waves within the 2× memory headroom, rollback; and handle hot prefixes and partitioning (locale, then split ranges or a hash ring, hot shards replicated more, shortest prefixes at the edge).",
+      "core": true
+    },
+    {
+      "text": "Keep suggestions safe: minimum support on distinct users rather than raw counts, a whole-word blocklist at build time, and a fast override set for takedowns applied at lookup over every tier, with an audit trail and a propagation SLO.",
+      "core": true
+    },
+    {
+      "text": "Implement in Go, passing tests under -race, a prefix index with a precomputed top-K per node, a serving snapshot swapped through an atomic pointer, and a lazily decaying counter whose snapshot feeds the next build (labs/c12/suggest).",
+      "core": true
+    },
+    {
+      "text": "Extend the design without touching the global path: client-side or parallel-endpoint personalisation, bounded fuzzy prefix matching with precomputed candidates, and multi-region serving from replicated snapshots.",
+      "core": false
+    }
+  ]
+}

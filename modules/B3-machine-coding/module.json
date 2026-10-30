@@ -1,0 +1,325 @@
+{
+  "schema_version": 1,
+  "id": "B3",
+  "slug": "machine-coding",
+  "title": "Machine-coding problem bank (timed)",
+  "track": "B",
+  "status": "written",
+  "core": true,
+  "summary": "Timed machine-coding problem bank (18 problems: LRU/TTL cache, rate limiter, parking lot, transactional KV, pub-sub, job scheduler, Splitwise, elevator, ticket booking, in-memory file system, async logger, vending machine, order book, inventory reservations, resilient HTTP client, URL shortener, plus two stretch problems and the round playbook), each with staged requirements, failing tests, a reference solution, a rubric and a debrief.",
+  "hours": {
+    "core": 46,
+    "stretch": 7.5,
+    "total": 53.5
+  },
+  "prerequisites": [
+    "B0",
+    "B2"
+  ],
+  "gate": {
+    "requires": [
+      "lab",
+      "design"
+    ]
+  },
+  "paths": {
+    "dir": "modules/B3-machine-coding",
+    "readme": "modules/B3-machine-coding/README.md",
+    "quiz": "modules/B3-machine-coding/quiz.json",
+    "design_exercise": "modules/B3-machine-coding/design-exercise.md",
+    "lab": "labs/b3",
+    "solution": "solutions/b3"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Caches and limiters: data structures, clocks and locks",
+      "file": "modules/B3-machine-coding/unit-1-caches-and-limiters.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "lrucache",
+        "ratelimit"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Modelling and state: parking lot, transactions",
+      "file": "modules/B3-machine-coding/unit-2-modelling-and-state.md",
+      "hours": {
+        "core": 5.5,
+        "stretch": 0.5
+      },
+      "labs": [
+        "parkinglot",
+        "kvtx"
+      ]
+    },
+    {
+      "n": 3,
+      "title": "Messaging and scheduling: acks, redelivery, timers",
+      "file": "modules/B3-machine-coding/unit-3-messaging-and-scheduling.md",
+      "hours": {
+        "core": 6.5,
+        "stretch": 1
+      },
+      "labs": [
+        "pubsub",
+        "scheduler"
+      ]
+    },
+    {
+      "n": 4,
+      "title": "Algorithms, state machines and contention",
+      "file": "modules/B3-machine-coding/unit-4-algorithms-and-contention.md",
+      "hours": {
+        "core": 8,
+        "stretch": 1
+      },
+      "labs": [
+        "splitwise",
+        "elevator",
+        "ticketing"
+      ]
+    },
+    {
+      "n": 5,
+      "title": "Trees and sinks: in-memory file system, async logging",
+      "file": "modules/B3-machine-coding/unit-5-trees-and-sinks.md",
+      "hours": {
+        "core": 6,
+        "stretch": 0
+      },
+      "labs": [
+        "memfs",
+        "logx"
+      ]
+    },
+    {
+      "n": 6,
+      "title": "State and matching: vending machine, order book",
+      "file": "modules/B3-machine-coding/unit-6-state-and-matching.md",
+      "hours": {
+        "core": 6,
+        "stretch": 0
+      },
+      "labs": [
+        "vending",
+        "orderbook"
+      ]
+    },
+    {
+      "n": 7,
+      "title": "Reservations and resilience: inventory, HTTP client, URL shortener",
+      "file": "modules/B3-machine-coding/unit-7-reservations-and-resilience.md",
+      "hours": {
+        "core": 6,
+        "stretch": 0
+      },
+      "labs": [
+        "inventory",
+        "resilient",
+        "shortener"
+      ]
+    },
+    {
+      "n": 8,
+      "title": "Stretch problems and the round playbook",
+      "file": "modules/B3-machine-coding/unit-8-stretch-and-capstone.md",
+      "hours": {
+        "core": 3,
+        "stretch": 4
+      },
+      "labs": [
+        "leaderboard",
+        "hashcache"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "lrucache",
+      "title": "LRU cache with TTL: O(1) recency, expiry heap, callbacks outside the lock",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "ratelimit",
+      "title": "Rate limiter library: token bucket + sliding window behind one interface, per-key, bounded memory",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "parkinglot",
+      "title": "Parking lot: pluggable pricing and allocation, no double allocation under contention",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "kvtx",
+      "title": "In-memory KV store with nested transactions, undo log and concurrent sessions",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "pubsub",
+      "title": "Pub-sub broker: bounded subscribers, acks, redelivery, dead letters, consumer groups",
+      "unit": 3,
+      "core": true
+    },
+    {
+      "package": "scheduler",
+      "title": "Job scheduler: heap + single dispatcher, recurring jobs, cancellation, graceful shutdown",
+      "unit": 3,
+      "core": true
+    },
+    {
+      "package": "splitwise",
+      "title": "Expense sharing: integer money, split strategies, debt simplification",
+      "unit": 4,
+      "core": true
+    },
+    {
+      "package": "elevator",
+      "title": "Elevator controller: deterministic state machine, dispatch strategies, concurrent shell",
+      "unit": 4,
+      "core": true
+    },
+    {
+      "package": "ticketing",
+      "title": "Ticket booking: all-or-nothing seat holds, expiry, contention, idempotent confirm",
+      "unit": 4,
+      "core": true
+    },
+    {
+      "package": "memfs",
+      "title": "In-memory file system: tree, atomic rename, walk, quota",
+      "unit": 5,
+      "core": true
+    },
+    {
+      "package": "logx",
+      "title": "Logger with decorator sinks and an async batching sink",
+      "unit": 5,
+      "core": true
+    },
+    {
+      "package": "vending",
+      "title": "Vending machine: state pattern, change-making, payment strategy",
+      "unit": 6,
+      "core": true
+    },
+    {
+      "package": "orderbook",
+      "title": "Order book / matching engine with price-time priority and invariants",
+      "unit": 6,
+      "core": true
+    },
+    {
+      "package": "inventory",
+      "title": "Inventory and library reservations: two-phase holds, idempotency, waitlist",
+      "unit": 7,
+      "core": true
+    },
+    {
+      "package": "resilient",
+      "title": "Resilient HTTP client: retry, budget, circuit breaker, bulkhead",
+      "unit": 7,
+      "core": true
+    },
+    {
+      "package": "shortener",
+      "title": "URL shortener with pluggable ID generation and stores",
+      "unit": 7,
+      "core": true
+    },
+    {
+      "package": "leaderboard",
+      "title": "STRETCH: leaderboard with O(log n) updates, rank and top-k",
+      "unit": 8,
+      "core": false
+    },
+    {
+      "package": "hashcache",
+      "title": "STRETCH: consistent-hashing cache client with lazy migration",
+      "unit": 8,
+      "core": false
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Run a timed machine-coding attempt: clarify and pin down requirements, state invariants out loud, hit stage checkpoints, and finish with a concurrency walk-through.",
+      "core": true
+    },
+    {
+      "text": "Choose data structures that give the required complexity (map + intrusive list, heaps with back-indices, undo logs, tick-driven state machines) and show the scale test that proves it.",
+      "core": true
+    },
+    {
+      "text": "Make a component safe for concurrent use under go test -race: state ownership, lock granularity and lock ordering, no user code under a lock, and invariants that a stress test can check.",
+      "core": true
+    },
+    {
+      "text": "Inject time (clocks, timers, ticks) so that every stage is testable without sleeping, including exact boundaries.",
+      "core": true
+    },
+    {
+      "text": "Land mid-interview requirement changes as additions (options, strategy interfaces, new methods) rather than rewrites of stage-1 code.",
+      "core": true
+    },
+    {
+      "text": "Design for lifecycle: bounded queues and memory, backpressure policies, graceful shutdown, panic containment and goroutine-leak freedom.",
+      "core": true
+    },
+    {
+      "text": "Model money, retries and duplicates correctly: integer minor units, deterministic rounding, idempotency keys, at-least-once delivery with dedupe.",
+      "core": true
+    },
+    {
+      "text": "Score your own code and a peer's against the machine-coding rubric (extensibility, concurrency safety, clean interfaces, tests, time management) and name the change that moves each dimension up a level.",
+      "core": true
+    },
+    {
+      "text": "Choose and defend a data model before coding (tree vs flat map, state pattern vs enum, sorted levels vs heap) and implement atomic tree operations with correct path handling.",
+      "core": true
+    },
+    {
+      "text": "Compose decorators and sinks with an explicit backpressure policy, failure isolation and a bounded graceful shutdown.",
+      "core": true
+    },
+    {
+      "text": "Implement the State pattern with an explicit transition table, reject invalid events, and make change correctly with finite coin stock.",
+      "core": true
+    },
+    {
+      "text": "Implement a price-time-priority matching engine with integer money, executable invariants and a differential test against a reference model.",
+      "core": true
+    },
+    {
+      "text": "Design reservations: reserve then commit or release with lazy expiry, all-or-nothing multi-item holds without deadlock, idempotency keys and a fair waitlist.",
+      "core": true
+    },
+    {
+      "text": "Build a resilient HTTP client: retry only what is safe, jittered backoff, retry budgets, circuit breaker, bulkhead and deadlines.",
+      "core": true
+    },
+    {
+      "text": "Design pluggable components with small consumer-side interfaces and shared contract tests.",
+      "core": true
+    },
+    {
+      "text": "Run a 90-minute machine-coding round: time budget with checkpoints, staged requirements, a deliberate concurrency pass and a spoken five-part concurrency note.",
+      "core": true
+    },
+    {
+      "text": "Choose an order-statistic structure for leaderboard top-k, rank and neighbours, and shard and merge top-k.",
+      "core": false
+    },
+    {
+      "text": "Implement consistent hashing with virtual nodes, replication, bounded loads and lazy migration on membership change.",
+      "core": false
+    }
+  ]
+}

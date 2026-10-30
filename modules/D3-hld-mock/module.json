@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "D3",
+  "slug": "hld-mock",
+  "title": "Mock: 45-minute HLD",
+  "track": "D",
+  "status": "written",
+  "core": true,
+  "summary": "Timed 45-minute HLD mocks with the tutor as interviewer: checkpoints at 0:10/0:25/0:40, follow-up probes from a per-case-study bank, one mid-way requirement change, an eight-dimension senior rubric and a log per mock; four mocks at meets on distinct, unseen problems.",
+  "hours": {"core": 10, "stretch": 0, "total": 10},
+  "prerequisites": ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7", "C1", "C2", "C5", "C6"],
+  "gate": {"requires": ["mocks"], "mocks_required": 4, "mock_formats": ["hld-45"]},
+  "paths": {
+    "dir": "modules/D3-hld-mock",
+    "readme": "modules/D3-hld-mock/README.md"
+  },
+  "units": [
+    {"n": 1, "title": "The 45 minutes under a real clock", "file": "modules/D3-hld-mock/unit-1-clock-and-scoring.md", "hours": {"core": 5, "stretch": 0}, "labs": []},
+    {"n": 2, "title": "Under the probe ladder", "file": "modules/D3-hld-mock/unit-2-probes-and-changes.md", "hours": {"core": 5, "stretch": 0}, "labs": []}
+  ],
+  "labs": [],
+  "outcomes": [
+    {"text": "Run a 45-minute HLD round against the clock: numbers by 0:10, an end-to-end diagram by 0:25, closing by 0:40, stop at 0:45, and recover out loud when behind.", "core": true},
+    {"text": "Answer follow-up probes (scale-up, failure, consistency, cost, security, why not X, how would you know) from your own design in 30-90 seconds: anchor, mechanism, cost, flip.", "core": true},
+    {"text": "Absorb a mid-way requirement change (scale, topology, contract, constraint, product) as a delta in at most 3 minutes, naming what doesn't change and what the change costs.", "core": true},
+    {"text": "Score your own mock on the eight-dimension rubric with evidence, apply the caps and the overall rule, and land within one level of the tutor on every dimension.", "core": true},
+    {"text": "Turn each mock log into one concrete fix and a section to revisit, and track phase slips, probe verdicts and calibration across mocks.", "core": true},
+    {"text": "Pass four hld-45 mocks at meets on distinct, unseen problems.", "core": true}
+  ]
+}

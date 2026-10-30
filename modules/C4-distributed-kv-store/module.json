@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "id": "C4",
+  "slug": "distributed-kv-store",
+  "title": "Case study: distributed key-value store",
+  "track": "C",
+  "status": "written",
+  "core": true,
+  "summary": "Dynamo-style store derived from the requirements: ops-sized estimation, hash ring and preference lists, tunable quorums with sloppy quorums and hints, conflict resolution per data type, Merkle-tree repair and tombstones, gossip membership, and the flip to consensus.",
+  "hours": {
+    "core": 7,
+    "stretch": 2,
+    "total": 9
+  },
+  "prerequisites": [
+    "A4",
+    "A5"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/C4-distributed-kv-store",
+    "readme": "modules/C4-distributed-kv-store/README.md",
+    "quiz": "modules/C4-distributed-kv-store/quiz.json",
+    "design_exercise": "modules/C4-distributed-kv-store/design-exercise.md",
+    "teachback": "modules/C4-distributed-kv-store/teachback.md",
+    "lab": "labs/c4",
+    "solution": "solutions/c4"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Guided design: requirements, estimation, API and data model, from one node to a ring",
+      "file": "modules/C4-distributed-kv-store/unit-1-guided-design.md",
+      "hours": {
+        "core": 3,
+        "stretch": 0.5
+      },
+      "labs": []
+    },
+    {
+      "n": 2,
+      "title": "Deep dives: quorums under failure, conflicts, anti-entropy and deletes, membership and the CP flip",
+      "file": "modules/C4-distributed-kv-store/unit-2-deep-dives.md",
+      "hours": {
+        "core": 4,
+        "stretch": 1.5
+      },
+      "labs": [
+        "antientropy",
+        "membership"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "antientropy",
+      "title": "Merkle-tree anti-entropy: deterministic merge with tombstones, trees over token buckets, diff by descent, repair of only the divergent leaves, safe tombstone purge",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "membership",
+      "title": "Gossip membership: generation-aware heartbeats, suspect and dead states, dead-member probing across partitions, phi-accrual failure detector",
+      "unit": 2,
+      "core": false
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Scope a distributed key-value store prompt in ≤ 6 minutes: core operations, NFRs with numbers, out-of-scope list, and the clarifying questions (consistency per operation, partition behaviour, concurrent-write semantics, scans, regions) whose answers pick between the leaderless and the consensus families.",
+      "core": true
+    },
+    {
+      "text": "Estimate storage with replication and LSM overhead, replica operations (reads × R + writes × N), nodes by operations vs by disk, replication and cross-AZ bandwidth, hint volume and rebuild time, and state the decision each drives.",
+      "core": true
+    },
+    {
+      "text": "Design the API (consistency level per request, opaque causal context, siblings, Unavailable vs Timeout, tombstone deletes) and the per-node data model (LSM sorted by token, versions, tombstones, TTL).",
+      "core": true
+    },
+    {
+      "text": "Build the high-level design step by step: hash ring with virtual nodes, preference lists over distinct nodes and AZs, any-node coordination with token-aware clients, read and write paths at QUORUM with rates, and the background processes each requirement forces.",
+      "core": true
+    },
+    {
+      "text": "Choose N, R, W and strict vs sloppy quorums per operation, explain what R + W > N does and does not guarantee, and size and bound hinted handoff.",
+      "core": true
+    },
+    {
+      "text": "Choose conflict resolution per data type (last-write-wins, version vectors with siblings, CRDTs such as PN-counters and OR-Sets, or prevention by consensus) and explain how each alternative fails.",
+      "core": true
+    },
+    {
+      "text": "Implement Merkle-tree anti-entropy that ships only the divergent leaves, deterministic merging with tombstones, and tombstone garbage collection with a safe cutoff, and demonstrate zombie resurrection (labs/c4/antientropy).",
+      "core": true
+    },
+    {
+      "text": "Explain gossip membership and failure detection (heartbeat generations, suspicion, phi accrual), why conviction reroutes while removal streams, how nodes join and leave, and how to handle hot keys.",
+      "core": true
+    },
+    {
+      "text": "Decide when the answer flips to consensus (per-key Paxos vs Raft groups per range vs a separate CP store) for compare-and-set, with latency and partition behaviour stated.",
+      "core": true
+    },
+    {
+      "text": "Implement gossip membership with generation-aware heartbeats, suspect and dead states, dead-member probing and a phi-accrual detector (labs/c4/membership), and reason about multi-region quorums (LOCAL_QUORUM vs EACH_QUORUM).",
+      "core": false
+    }
+  ]
+}

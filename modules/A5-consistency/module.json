@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "id": "A5",
+  "slug": "consistency",
+  "title": "Consistency and distributed-systems basics",
+  "track": "A",
+  "status": "written",
+  "core": true,
+  "summary": "CAP/PACELC without the folklore, quorums and what they do not guarantee, clocks and ordering, why exactly-once is a property of the whole pipeline, consensus intuition, leases and fencing tokens, and choosing a model for money movement.",
+  "hours": {
+    "core": 14,
+    "stretch": 4,
+    "total": 18
+  },
+  "prerequisites": [
+    "A4"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/A5-consistency",
+    "readme": "modules/A5-consistency/README.md",
+    "quiz": "modules/A5-consistency/quiz.json",
+    "design_exercise": "modules/A5-consistency/design-exercise.md",
+    "teachback": "modules/A5-consistency/teachback.md",
+    "lab": "labs/a5",
+    "solution": "solutions/a5"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Consistency models, CAP/PACELC and quorums",
+      "file": "modules/A5-consistency/unit-1-consistency-quorums.md",
+      "hours": {
+        "core": 4.5,
+        "stretch": 1
+      },
+      "labs": [
+        "quorum"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Time, clocks and ordering; exactly-once as an end-to-end property",
+      "file": "modules/A5-consistency/unit-2-time-ordering.md",
+      "hours": {
+        "core": 4.5,
+        "stretch": 1
+      },
+      "labs": [
+        "clocks"
+      ]
+    },
+    {
+      "n": 3,
+      "title": "Consensus, leases, fencing and choosing a model",
+      "file": "modules/A5-consistency/unit-3-consensus-leases.md",
+      "hours": {
+        "core": 5,
+        "stretch": 2
+      },
+      "labs": [
+        "raftlite"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "quorum",
+      "title": "Dynamo-style quorum KV (N, R, W): versions, read repair, sloppy quorums, hinted handoff",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "clocks",
+      "title": "Lamport and vector clocks, siblings, and last-write-wins under clock skew",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "raftlite",
+      "title": "Leader election and log replication intuition (Raft-lite)",
+      "unit": 3,
+      "core": false
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "State the CAP theorem correctly (what C, A and P mean, and what it does not say), apply PACELC, and assign a consistency-versus-availability choice to each operation of a banking platform.",
+      "core": true
+    },
+    {
+      "text": "Distinguish linearizability, serializability, sequential, causal and eventual consistency and the session guarantees, and identify which anomaly a given system or recorded history permits.",
+      "core": true
+    },
+    {
+      "text": "Choose N, R and W for a workload, prove the overlap rule, and explain what quorums do not guarantee: sloppy quorums, partial writes, concurrent writes and non-linearizable reads.",
+      "core": true
+    },
+    {
+      "text": "Implement a Dynamo-style quorum key-value coordinator with versioned values, read repair, sloppy quorums and hinted handoff.",
+      "core": true
+    },
+    {
+      "text": "Explain why wall-clock last-write-wins loses data under clock skew, quantify the loss, and say what monotonic, hybrid logical and bounded-uncertainty clocks do and do not give.",
+      "core": true
+    },
+    {
+      "text": "Implement Lamport and vector clocks, detect concurrent writes, and merge siblings.",
+      "core": true
+    },
+    {
+      "text": "Argue that exactly-once is an end-to-end property (at-least-once delivery plus idempotent, deduplicating processing) and place the dedupe record correctly for a given kind of effect.",
+      "core": true
+    },
+    {
+      "text": "Explain why consensus needs a majority and how Raft's terms, elections, log matching and commit rule keep committed entries safe.",
+      "core": true
+    },
+    {
+      "text": "Design lease-based mutual exclusion with fencing tokens and explain why a lease alone is unsafe.",
+      "core": true
+    },
+    {
+      "text": "Choose a consistency model and mechanism for each piece of state in a money-movement system, with numbers, and defend it under follow-up probes.",
+      "core": true
+    },
+    {
+      "text": "Implement leader election and log replication as a Raft-style state machine.",
+      "core": false
+    },
+    {
+      "text": "Explain hybrid logical clocks and TrueTime-style commit wait, including what happens when one clock in an HLC cluster is far ahead.",
+      "core": false
+    }
+  ]
+}

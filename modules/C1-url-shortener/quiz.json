@@ -1,0 +1,685 @@
+{
+  "module": "C1",
+  "title": "Case study: URL shortener",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "C1-001",
+      "type": "single",
+      "tags": [
+        "requirements",
+        "trade-offs"
+      ],
+      "difficulty": 2,
+      "prompt": "An interviewer says 'design a URL shortener like bit.ly' and nothing else. Which clarifying question changes the MOST boxes on the board?",
+      "choices": [
+        "Which short domain name will be used",
+        "Whether click analytics are required and how fresh they must be",
+        "Whether codes use lowercase letters only",
+        "Whether the dashboard supports dark mode"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Analytics add a whole asynchronous pipeline (events, a durable log, an aggregator and a store that outgrows the links table) and decide the redirect status code (a cached 301 never reports repeat clicks). The domain name, the alphabet and the dashboard change nothing structural; they are the questions that waste the first six minutes.",
+      "ref": "unit-1-url-shortener.md#1-requirements-and-the-questions-that-change-the-design-000006"
+    },
+    {
+      "id": "C1-002",
+      "type": "single",
+      "tags": [
+        "requirements",
+        "abuse"
+      ],
+      "difficulty": 2,
+      "prompt": "A shortener for a bank's transactional messages (statement-ready links, device-verification links) is being scoped. Which requirement follows directly from 'the destination is personal'?",
+      "choices": [
+        "Codes must be unguessable, because sequential codes let anyone enumerate every link",
+        "Redirects must use HTTP 301 so that browsers cache them",
+        "The service must store the member's IP address with each click for audit",
+        "Links must never expire, because statements are kept for seven years"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Sequential or guessable codes turn the service into a directory of every personal destination ever linked; enumeration at thousands of requests per second is trivial. 301 caching works against takedown and analytics. Storing raw IPs is the opposite of what personal data requires (hash and salt them). Audit retention of the creation record is separate from how long the link resolves; verification links in particular must expire in minutes.",
+      "ref": "unit-1-url-shortener.md#1-requirements-and-the-questions-that-change-the-design-000006"
+    },
+    {
+      "id": "C1-003",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "qps"
+      ],
+      "difficulty": 1,
+      "prompt": "A shortener receives 100 million new links per month. What is the average create rate? Answer in creates per second.",
+      "value": 38.5,
+      "tolerance": 0.25,
+      "unit": "req/s",
+      "explanation": "10^8 links / (≈ 2.6 × 10^6 seconds per month) ≈ 38/s. The classic mistake is dividing by seconds per day (86,400), which gives ≈ 1,157/s, a 30× error that would make you shard a system that needs one small primary.",
+      "ref": "unit-1-url-shortener.md#2-estimation-the-five-numbers-that-decide-the-shape-006010"
+    },
+    {
+      "id": "C1-004",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "6 billion links are kept, ≈ 500 bytes each, replicated 3 times. How much storage is that, before indexes? Answer in TB.",
+      "value": 9,
+      "tolerance": 0.25,
+      "unit": "TB",
+      "explanation": "6 × 10^9 × 500 B = 3 × 10^12 B = 3 TB raw; × 3 replicas = 9 TB. Forgetting replication (3 TB) is the common 3× error; using the 2 KB maximum URL size instead of the average is a 4× error in the other direction.",
+      "ref": "unit-1-url-shortener.md#2-estimation-the-five-numbers-that-decide-the-shape-006010"
+    },
+    {
+      "id": "C1-005",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "How many distinct 7-character codes does base 62 (0-9, a-z, A-Z) provide? Answer as a count.",
+      "value": 3520000000000.0,
+      "tolerance": 0.25,
+      "unit": "codes",
+      "explanation": "62^7 = 3,521,614,606,208 ≈ 3.5 × 10^12. Against 6 billion links over five years that is ≈ 590× headroom; 6 characters give 62^6 ≈ 5.7 × 10^10, only ≈ 9.5× headroom, and random codes would collide ≈ 10% of the time by the end of life.",
+      "ref": "unit-1-url-shortener.md#2-estimation-the-five-numbers-that-decide-the-shape-006010"
+    },
+    {
+      "id": "C1-006",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "bandwidth",
+        "cost"
+      ],
+      "difficulty": 2,
+      "prompt": "Peak redirects are 12,000 per second and each redirect response is ≈ 500 bytes. What is the peak egress? Answer in Mbps.",
+      "value": 48,
+      "tolerance": 0.25,
+      "unit": "Mbps",
+      "explanation": "12,000 × 500 B = 6 MB/s; × 8 = 48 Mbps. Trivial for a NIC, but ≈ 15 TB/month, which at ≈ $0.05–0.09/GB is ≈ $800–1,400/month: egress is a bill line, not a capacity problem. Answering 6 or 6,000 is the bits/bytes mix-up.",
+      "ref": "unit-1-url-shortener.md#2-estimation-the-five-numbers-that-decide-the-shape-006010"
+    },
+    {
+      "id": "C1-007",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "hld"
+      ],
+      "difficulty": 3,
+      "prompt": "After estimating ≈ 120 creates/s, ≈ 12k redirects/s and ≈ 9 TB replicated for a shortener, what is the strongest sentence to say at 0:10?",
+      "choices": [
+        "'This needs a twelve-node Cassandra cluster and Kafka for the writes'",
+        "'This isn't a scale problem; the risks are unique ids, the redirect path and the analytics pipeline, so that's where I'll go deep'",
+        "'Storage is 3 TB per year, so we need a data lake'",
+        "'The write path is the bottleneck, so I'll shard by user id first'"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The numbers rule out write-scale and storage-scale problems, which redirects the deep dives to the real risks and shows the interviewer that your numbers drive decisions. Twelve Cassandra nodes and Kafka for 120 writes/s is the unjustified-box failure. 3 TB per year is wrong (≈ 0.6 TB/year raw) and a data lake answers nothing. The write path is tiny; sharding it by user id ignores the dominant access pattern (lookup by code).",
+      "ref": "unit-1-url-shortener.md#2-estimation-the-five-numbers-that-decide-the-shape-006010"
+    },
+    {
+      "id": "C1-008",
+      "type": "single",
+      "tags": [
+        "api",
+        "caching",
+        "analytics"
+      ],
+      "difficulty": 2,
+      "prompt": "A shortener must report click counts and take down phishing links within minutes. Which redirect status should it use by default, and why?",
+      "choices": [
+        "301, because the mapping is permanent and browsers will cache it, saving load",
+        "302 (or 307), because it is not cached by default, so every click returns to the service and a takedown reaches every visitor",
+        "200 with the long URL in a JSON body, so the client decides",
+        "308, because it preserves the request method"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A 301 is cacheable by default: repeat clicks never come back (undercounted analytics) and a browser that cached it keeps going to the phishing page after the takedown. A 302/307 returns every click. A JSON body cannot be followed by a browser clicking a link in a message. 308 is the method-preserving permanent redirect and has the same caching problem as 301.",
+      "ref": "unit-1-url-shortener.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C1-009",
+      "type": "single",
+      "tags": [
+        "api",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "A mobile client's POST /v1/links times out and the client retries. Without an idempotency key, what happens?",
+      "choices": [
+        "The second request fails with 409 because the long URL already exists",
+        "Two links with different codes are created; the user shares one and sees another in their list",
+        "Nothing: POST is idempotent by definition",
+        "The server detects the duplicate by the client's IP address"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Each create mints a new code, so a retry produces a second link. The user is confused and analytics are split. A 409 on duplicate URL only exists if you dedupe by URL, which has its own costs and is not the default. POST is not idempotent. IP-based detection is not a correctness mechanism. The fix is an Idempotency-Key scoped per caller (A1 Unit 3).",
+      "ref": "unit-1-url-shortener.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C1-010",
+      "type": "single",
+      "tags": [
+        "data-model",
+        "hot-keys"
+      ],
+      "difficulty": 2,
+      "prompt": "Why should the click count NOT be a column in the link row that is incremented on every redirect?",
+      "choices": [
+        "Because integers overflow at 2^31 clicks",
+        "Because it puts the full redirect rate on the hottest rows, serialises a viral link's clicks on one row, and ties redirect latency to the write path",
+        "Because key-value stores cannot store integers",
+        "Because counts must be stored as strings for the dashboard"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "At 12k redirects/s the counter turns a read-only hot path into 12k row updates/s, and the viral link's row becomes a lock queue that slows its own redirects. Overflow is a non-issue with 64-bit integers; stores handle integers fine; the dashboard's format is irrelevant. Counts belong in an asynchronous aggregate fed by click events.",
+      "ref": "unit-1-url-shortener.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C1-011",
+      "type": "multi",
+      "tags": [
+        "data-model",
+        "api"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the access patterns a URL shortener's data model must serve.",
+      "choices": [
+        "Resolve a code to its long URL, state and expiry (point lookup)",
+        "Insert a link only if its code or alias is free (conditional insert)",
+        "List a user's links newest first (secondary access by owner)",
+        "Find expired links in batches (range on expires_at)",
+        "Join every link with its clicks table on every redirect"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "The first four are the real patterns, in decreasing order of rate: the point lookup at ≈ 12k/s decides the partition key (code), the conditional insert is the uniqueness primitive, the owner listing needs a secondary index or table, and the expiry scan needs an index on expires_at or a native TTL. Joining clicks on every redirect is exactly what the design avoids: counts live in an async aggregate.",
+      "ref": "unit-1-url-shortener.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C1-012",
+      "type": "single",
+      "tags": [
+        "hld",
+        "trade-offs"
+      ],
+      "difficulty": 3,
+      "prompt": "Your shortener HLD has a load balancer, stateless servers with an in-process L1, Redis, a partitioned link store, an event log and an aggregator. The interviewer says it looks over-engineered. Which box do you remove first, and what do you lose?",
+      "choices": [
+        "Redis, because the link store can serve 12k reads/s",
+        "The link store's replicas, because the data is small",
+        "The in-process L1, because without it Redis takes the viral key directly, which is survivable at ≈ 50% of one instance but with no headroom",
+        "The load balancer, because DNS round-robin is enough"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The L1 is the cheapest box to lose: Redis then absorbs the viral key at ≈ 50k GETs/s, which is survivable but one slow moment from the connection-pool failure, so you would add it back after the first incident. Removing Redis breaks the latency budget and the viral case. Removing the replicas drops the availability and durability requirements. DNS round-robin gives no health checking or draining, so it fails the 99.99% target.",
+      "ref": "unit-1-url-shortener.md#4-high-level-design-both-paths-every-box-justified-016025"
+    },
+    {
+      "id": "C1-013",
+      "type": "single",
+      "tags": [
+        "hld",
+        "availability"
+      ],
+      "difficulty": 3,
+      "prompt": "The link store is unavailable for 10 minutes at peak. With a ≈ 90% cache hit rate and immutable links, what happens to redirects in a well-designed shortener?",
+      "choices": [
+        "All redirects fail, because every request must verify the link in the store",
+        "≈ 90% keep working from the caches; the ≈ 10% that miss fail fast with 503 behind a short timeout and a circuit breaker",
+        "All redirects keep working, because the cache holds every link",
+        "Redirects keep working but creates are unaffected, because creates use the counter"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Cache hits need no store call, and immutability means stale is not a concern (expiry and state are checked from the cached row). Misses must fail fast: without a short timeout and a breaker each miss holds a connection for the full timeout and the servers run out of capacity, taking the 90% down too. The cache does not hold every link (3 GB hot set of ≈ 3 TB). Creates write to the store, so they fail during the outage (503, retried with the same idempotency key).",
+      "ref": "unit-1-url-shortener.md#4-high-level-design-both-paths-every-box-justified-016025"
+    },
+    {
+      "id": "C1-014",
+      "type": "single",
+      "tags": [
+        "hld",
+        "analytics"
+      ],
+      "difficulty": 2,
+      "prompt": "Where does a click event leave the redirect path, and what guarantees it does not slow the redirect?",
+      "choices": [
+        "The server writes the event to the analytics database before sending the 302",
+        "The server appends the event to a bounded in-memory buffer and returns; a background goroutine ships batches to a durable log",
+        "The browser posts the event to an analytics endpoint after following the redirect",
+        "The load balancer logs every request and the aggregator parses the logs synchronously"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A fire-and-forget buffer with batched shipping means the redirect never waits on analytics; if the log is down the buffer fills and events are dropped with a metric, which is the accepted cost. Writing to the analytics store before responding couples redirect latency and availability to it. Relying on the browser loses most events (the client has already left). Parsing load-balancer logs synchronously is neither fast nor reliable.",
+      "ref": "unit-1-url-shortener.md#4-high-level-design-both-paths-every-box-justified-016025"
+    },
+    {
+      "id": "C1-015",
+      "type": "single",
+      "tags": [
+        "id-generation",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "Two API servers generate a random 7-character code, run SELECT to check it is free, and INSERT it. The links table has no unique index on code. What eventually happens?",
+      "choices": [
+        "Nothing: 62^7 is so large that two servers never draw the same code",
+        "Occasionally both servers see 'free' and both insert, and one link silently overwrites or shadows the other",
+        "The database detects the race and rolls back one transaction",
+        "The second insert fails with a duplicate-key error"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Check-then-insert is not atomic; at 120 creates/s across servers two draws of the same code within the race window happen eventually (and at 6B existing codes, ≈ 0.17% of draws collide with existing ones outright). Without a unique index nothing stops the second write. A unique index would make the second insert fail (the correct behaviour, then retry), which is why the index is the atomic primitive. 'Never' is wrong: rare is not never, and the keyspace is only 590× the data.",
+      "ref": "unit-1-url-shortener.md#5-deep-dive-1-unique-codes-without-a-serialising-point-025032"
+    },
+    {
+      "id": "C1-016",
+      "type": "numeric",
+      "tags": [
+        "id-generation",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "6 billion links exist with 7-character base-62 codes (62^7 ≈ 3.5 × 10^12). What is the probability that one more uniformly random code collides with an existing one? Answer in percent.",
+      "value": 0.17,
+      "tolerance": 0.3,
+      "unit": "%",
+      "explanation": "n/K = 6 × 10^9 / 3.5 × 10^12 ≈ 0.0017, i.e. ≈ 0.17%: about one retry per 590 creates at the very end of the keyspace's life, far fewer earlier. With 6 characters it is ≈ 0.106, one retry per ten creates.",
+      "ref": "unit-1-url-shortener.md#5-deep-dive-1-unique-codes-without-a-serialising-point-025032"
+    },
+    {
+      "id": "C1-017",
+      "type": "single",
+      "tags": [
+        "id-generation",
+        "trade-offs"
+      ],
+      "difficulty": 3,
+      "prompt": "Which statement about using a single global database counter (one increment per create) as the ID source is correct?",
+      "choices": [
+        "It is the standard choice because it never produces duplicates and scales horizontally",
+        "It is correct but serialises every create on one row, adds a round trip (cross-region if the counter is elsewhere) to each create, and stops all creates when that database fails over",
+        "It produces duplicates under concurrency unless combined with random codes",
+        "It cannot be made unguessable, so it must never be used"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The counter is correct (atomic increment) but it is a serialising point on the write path with its own availability: that is why leased ranges (one compare-and-swap per 1,000 ids, held locally) or random codes with insert-if-absent are preferred. It does not scale horizontally. It does not produce duplicates. Its ids can be made unguessable with a keyed permutation, so guessability is not the reason to reject it.",
+      "ref": "unit-1-url-shortener.md#5-deep-dive-1-unique-codes-without-a-serialising-point-025032"
+    },
+    {
+      "id": "C1-018",
+      "type": "single",
+      "tags": [
+        "id-generation",
+        "availability"
+      ],
+      "difficulty": 2,
+      "prompt": "A server using leased id ranges of 1,000 has handed out 41,000–41,002 and crashes. A replacement server starts. Which is true?",
+      "choices": [
+        "The replacement resumes at 41,003 by reading the crashed server's state from disk",
+        "Ids 41,003–41,999 are wasted forever and the replacement starts at 42,000; nothing below 42,000 is ever reused",
+        "The replacement reuses 41,000–41,999, since the crashed server never acknowledged them",
+        "The counter is rolled back to 41,003 by the database"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The range was reserved by advancing the counter to 42,000 with compare-and-swap; the unused tail is lost (bounded waste, irrelevant against 3.5 × 10^12). Persisting a range client-side and resuming it, or reusing it, are the two bugs that produce duplicate codes. Nothing rolls the counter back.",
+      "ref": "unit-1-url-shortener.md#5-deep-dive-1-unique-codes-without-a-serialising-point-025032"
+    },
+    {
+      "id": "C1-019",
+      "type": "single",
+      "tags": [
+        "id-generation",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "A range allocator advances the counter with 'read value; write value + 1000' (no comparison with the value read). Under contention, what does the lab's break-it show, and what fixes it?",
+      "choices": [
+        "No duplicates, because the allocator retries on failure; nothing to fix",
+        "≈ 89% of ranges handed out twice; the fix is compare-and-swap in the store (UPDATE ... WHERE value = old, a conditional put, a script), not more client-side retries",
+        "A few duplicates that a client-side mutex removes",
+        "The counter runs backwards, which a max() on the client fixes"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Two servers read the same value and both write the same new value, so both take the same range: the reference run duplicates 711 of 800 ranges. A client-side retry loop cannot fix a non-atomic primitive, and a client-side mutex only covers one process. The atomicity must come from the store. The counter does not run backwards.",
+      "ref": "unit-1-url-shortener.md#5-deep-dive-1-unique-codes-without-a-serialising-point-025032"
+    },
+    {
+      "id": "C1-020",
+      "type": "single",
+      "tags": [
+        "id-generation",
+        "abuse"
+      ],
+      "difficulty": 2,
+      "prompt": "Counter-derived codes are 0000001, 0000002, ... in base 62. What is the cheapest change that makes them unguessable while keeping the counter?",
+      "choices": [
+        "Encrypt the long URL",
+        "Pass the id through a keyed bijection (an odd multiplier modulo 2^41 plus an XOR mask) before base-62 encoding",
+        "Add a random suffix character to each code",
+        "Switch to base 64 so the codes look different"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A keyed permutation scatters consecutive ids across the keyspace and is reversible for you (you can still recover the id), so enumeration needs the seed. Encrypting the URL does nothing for enumeration of codes. One random suffix character gives 62 guesses per enumerated id, which is nothing. Base 64 is just another encoding of the same sequence.",
+      "ref": "unit-1-url-shortener.md#5-deep-dive-1-unique-codes-without-a-serialising-point-025032"
+    },
+    {
+      "id": "C1-021",
+      "type": "numeric",
+      "tags": [
+        "id-generation",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A fleet of 20 servers uses leased id ranges of 1,000. A deploy restarts every server. At most how many ids are wasted? Answer as a count.",
+      "value": 20000,
+      "tolerance": 0.25,
+      "unit": "ids",
+      "explanation": "Each server loses at most the unused part of its current range: 20 × 1,000 = 20,000, which is 6 × 10^-7 % of a 3.5 × 10^12 keyspace. The range size trades this waste (and the minutes of creates a server can do during a counter outage) against store operations per id (2 per range).",
+      "ref": "unit-1-url-shortener.md#5-deep-dive-1-unique-codes-without-a-serialising-point-025032"
+    },
+    {
+      "id": "C1-022",
+      "type": "single",
+      "tags": [
+        "caching",
+        "hot-keys"
+      ],
+      "difficulty": 3,
+      "prompt": "One link receives ≈ 50,000 redirects/s for ten minutes. Six servers each hold the code in a 10-second in-process L1 with request coalescing. How many lookups per second does Redis see for that code, and what becomes the real limit?",
+      "choices": [
+        "50,000/s; Redis is the limit",
+        "≈ 0.6/s (six servers, one fetch per 10 s each); the app tier's request capacity becomes the limit",
+        "≈ 5,000/s; the link store is the limit",
+        "0/s, because the L1 never expires immutable data"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Each server refreshes the key once per TTL: 6 / 10 s = 0.6 lookups/s. The spike is served from process memory, so the next limit is the servers' own request throughput (≈ 5–10k/s each, so 5–10 servers for the spike), then the NICs if the long URL is large. Without the L1 Redis would take the 50k/s. The L1 does expire (a short TTL plus a purge broadcast keeps takedowns fast).",
+      "ref": "unit-1-url-shortener.md#6-deep-dive-2-the-redirect-hot-path-viral-links-and-availability-032038"
+    },
+    {
+      "id": "C1-023",
+      "type": "numeric",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A cache in front of the link store has a 90% hit rate. The cache restarts empty at peak. By what factor does the store's read load rise until the cache warms? Answer as a multiplier.",
+      "value": 10,
+      "tolerance": 0.25,
+      "unit": "times",
+      "explanation": "The cold factor is 1/(1 − h) = 1/0.1 = 10: the store sees 100% of reads instead of 10%. Request coalescing, a warm-up from a snapshot of the hot set, or restarting one shard at a time keep this from becoming an incident; sizing the store only for the cached load is the mistake.",
+      "ref": "unit-1-url-shortener.md#6-deep-dive-2-the-redirect-hot-path-viral-links-and-availability-032038"
+    },
+    {
+      "id": "C1-024",
+      "type": "single",
+      "tags": [
+        "caching",
+        "abuse"
+      ],
+      "difficulty": 3,
+      "prompt": "Bots and typos produce lookups for codes that do not exist at ≈ 10% of redirect traffic. What does a design without negative caching do with them, and what is the fix?",
+      "choices": [
+        "They are served from the cache like any other key; nothing to fix",
+        "Every lookup misses every layer and reads the store (≈ 1.2k/s of guaranteed misses); cache 'no such code' for ≈ 60 s, invalidate on create, and reject malformed codes before any lookup",
+        "They are blocked by the load balancer's health checks",
+        "They cause the store to create placeholder rows"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A code that exists is cached after its first miss; a code that does not exist misses forever, so unknown codes are a permanent miss stream and an amplifier for enumeration attacks. A short negative entry invalidated on create (creates are only ≈ 120/s) and a shape check (7 base-62 characters) make them nearly free. Load balancers do not know which codes exist, and stores must never create rows on reads.",
+      "ref": "unit-1-url-shortener.md#6-deep-dive-2-the-redirect-hot-path-viral-links-and-availability-032038"
+    },
+    {
+      "id": "C1-025",
+      "type": "multi",
+      "tags": [
+        "caching",
+        "abuse",
+        "availability"
+      ],
+      "difficulty": 3,
+      "prompt": "A phishing link must be dead everywhere within minutes. Select ALL the steps of a correct takedown, in the right spirit of ordering.",
+      "choices": [
+        "Write state = gone to the link store first",
+        "Delete the entry from the shared cache after the store write",
+        "Broadcast a purge to every server's in-process L1 and record how many acknowledged within the SLA",
+        "Purge the CDN if the link was edge-cached",
+        "Rely on the caches' TTLs to expire the entry naturally"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "Store first so a concurrent reader cannot refill a cache with the old row (A3's stale-set race), then every cache layer, then the edge, with acknowledgements so you can prove when the link was dead everywhere. TTL expiry alone makes the takedown as slow as the longest TTL and gives no proof; it is the red flag in the design exercise.",
+      "ref": "unit-1-url-shortener.md#6-deep-dive-2-the-redirect-hot-path-viral-links-and-availability-032038"
+    },
+    {
+      "id": "C1-026",
+      "type": "single",
+      "tags": [
+        "availability",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Redirects must be 99.99% available. Roughly how much downtime per month is that, and what does it imply for a single-AZ cache with a 5-minute failover?",
+      "choices": [
+        "≈ 43 minutes; a 5-minute failover is fine",
+        "≈ 4.3 minutes; one such failover spends the entire monthly budget, so the hot set must keep serving from an in-process L1 and a replica in another AZ",
+        "≈ 26 seconds; the target is impossible",
+        "≈ 7 hours; availability is not a concern"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "99.99% is ≈ 4.3 minutes per 30 days (NUMBERS.md). 43 minutes is 99.9%; 26 seconds is 99.999%; 7 hours is 99%. A 5-minute cache failover that takes redirects down would blow the budget in one incident, which is why the L1 and a cross-AZ replica exist and why a store outage must only affect misses.",
+      "ref": "unit-1-url-shortener.md#6-deep-dive-2-the-redirect-hot-path-viral-links-and-availability-032038"
+    },
+    {
+      "id": "C1-027",
+      "type": "single",
+      "tags": [
+        "analytics",
+        "hld"
+      ],
+      "difficulty": 2,
+      "prompt": "How should per-link daily click counts be produced so that the dashboard is fresh and the numbers are eventually exact?",
+      "choices": [
+        "Increment a Redis counter per click and read it on the dashboard; Redis is the only copy",
+        "Redirect servers emit events to a durable log; a stream aggregator keeps approximate live counters, and a nightly job recomputes exact totals from the raw log",
+        "Run COUNT(DISTINCT ip) over the raw event table whenever the dashboard loads",
+        "Update the link row synchronously on each redirect"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Two freshness tiers (seconds, approximate; nightly, exact) from a durable log give both properties and let you recompute when the logic changes. Redis as the only copy loses a week of analytics on a restart. COUNT(DISTINCT) over 200 GB/day times out. The synchronous row update is the hot-row failure.",
+      "ref": "unit-1-url-shortener.md#7-deep-dive-3-the-analytics-pipeline-abuse-and-what-breaks-at-10-038045"
+    },
+    {
+      "id": "C1-028",
+      "type": "numeric",
+      "tags": [
+        "analytics",
+        "estimation",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "Click events arrive at 12,000 per second and each is ≈ 200 bytes. How much raw event data is that per day? Answer in GB.",
+      "value": 207,
+      "tolerance": 0.25,
+      "unit": "GB",
+      "explanation": "12,000 × 200 B = 2.4 MB/s; × 86,400 s ≈ 207 GB/day (≈ 6 TB/month). Keep raw events for 30–90 days and aggregates (≈ 5 GB/day) afterwards; the analytics store, not the links table, is where storage grows.",
+      "ref": "unit-1-url-shortener.md#7-deep-dive-3-the-analytics-pipeline-abuse-and-what-breaks-at-10-038045"
+    },
+    {
+      "id": "C1-029",
+      "type": "single",
+      "tags": [
+        "analytics",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A dashboard needs unique visitors per link per day for millions of links. Which approach fits in bounded memory with a stated error?",
+      "choices": [
+        "A HyperLogLog sketch per (link, day): ≈ 12 KB each for ≈ 0.8% error, mergeable across servers and days",
+        "A set of all hashed visitor ids per (link, day) in Redis",
+        "A SQL COUNT(DISTINCT) over the raw events on demand",
+        "Counting clicks and dividing by an assumed average of 1.3 clicks per visitor"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "HLL gives a bounded-memory, mergeable estimate with a known error; sparse sketches keep small links cheap. A full set of ids is unbounded (a viral link has millions). COUNT(DISTINCT) over raw events does not scale. Dividing by an assumed ratio is not a measurement.",
+      "ref": "unit-1-url-shortener.md#7-deep-dive-3-the-analytics-pipeline-abuse-and-what-breaks-at-10-038045"
+    },
+    {
+      "id": "C1-030",
+      "type": "single",
+      "tags": [
+        "abuse",
+        "availability"
+      ],
+      "difficulty": 3,
+      "prompt": "Destinations must be checked against a malware and phishing reputation service. Where does the check sit, and why?",
+      "choices": [
+        "Synchronously on the create path, so no bad link ever exists",
+        "Asynchronously after the create, disabling the link within seconds on a hit, because a vendor call with a 2 s timeout on the create path would couple create latency and availability to the vendor",
+        "On the redirect path, checked for every click",
+        "Nowhere; the short domain's reputation is the tenant's responsibility"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A vendor on the create path's latency budget makes every create as slow and as available as the vendor (Little's law fills the pools during a vendor outage). An async scan bounds the exposure window to seconds and an interstitial for untrusted callers covers it. Checking on every redirect adds a vendor call to the hot path at 12k/s. Doing nothing turns the service into a phishing tool.",
+      "ref": "unit-1-url-shortener.md#7-deep-dive-3-the-analytics-pipeline-abuse-and-what-breaks-at-10-038045"
+    },
+    {
+      "id": "C1-031",
+      "type": "single",
+      "tags": [
+        "cost",
+        "trade-offs"
+      ],
+      "difficulty": 2,
+      "prompt": "At the unit's numbers (≈ 12k redirects/s, ≈ 100M links/month), which cost lines grow with clicks rather than with links?",
+      "choices": [
+        "The links table and its indexes",
+        "Egress (≈ 15 TB/month) and the analytics aggregates (≈ 5 GB/day)",
+        "The counter row and the id ranges",
+        "The number of tenants' domains"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Every redirect sends a response (egress) and produces an event that lands in aggregates; both scale with clicks and accumulate for years, which is why the analytics store outgrows the links store. The links table scales with creates and is cheap; the counter costs nothing; domains scale with tenants.",
+      "ref": "unit-1-url-shortener.md#7-deep-dive-3-the-analytics-pipeline-abuse-and-what-breaks-at-10-038045"
+    },
+    {
+      "id": "C1-032",
+      "type": "single",
+      "tags": [
+        "trade-offs",
+        "hld"
+      ],
+      "difficulty": 3,
+      "prompt": "Creates must now happen in three regions with no cross-region call on the create path. Which ID scheme change is required, and what store consequence follows?",
+      "choices": [
+        "None: a single global counter can be called from any region",
+        "Random codes with a region-local insert-if-absent (accepting a tiny cross-region collision window reconciled later), or per-region counter ranges / region bits; the link store becomes multi-leader or home-region-per-owner",
+        "Hash the long URL so every region computes the same code",
+        "Use 6-character codes so each region has fewer to manage"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Without a shared row on the create path, uniqueness must be coordination-free: random codes (with a rare cross-region conflict to reconcile) or partitioned ranges / region bits (C3's territory). Writes in several regions mean the store is no longer single-leader (A4 Unit 1 §4). A global counter is exactly the cross-region call being forbidden. URL hashing collides after ≈ 2M links at 7 characters. Shorter codes make collisions worse.",
+      "ref": "unit-1-url-shortener.md#7-deep-dive-3-the-analytics-pipeline-abuse-and-what-breaks-at-10-038045"
+    },
+    {
+      "id": "C1-033",
+      "type": "single",
+      "tags": [
+        "api",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "A deleted or expired link should return 410 Gone rather than 404. What does that require and buy?",
+      "choices": [
+        "A tombstone row (≈ 50 B) per dead link; it buys cacheable negatives and clients that stop retrying",
+        "A full copy of the long URL kept forever; it buys nothing",
+        "A synchronous check against the audit log; it buys compliance",
+        "Nothing extra; 404 and 410 are interchangeable"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "410 needs the service to know the code once existed, so the row stays with state = gone; the cost is tiny and a dead link stays answerable from cache, which matters when a taken-down phishing link keeps receiving traffic. The long URL need not be kept. The audit log is not on the redirect path. 404 means 'never existed' and tells clients nothing about retrying.",
+      "ref": "unit-1-url-shortener.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C1-034",
+      "type": "single",
+      "tags": [
+        "requirements",
+        "trade-offs"
+      ],
+      "difficulty": 2,
+      "prompt": "A requirement is added mid-interview: 'link owners can change the destination of an existing link'. Which consequence is correct?",
+      "choices": [
+        "Nothing changes; the cache will pick up the new destination on the next read",
+        "Every cached copy becomes potentially stale, so you need versioned invalidation, the 301 option disappears, and the URL safety scan must re-run on edit",
+        "The ID scheme must change to random codes",
+        "Click counts must now live in the link row"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Mutability breaks the immutability assumption behind long cache TTLs and edge caching: invalidation must be explicit and ordered (A3 Unit 2 §5), a cached 301 can never be updated, and an edit is a new abuse vector. The ID scheme is unaffected (codes stay unique either way), and click counting stays asynchronous.",
+      "ref": "unit-1-url-shortener.md#1-requirements-and-the-questions-that-change-the-design-000006"
+    }
+  ]
+}

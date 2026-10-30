@@ -1,0 +1,1233 @@
+{
+  "module": "A9",
+  "title": "Security and multi-tenancy",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "A9-001",
+      "type": "single",
+      "tags": [
+        "security",
+        "threat-modeling"
+      ],
+      "difficulty": 2,
+      "prompt": "Minute 22 of a 45-minute HLD interview for a member document vault. The interviewer says: \"talk about security\". You have five minutes. What do you do first?",
+      "choices": [
+        "List every control you know (TLS, WAF, MFA, encryption at rest, SIEM) so the interviewer sees breadth",
+        "Say that security will be handled by a separate team after the design is agreed",
+        "Run a full STRIDE matrix over every box and arrow on the diagram",
+        "Name the assets, the actors (including staff, partners and your own engineers) and the trust boundaries, then walk the boundary crossings and rank the top threats by blast radius"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Starting from assets, actors and trust boundaries ties each mitigation to a place in the design and lets you rank by impact, which is what the five minutes are for. A catalogue of controls is breadth without relevance (nothing is tied to a boundary or a threat). Deferring security is the answer that costs weeks later. A full STRIDE matrix is the thorough method but does not fit five minutes; STRIDE-lite on the boundary crossings does.",
+      "ref": "unit-1-authorization-tenancy.md#1-threat-modelling-in-a-design-interview"
+    },
+    {
+      "id": "A9-002",
+      "type": "single",
+      "tags": [
+        "security",
+        "threat-modeling",
+        "multitenancy"
+      ],
+      "difficulty": 2,
+      "prompt": "A support-console search for a member document vault queries all credit unions at once and takes the credit-union filter from a query parameter. A staff user at credit union A changes the parameter and exports credit union B's documents. Which pair of STRIDE categories best describes the core threat?",
+      "choices": [
+        "Repudiation and tampering",
+        "Tampering and denial of service",
+        "Spoofing and denial of service",
+        "Information disclosure and elevation of privilege"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The staff user reads data they have no right to (information disclosure) by acting beyond their tenant-scoped authority (elevation of privilege). Spoofing is about pretending to be someone else, and the user is who they say they are. Repudiation and tampering concern denying actions or changing data; nothing is altered here. Denial of service is about availability, which is not affected.",
+      "ref": "unit-1-authorization-tenancy.md#1-threat-modelling-in-a-design-interview"
+    },
+    {
+      "id": "A9-003",
+      "type": "single",
+      "tags": [
+        "security",
+        "threat-modeling"
+      ],
+      "difficulty": 3,
+      "prompt": "You have found four threats in a document vault: (1) a staff user can read other tenants' documents through a global search, (2) a pre-signed URL valid for 7 days was pasted into a ticket, (3) uploads of 2 GB each can saturate shared workers, (4) a CSV export is vulnerable to formula injection. You must pick one to stake the design on in the interview. Which and why?",
+      "choices": [
+        "(4): injection bugs are the most exploited vulnerability class",
+        "(1): its blast radius is every tenant, every call looks legitimate, and existing controls will not notice",
+        "(2): leaked credentials are the most common real-world breach cause, so it ranks highest regardless of scope",
+        "(3): availability is the first thing users notice"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Rank by blast radius and by whether existing controls would detect it. The cross-tenant read affects all tenants, is authenticated and permitted at every step, and is a regulatory event. The leaked URL exposes one object for a bounded time. The upload saturation degrades availability without disclosing data. CSV formula injection harms the downstream recipient and is cheap to fix. Generic frequency statistics are not a reason to ignore the threat with the largest blast radius in your system.",
+      "ref": "unit-1-authorization-tenancy.md#1-threat-modelling-in-a-design-interview"
+    },
+    {
+      "id": "A9-004",
+      "type": "single",
+      "tags": [
+        "security",
+        "encryption",
+        "multitenancy"
+      ],
+      "difficulty": 2,
+      "prompt": "A teammate says the cross-tenant document export in your design review \"is covered because the database is encrypted at rest\". What is the right response?",
+      "choices": [
+        "Agree: encryption at rest means exports from the database are protected",
+        "Disagree: at-rest encryption protects stolen media, not a legitimate authorised session; the control that matters is tenant-scoped authorisation at the data layer, with per-tenant keys as a second barrier",
+        "Disagree: only TLS between the support console and the database would help",
+        "Agree, provided the encryption keys are rotated every 90 days"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The staff user's query goes through the application, which decrypts as designed, so volume or database encryption does not apply to this attacker. Tenant-scoped authorisation in the data layer prevents the read, and per-tenant keys (and who may call Decrypt) add a barrier and enable per-tenant deletion. TLS protects the wire, not what an authorised session may read. Rotating keys does not change who is authorised.",
+      "ref": "unit-1-authorization-tenancy.md#1-threat-modelling-in-a-design-interview"
+    },
+    {
+      "id": "A9-005",
+      "type": "single",
+      "tags": [
+        "security",
+        "auth",
+        "multitenancy"
+      ],
+      "difficulty": 2,
+      "prompt": "The gateway validates the access token and forwards X-User-ID and X-Tenant-ID headers over plain HTTP; services trust them. What is the most important problem and the best fix?",
+      "choices": [
+        "The headers add bytes to every request; compress them",
+        "The gateway should also forward the original refresh token so services can validate it with the IdP",
+        "Services should re-validate the external access token against the IdP on every request",
+        "Any process that can reach a service can forge the headers and act as any user or tenant. Have the gateway mint a short-lived signed internal identity (token exchange) and use mTLS between components so services verify who is calling and for whom"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Bare identity headers are only trustworthy if the transport proves who set them; on a flat network they are forgeable, which is a complete bypass of tenant isolation. A signed internal token plus mTLS makes identity verifiable locally and cheaply. Header size is irrelevant. Forwarding refresh tokens spreads the most sensitive credential to every service. Re-validating the external token at every service moves IdP knowledge and load everywhere and still does not authenticate the caller component.",
+      "ref": "unit-1-authorization-tenancy.md#2-authentication-authorisation-and-where-decisions-are-made"
+    },
+    {
+      "id": "A9-006",
+      "type": "single",
+      "tags": [
+        "security",
+        "auth",
+        "multitenancy",
+        "caching"
+      ],
+      "difficulty": 3,
+      "prompt": "An authorisation layer caches decisions for 30 seconds keyed by userID + action + resourceID. After an incident, a user in credit union B was able to perform an action on a resource only credit union A's users should reach. What is the most likely cause?",
+      "choices": [
+        "The policy engine should have used RBAC instead of ABAC",
+        "Resource ids must be encrypted before they are used as cache keys",
+        "User ids are unique per identity provider, not globally; two tenants' users share an id, so a cached allow decision for one was served to the other. The key must include the tenant",
+        "The cache TTL of 30 seconds is too long; reducing it to 1 second removes the bug"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Federated user ids come from each tenant's IdP and can collide; the decision depends on the tenant, so it must be part of the cache key (along with the policy version). A shorter TTL narrows the window but does not remove the cross-tenant bug. The model (RBAC vs ABAC) is not the issue; the cache key is. Encrypting resource ids does not add the missing dimension.",
+      "ref": "unit-1-authorization-tenancy.md#2-authentication-authorisation-and-where-decisions-are-made"
+    },
+    {
+      "id": "A9-007",
+      "type": "multi",
+      "tags": [
+        "security",
+        "auth",
+        "multitenancy"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the checks that can only be made correctly in the service or data layer rather than at the API gateway.",
+      "choices": [
+        "Whether the JWT signature, issuer and audience are valid",
+        "Whether the route requires the transfers:write scope",
+        "Whether the request is within the client's coarse per-minute rate limit",
+        "Whether this account belongs to the caller's tenant and to a member the caller may act for",
+        "Whether the wire amount is under the approver's limit and the approver did not initiate it"
+      ],
+      "answer": [
+        3,
+        4
+      ],
+      "explanation": "Object ownership and context-dependent rules (limits, four-eyes) need domain data the gateway does not have. Signature, issuer and audience validation, route scopes and coarse rate limits are the uniform, data-free checks that belong at the edge (though the services should still not trust the network).",
+      "ref": "unit-1-authorization-tenancy.md#2-authentication-authorisation-and-where-decisions-are-made"
+    },
+    {
+      "id": "A9-008",
+      "type": "single",
+      "tags": [
+        "security",
+        "auth",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "The authorisation middleware calls a remote policy service. When it times out, it logs a warning and lets the request through \"to avoid an outage\". What is wrong?",
+      "choices": [
+        "It fails open: an attacker who can slow or break the policy path gets through, so an outage becomes an authorisation bypass. Fail closed and keep availability with locally evaluated policy bundles",
+        "Nothing; availability matters more than authorisation for a banking API",
+        "The timeout is too short; with a 30-second timeout fail-open is safe",
+        "It should return 404 instead of letting the request through"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Fail-open on errors converts any disruption (or deliberate DoS) of the policy path into a bypass. The safe design denies on error and removes the dependency from the hot path by evaluating policy locally from distributed bundles. Longer timeouts only make users wait longer before the same bypass. 404 on timeout is a denial, but that is not what the middleware does.",
+      "ref": "unit-1-authorization-tenancy.md#2-authentication-authorisation-and-where-decisions-are-made"
+    },
+    {
+      "id": "A9-009",
+      "type": "single",
+      "tags": [
+        "security",
+        "auth"
+      ],
+      "difficulty": 2,
+      "prompt": "A bank allows a joint-account holder, and anyone that holder has delegated to, to view the account; branch tellers can view accounts held by their branch. Which access-control model fits this best?",
+      "choices": [
+        "Plain RBAC with one global 'viewer' role",
+        "Mandatory access control with security labels",
+        "IP allow-lists per account",
+        "Relationship-based access control: access follows ownership, delegation and group-membership relationships"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The rules are about relationships (holder, delegate-of-holder, member of the branch that holds the account), which ReBAC expresses as tuples and rewrites; RBAC would explode into many scoped roles. A single global role cannot distinguish accounts. Security-label MAC is a different model aimed at classification levels. IP lists do not model ownership.",
+      "ref": "unit-1-authorization-tenancy.md#2-authentication-authorisation-and-where-decisions-are-made"
+    },
+    {
+      "id": "A9-010",
+      "type": "numeric",
+      "tags": [
+        "security",
+        "auth",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A request makes 12 authorisation decisions, one after another, each a remote call to a central policy service with p99 = 40 ms. What latency do the policy calls add to the request's tail, roughly, if every call hits its p99? Answer in milliseconds.",
+      "value": 480,
+      "tolerance": 0.1,
+      "unit": "ms",
+      "explanation": "Serial remote checks add up: 12 x 40 ms = 480 ms. The fix is to evaluate policy locally (library or sidecar, microseconds to about a millisecond) and keep remote calls for rare decisions that need fresh global state.",
+      "ref": "unit-1-authorization-tenancy.md#2-authentication-authorisation-and-where-decisions-are-made"
+    },
+    {
+      "id": "A9-011",
+      "type": "single",
+      "tags": [
+        "security",
+        "auth",
+        "multitenancy"
+      ],
+      "difficulty": 2,
+      "prompt": "Sequential statement ids let a member read other members' statements by changing the id. A first fix adds an ownership check to the handler. A week later a second endpoint is found with the same bug. What fix prevents this class of bug rather than one instance?",
+      "choices": [
+        "Rate-limit each user to 10 statement downloads per minute",
+        "Route all reads through a repository whose methods take the tenant and member scope from the request context and always include it in the query, with no unscoped get-by-id exposed to handlers",
+        "Switch the ids to random UUIDs so they cannot be guessed",
+        "Add the ownership check to the second endpoint as well, and add a code-review checklist item"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Making the scoped path the only path turns a forgotten check into a deliberate violation that reviews, lint rules and database roles can catch. UUIDs reduce enumeration but ids leak through logs and links; authorisation is the control. A per-endpoint check plus a checklist relies on memory again. Rate limiting slows a loop but does not stop access to one other member's statement.",
+      "ref": "unit-1-authorization-tenancy.md#3-object-level-authorisation-and-the-confused-deputy"
+    },
+    {
+      "id": "A9-012",
+      "type": "single",
+      "tags": [
+        "security",
+        "multitenancy",
+        "api-design"
+      ],
+      "difficulty": 2,
+      "prompt": "A partner token is valid for credit union A. It requests GET /v1/transfers/tr_8841 and tr_8841 belongs to credit union B. What should the API return?",
+      "choices": [
+        "404, identical to the response for a nonexistent id, so ids cannot be probed for existence",
+        "403 with the message \"transfer belongs to another tenant\"",
+        "200 with the transfer's fields redacted",
+        "401, because the token is not valid for that object"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Returning the same 404 for out-of-scope and missing objects avoids an existence oracle that lets an attacker enumerate other tenants' ids. A 403 with an explanatory message confirms the object exists and whose it is. Returning a redacted 200 still confirms existence and may leak metadata. 401 means authentication failed, but the caller is authenticated.",
+      "ref": "unit-1-authorization-tenancy.md#3-object-level-authorisation-and-the-confused-deputy"
+    },
+    {
+      "id": "A9-013",
+      "type": "single",
+      "tags": [
+        "security",
+        "multitenancy"
+      ],
+      "difficulty": 3,
+      "prompt": "An export service has a role that can read every tenant's object storage. Its API takes a storage_key from the caller and returns the object. A partner whose token is valid for credit union A passes a key under credit union B's prefix and gets B's file. What vulnerability is this and what is the best structural fix?",
+      "choices": [
+        "An SQL injection; use parameterised queries",
+        "A CSRF flaw; add anti-forgery tokens",
+        "A weak-TLS problem; upgrade the cipher suite",
+        "A confused deputy: the service uses its own broad authority on a caller-supplied name. Derive the prefix from the caller's tenant or call storage with credentials scoped to that tenant only"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The deputy holds authority from two sources (its own role, the caller's request) and applies the wrong one to a name the caller controls. Fixes shrink or replace the ambient authority: per-tenant credentials or session-tag-scoped storage policies, or authorising the key against the caller's principal. There is no SQL, cross-site request or transport weakness involved.",
+      "ref": "unit-1-authorization-tenancy.md#3-object-level-authorisation-and-the-confused-deputy"
+    },
+    {
+      "id": "A9-014",
+      "type": "multi",
+      "tags": [
+        "security",
+        "multitenancy"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL measures that reduce confused-deputy risk in a service that acts on behalf of callers.",
+      "choices": [
+        "Log the caller's request id so incidents are traceable, and nothing else",
+        "Use a credential scoped to the caller's tenant (or an on-behalf-of token) when the service touches storage",
+        "Accept an opaque, platform-minted, tenant-bound handle instead of a caller-supplied path",
+        "Give the service the broadest role so it never fails an authorisation check",
+        "Validate the supplied name against the caller's principal before using it"
+      ],
+      "answer": [
+        1,
+        2,
+        4
+      ],
+      "explanation": "Scoping credentials, replacing forgeable names with capabilities, and authorising the name against the caller's principal each remove the deputy's ability to apply its own authority wrongly. Broad roles are the cause of the problem, not the fix. Logging helps investigation but prevents nothing.",
+      "ref": "unit-1-authorization-tenancy.md#3-object-level-authorisation-and-the-confused-deputy"
+    },
+    {
+      "id": "A9-015",
+      "type": "single",
+      "tags": [
+        "security",
+        "api-design",
+        "multitenancy"
+      ],
+      "difficulty": 2,
+      "prompt": "PATCH /v1/members/{id} binds the JSON body straight onto the member struct. An attacker adds \"tenant_id\":\"cu-9\" and \"role\":\"admin\" to the body. Which OWASP API category is this and what is the fix?",
+      "choices": [
+        "Security misconfiguration: disable verbose error messages",
+        "Property-level authorisation (mass assignment): decode into an explicit input type with only the editable fields and reject unknown fields",
+        "Function-level authorisation: hide the admin routes from the documentation",
+        "Unrestricted resource consumption: limit the body size"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The attacker is writing properties they must not control; the fix is an explicit input DTO with strict decoding, and stamping the tenant from the context. Hiding routes does not prevent the call, body-size limits do not constrain fields, and verbose errors are unrelated.",
+      "ref": "unit-1-authorization-tenancy.md#3-object-level-authorisation-and-the-confused-deputy"
+    },
+    {
+      "id": "A9-016",
+      "type": "single",
+      "tags": [
+        "multitenancy",
+        "security",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "In a tenant-scoped store, Insert receives a row whose Tenant field says 'cu-alpha' while the request context says 'cu-beta'. What should the store do?",
+      "choices": [
+        "Reject it with an error: silently re-stamping the row would hide an attack or a bug",
+        "Overwrite Tenant with the context's value and store it",
+        "Store it under the row's Tenant field since it is explicit",
+        "Store it twice, once for each tenant"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A caller-supplied tenant that disagrees with the authenticated context is a signal of a bug or an attempt to write into another tenant, and the safe, debuggable response is to refuse. Quietly overwriting hides the signal. Honouring the field would let the caller choose where data lives. Duplicating data across tenants is a leak.",
+      "ref": "unit-1-authorization-tenancy.md#3-object-level-authorisation-and-the-confused-deputy"
+    },
+    {
+      "id": "A9-017",
+      "type": "single",
+      "tags": [
+        "multitenancy",
+        "architecture",
+        "security"
+      ],
+      "difficulty": 3,
+      "prompt": "A pooled Postgres database serves 40 credit unions. A schema migration holds a table lock for 11 minutes and affects everyone. The largest credit union also asks for dedicated infrastructure and its own key. Which approach best fits?",
+      "choices": [
+        "Move every tenant to its own dedicated stack immediately",
+        "Fork the codebase for the large credit union",
+        "Keep everything pooled and promise careful migrations",
+        "A bridge/cell architecture: the same code deployed as cells with a tenant-to-cell placement table; small tenants stay pooled, the large one gets a dedicated cell with its own database and key"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Cells keep one codebase and make placement data, so a tenant can be promoted to a dedicated cell without a rewrite while the pooled majority stay cheap; blast radius becomes the cell. Siloing all 40 multiplies cost and operations. A fork doubles maintenance. Promising care does not address the contractual and blast-radius requirements.",
+      "ref": "unit-1-authorization-tenancy.md#4-tenant-isolation-models"
+    },
+    {
+      "id": "A9-018",
+      "type": "single",
+      "tags": [
+        "multitenancy",
+        "security",
+        "databases"
+      ],
+      "difficulty": 3,
+      "prompt": "Row-level security is keyed on current_setting('app.tenant_id'). The app sets it with a session-level SET on a pooled connection behind a transaction-mode pooler. What is the failure and the fix?",
+      "choices": [
+        "Transaction-mode pooling encrypts the setting; disable pooling",
+        "RLS cannot work with current_setting; use triggers",
+        "The value persists on the pooled connection, so another tenant's request can inherit it. Set it per transaction with set_config(..., true) or SET LOCAL so it is cleared at commit",
+        "The value is lost after each query, so RLS denies everything; use SET GLOBAL"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Session state outlives the request that set it on a reused connection, so the next request (maybe another tenant's) runs with the previous tenant's identity. A transaction-local setting is discarded automatically at the end of the transaction. There is no 'SET GLOBAL' for this purpose, pooling does not encrypt settings, and RLS with current_setting is the standard pattern.",
+      "ref": "unit-1-authorization-tenancy.md#4-tenant-isolation-models"
+    },
+    {
+      "id": "A9-019",
+      "type": "multi",
+      "tags": [
+        "multitenancy",
+        "security",
+        "databases"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL statements that are true about PostgreSQL row-level security used for tenant isolation.",
+      "choices": [
+        "RLS removes the need to test cross-tenant access",
+        "Superusers and roles with BYPASSRLS ignore the policies",
+        "The table owner ignores the policies unless FORCE ROW LEVEL SECURITY is set",
+        "A policy makes it safe to connect the application as a superuser",
+        "The policy predicate is evaluated for each query, so indexes should lead with tenant_id"
+      ],
+      "answer": [
+        1,
+        2,
+        4
+      ],
+      "explanation": "Bypass roles and un-forced table owners are exempt, which is why the application must connect as an ordinary role and forced RLS is used. Policy predicates add to every query plan so composite indexes lead with the tenant. Connecting as a superuser defeats RLS entirely, and RLS is an additional barrier that still needs tests running as the application role.",
+      "ref": "unit-1-authorization-tenancy.md#4-tenant-isolation-models"
+    },
+    {
+      "id": "A9-020",
+      "type": "single",
+      "tags": [
+        "multitenancy",
+        "databases"
+      ],
+      "difficulty": 2,
+      "prompt": "A table transfers has a composite foreign key (tenant_id, account_id) referencing accounts (tenant_id, id). What does this buy you?",
+      "choices": [
+        "The database rejects a transfer that references another tenant's account, whatever code path wrote it",
+        "Faster joins because the key is shorter",
+        "Automatic encryption of the account id",
+        "It allows the same account id to be reused across tenants without conflict, and nothing else"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Composite keys make referential integrity tenant-aware, so a child row cannot point at another tenant's parent and joins cannot silently cross the boundary. The key is longer, not shorter. It does not encrypt anything. Allowing the same id in different tenants is a side effect of per-tenant keys, not the only benefit.",
+      "ref": "unit-1-authorization-tenancy.md#4-tenant-isolation-models"
+    },
+    {
+      "id": "A9-021",
+      "type": "single",
+      "tags": [
+        "multitenancy",
+        "security",
+        "async"
+      ],
+      "difficulty": 3,
+      "prompt": "A background worker consumes jobs and sets the tenant context from the tenant_id field in each queue message. A bug in a producer sets the wrong tenant_id on one message. What design change reduces the risk most?",
+      "choices": [
+        "Increase the queue's retention period",
+        "Run the worker as a superuser so it never fails",
+        "Log the tenant_id for every message",
+        "Have the consumer validate the message's tenant against the authoritative job record (or a signed envelope) and use tenant-scoped credentials, instead of trusting the field"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A tenant field in a message is just another caller-supplied value; validating it against the source of truth (or signing the envelope) and scoping credentials to the tenant limits a producer bug to one tenant's data. Retention is unrelated. A superuser worker makes the bug worse. Logging helps after the fact but does not prevent it.",
+      "ref": "unit-1-authorization-tenancy.md#4-tenant-isolation-models"
+    },
+    {
+      "id": "A9-022",
+      "type": "numeric",
+      "tags": [
+        "multitenancy",
+        "databases",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Silo model: each of 40 tenants has its own database, and each of 6 services keeps a pool of 10 connections per tenant database. How many connections does that open in total?",
+      "value": 2400,
+      "tolerance": 0.05,
+      "unit": "connections",
+      "explanation": "40 tenants x 6 services x 10 connections = 2,400 connections, versus roughly 6 x 50 = 300 for pooled access. Connection counts are a hidden cost of siloing; a proxy/pooler or smaller pools per tenant are the usual mitigations.",
+      "ref": "unit-1-authorization-tenancy.md#4-tenant-isolation-models"
+    },
+    {
+      "id": "A9-023",
+      "type": "numeric",
+      "tags": [
+        "multitenancy",
+        "deploys",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A schema migration takes about 3 minutes on one tenant database. With 40 siloed tenant databases applied strictly one after another, how long does the rollout take? Answer in minutes.",
+      "value": 120,
+      "tolerance": 0.05,
+      "unit": "min",
+      "explanation": "40 x 3 min = 120 minutes. With a canary tenant first and five migrations in parallel the rollout is about 8 batches x 3 min = 24 minutes plus the canary, which is why silo operations need tooling.",
+      "ref": "unit-1-authorization-tenancy.md#4-tenant-isolation-models"
+    },
+    {
+      "id": "A9-024",
+      "type": "single",
+      "tags": [
+        "multitenancy",
+        "reliability",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A global limit of 2,000 req/s never trips, yet one tenant's partner polling at 400 req/s (each query ~120 ms) pushes everyone else's p99 to several seconds. The shared database pool has 60 connections. What resource is exhausted and what limit protects it?",
+      "choices": [
+        "Connection-pool concurrency; a per-tenant concurrency limit (bulkhead) sized from Little's law",
+        "Network bandwidth; a per-tenant bandwidth cap",
+        "CPU cores; a larger instance type",
+        "DNS resolution; a lower TTL"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "400 req/s x 0.12 s = 48 connections busy, 80% of the pool: occupancy, not arrival rate, is the problem, and a rate limit set far above 400 never notices. A concurrency cap per tenant (for example 15 of 60 connections) bounds occupancy. Bandwidth, CPU and DNS are not what saturated.",
+      "ref": "unit-1-authorization-tenancy.md#5-noisy-neighbours-and-fair-sharing"
+    },
+    {
+      "id": "A9-025",
+      "type": "numeric",
+      "tags": [
+        "multitenancy",
+        "estimation",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "Using Little's law: a tenant sends 400 requests per second and each request holds a database connection for 120 ms. How many connections does that tenant occupy on average?",
+      "value": 48,
+      "tolerance": 0.1,
+      "unit": "connections",
+      "explanation": "L = lambda x W = 400 x 0.12 = 48 connections. That is 80% of a 60-connection pool, which is why a rate limit alone (400 is far below the global limit) does not protect the pool.",
+      "ref": "unit-1-authorization-tenancy.md#5-noisy-neighbours-and-fair-sharing"
+    },
+    {
+      "id": "A9-026",
+      "type": "numeric",
+      "tags": [
+        "multitenancy",
+        "estimation",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "You cap any one tenant at 25% of a 60-connection pool (15 connections). Each query holds a connection for 120 ms. What is the maximum sustained request rate for that tenant in req/s?",
+      "value": 125,
+      "tolerance": 0.1,
+      "unit": "req/s",
+      "explanation": "Throughput = concurrency / time per request = 15 / 0.12 s = 125 req/s. Above that the tenant's requests queue briefly or are rejected with 429 while the other 45 connections remain available to other tenants.",
+      "ref": "unit-1-authorization-tenancy.md#5-noisy-neighbours-and-fair-sharing"
+    },
+    {
+      "id": "A9-027",
+      "type": "single",
+      "tags": [
+        "multitenancy",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "A weighted fair limiter has Rate 100/s and two equal-weight tenants, so each is guaranteed 50/s. TenantCap is configured as 30/s. What is the effective ceiling for each tenant?",
+      "choices": [
+        "80/s: the average of the cap and the platform rate",
+        "50/s: a cap below the guarantee is raised to the guarantee, since a ceiling must not undercut a promise",
+        "30/s: the cap always wins",
+        "100/s: caps are ignored when capacity is idle"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The effective ceiling is max(cap, guarantee); otherwise a tenant could be refused traffic it was guaranteed. A cap that always wins would make the guarantee a lie. Ignoring caps when capacity is idle would let one tenant take everything and defeat the purpose of the cap. The averaging answer has no basis in the model.",
+      "ref": "unit-1-authorization-tenancy.md#5-noisy-neighbours-and-fair-sharing"
+    },
+    {
+      "id": "A9-028",
+      "type": "single",
+      "tags": [
+        "multitenancy",
+        "reliability",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "Platform capacity is 100 req/s. Tenant big floods at 500 req/s and always goes first in each round; tenant small sends 40 req/s. Under one global token bucket, roughly what happens to small's requests, compared with a design that guarantees each tenant 50 req/s?",
+      "choices": [
+        "Under the global bucket almost all of small's requests are refused (low single-digit percent succeed); with guarantees, all of small's 40 req/s succeed",
+        "Both designs give small about half of its requests",
+        "Under the global bucket small succeeds fully because 40 is below 100",
+        "With guarantees small is refused because big is using idle capacity"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "First come, first served means big drains the shared bucket every round before small is looked at; the lab's break-it measures about 2% for small. A guaranteed 50 req/s share covers small's 40 req/s entirely, and big may only borrow what small leaves unused. Being below the global rate does not matter when the bucket is empty on arrival, and borrowing never takes a tenant's guarantee.",
+      "ref": "unit-1-authorization-tenancy.md#5-noisy-neighbours-and-fair-sharing"
+    },
+    {
+      "id": "A9-029",
+      "type": "multi",
+      "tags": [
+        "multitenancy",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL true statements about a work-conserving weighted fair limiter with borrowing and a per-tenant cap.",
+      "choices": [
+        "Weights should be derived only from current traffic so growing tenants are throttled early",
+        "Unused guaranteed capacity can be lent to tenants that need more",
+        "The sum of guaranteed rates should not exceed platform capacity",
+        "The cap stops one tenant from consuming all spare capacity",
+        "Lending is safe because borrowers can also spend other tenants' guaranteed tokens"
+      ],
+      "answer": [
+        1,
+        2,
+        3
+      ],
+      "explanation": "Work conservation lends idle capacity, guarantees are never oversubscribed, and caps bound the borrowers. A borrower never spends another tenant's own bucket (only the shared overflow), which is what keeps guarantees intact. Weights should reflect entitlement (contract tier), not only current load, or a growing customer is penalised for success.",
+      "ref": "unit-1-authorization-tenancy.md#5-noisy-neighbours-and-fair-sharing"
+    },
+    {
+      "id": "A9-030",
+      "type": "numeric",
+      "tags": [
+        "multitenancy",
+        "reliability",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "With shuffle sharding, each tenant is assigned 2 of 8 workers. How many distinct worker pairs are possible?",
+      "value": 28,
+      "tolerance": 0.05,
+      "unit": "pairs",
+      "explanation": "C(8,2) = 8 x 7 / 2 = 28. The chance that another given tenant shares both of a poisonous tenant's workers is 1/28, about 3.6%; with 100 workers and 5 per tenant there are 75 million combinations.",
+      "ref": "unit-1-authorization-tenancy.md#5-noisy-neighbours-and-fair-sharing"
+    },
+    {
+      "id": "A9-031",
+      "type": "single",
+      "tags": [
+        "security",
+        "secrets",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "You must rotate the database password of a production service with zero downtime. What is the correct approach?",
+      "choices": [
+        "Keep the password and rotate the TLS certificate instead",
+        "Make two credentials valid at once (a second user or the idle half of an alternating pair), roll the services onto the new one, verify the old is unused, then revoke it",
+        "Change the password in the database and restart all services together",
+        "Change the password during a maintenance window and accept connection errors"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "An overlap in which both credentials work lets consumers move over at their own pace; revocation happens only after usage is zero. Changing in place then restarting leaves a window of failures. Maintenance windows are downtime by definition. Rotating a certificate does not rotate the database credential.",
+      "ref": "unit-2-data-protection-audit.md#1-secrets-management"
+    },
+    {
+      "id": "A9-032",
+      "type": "single",
+      "tags": [
+        "security",
+        "secrets"
+      ],
+      "difficulty": 1,
+      "prompt": "Why are environment variables a poor long-term home for production secrets?",
+      "choices": [
+        "They are inherited by child processes and visible in process metadata, crash dumps and diagnostics, and are often exported by CI tooling",
+        "They are limited to 32 characters",
+        "They cannot be changed without recompiling the program",
+        "They are always stored unencrypted on the network"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Environment variables leak through child processes, /proc, container inspection and common diagnostic dumps. The length limit and recompile claims are false (variables can be changed at launch and are large), and they are not network objects.",
+      "ref": "unit-2-data-protection-audit.md#1-secrets-management"
+    },
+    {
+      "id": "A9-033",
+      "type": "multi",
+      "tags": [
+        "security",
+        "secrets"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL places where a production secret should never be stored.",
+      "choices": [
+        "The service's log output at debug level",
+        "A secret manager path with per-service read policy",
+        "A build argument baked into a container image layer",
+        "A committed Helm values file",
+        "An in-memory value fetched at start-up with workload identity"
+      ],
+      "answer": [
+        0,
+        2,
+        3
+      ],
+      "explanation": "Image layers, source control and logs persist and are widely readable. Fetching with workload identity into memory and storing in a secret manager with scoped policies are the intended patterns.",
+      "ref": "unit-2-data-protection-audit.md#1-secrets-management"
+    },
+    {
+      "id": "A9-034",
+      "type": "single",
+      "tags": [
+        "security",
+        "secrets",
+        "auth"
+      ],
+      "difficulty": 3,
+      "prompt": "HMAC webhook secrets are rotated. Receivers verify with the old key during an overlap. Webhook deliveries can be retried for up to 24 hours and signatures carry a 5-minute tolerance. How long must the old key remain accepted after the new key starts signing?",
+      "choices": [
+        "Exactly 5 minutes, the signature tolerance",
+        "Forever, so that nothing ever breaks",
+        "At least about 24 hours plus the tolerance: long enough for any delivery signed with the old key to be retried and verified",
+        "Zero: switch instantly to avoid confusion"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The overlap must cover the longest time a message signed with the old key can still arrive (retry window) plus skew. Switching instantly rejects retried deliveries. Five minutes ignores retries. Keeping old keys forever defeats rotation.",
+      "ref": "unit-2-data-protection-audit.md#1-secrets-management"
+    },
+    {
+      "id": "A9-035",
+      "type": "single",
+      "tags": [
+        "security",
+        "encryption",
+        "databases"
+      ],
+      "difficulty": 2,
+      "prompt": "A Go service connects to Postgres with sslmode=require. What does it not protect against?",
+      "choices": [
+        "Replay of captured traffic",
+        "A man in the middle presenting any certificate, because require encrypts but does not verify the server's certificate; use verify-full",
+        "Eavesdropping on the connection",
+        "Passwords sent in the clear"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "require encrypts the channel but accepts any certificate, so an active attacker can impersonate the database. verify-full checks the chain and host name. The other options are what TLS (even unverified) already addresses.",
+      "ref": "unit-2-data-protection-audit.md#2-encryption-in-transit-and-at-rest"
+    },
+    {
+      "id": "A9-036",
+      "type": "multi",
+      "tags": [
+        "security",
+        "encryption"
+      ],
+      "difficulty": 3,
+      "prompt": "A DBA with legitimate read access exports the members table. Select ALL controls that would keep sensitive fields unreadable to the DBA.",
+      "choices": [
+        "Tokenisation with the real values held in a separate hardened vault",
+        "Volume (disk) encryption",
+        "Database TDE",
+        "TLS between the DBA's client and the database",
+        "Application-level field encryption whose keys the DBA cannot use"
+      ],
+      "answer": [
+        0,
+        4
+      ],
+      "explanation": "Volume encryption and TDE are transparent to an authorised session; the database decrypts for the DBA. TLS only protects the connection. Application-level encryption with inaccessible keys, or tokenisation, removes the readable value from the database.",
+      "ref": "unit-2-data-protection-audit.md#2-encryption-in-transit-and-at-rest"
+    },
+    {
+      "id": "A9-037",
+      "type": "single",
+      "tags": [
+        "security",
+        "auth",
+        "encryption"
+      ],
+      "difficulty": 3,
+      "prompt": "Service mesh mTLS is on. Any workload with a valid certificate can call the ledger's Post endpoint, which trusts an X-Caller header. What is the most important gap?",
+      "choices": [
+        "mTLS should be replaced with plain TLS",
+        "Certificates should be valid for five years to avoid renewals",
+        "The ledger should use HTTP/1.1",
+        "Authorisation is not tied to the verified certificate identity; allow-list SPIFFE identities per endpoint and ignore caller-supplied identity headers"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "mTLS proves a caller is some platform workload, not which one may call this endpoint. Authorise on the certificate identity and do not trust headers when a verified identity exists. Plain TLS authenticates less, long-lived certificates are a standing credential, and the HTTP version is irrelevant.",
+      "ref": "unit-2-data-protection-audit.md#2-encryption-in-transit-and-at-rest"
+    },
+    {
+      "id": "A9-038",
+      "type": "single",
+      "tags": [
+        "security",
+        "encryption",
+        "databases"
+      ],
+      "difficulty": 2,
+      "prompt": "You must find duplicate tax ids without being able to read them in the database. Which technique is the standard approach for equality lookups on an encrypted field?",
+      "choices": [
+        "Store a plain SHA-256 of the tax id",
+        "Sort the ciphertexts and compare neighbours",
+        "Store a keyed HMAC of the normalised value as a blind index next to the randomised ciphertext",
+        "Encrypt with ECB mode so identical values give identical ciphertext"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A keyed HMAC (under a separate key) allows equality matching and leaks only which rows are equal. ECB has no randomisation or integrity and exposes patterns. An unkeyed hash of a low-entropy value can be brute-forced. Ciphertext order has no meaning.",
+      "ref": "unit-2-data-protection-audit.md#2-encryption-in-transit-and-at-rest"
+    },
+    {
+      "id": "A9-039",
+      "type": "numeric",
+      "tags": [
+        "encryption",
+        "estimation",
+        "cost"
+      ],
+      "difficulty": 2,
+      "prompt": "A design calls KMS Decrypt for every read, with no DEK cache, at 5,000 reads per second. How many KMS calls per day does that produce? Answer in millions.",
+      "value": 432,
+      "tolerance": 0.05,
+      "unit": "million calls",
+      "explanation": "5,000 x 86,400 = 432,000,000 calls/day. At roughly $0.03 per 10,000 requests (check current pricing) that is about $1,300/day, and it would also exhaust shared KMS request quotas. A DEK cache with a 99.99% hit rate brings it to about 0.5 calls/s.",
+      "ref": "unit-2-data-protection-audit.md#3-envelope-encryption-and-key-management"
+    },
+    {
+      "id": "A9-040",
+      "type": "numeric",
+      "tags": [
+        "encryption",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A KEK is rotated and you use one data key per object, with 100 million objects, re-wrapped by the KMS at 1,000 calls per second. How many hours does the re-wrap take?",
+      "value": 28,
+      "tolerance": 0.1,
+      "unit": "hours",
+      "explanation": "100,000,000 / 1,000 per second = 100,000 s, about 27.8 hours. With one DEK per tenant (40 keys) it is seconds. KEK rotation costs one re-wrap per wrapped DEK, not per byte of data.",
+      "ref": "unit-2-data-protection-audit.md#3-envelope-encryption-and-key-management"
+    },
+    {
+      "id": "A9-041",
+      "type": "single",
+      "tags": [
+        "encryption",
+        "multitenancy",
+        "compliance"
+      ],
+      "difficulty": 3,
+      "prompt": "Credit union 17 offboards and its contract requires all its data to be unrecoverable, including in backups, within 30 days. The data is encrypted under per-tenant DEKs wrapped by a KEK. What is the cleanest approach?",
+      "choices": [
+        "Delete rows from the live database and leave backups untouched",
+        "Rotate the platform KEK",
+        "Overwrite the live database files with zeros",
+        "Crypto-shred: destroy the tenant's DEKs (and KEK) and purge them from key-table backups on a shorter retention than data backups"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Destroying the keys makes every copy of the ciphertext, including backups, unreadable without touching the backups. The key table's own backups must not outlive the deadline. Deleting live rows leaves backups readable. Rotating the platform KEK affects everyone and does not remove the tenant's DEK. Zeroing live files does nothing to backups or replicas.",
+      "ref": "unit-2-data-protection-audit.md#3-envelope-encryption-and-key-management"
+    },
+    {
+      "id": "A9-042",
+      "type": "single",
+      "tags": [
+        "encryption",
+        "security",
+        "multitenancy"
+      ],
+      "difficulty": 3,
+      "prompt": "Ciphertexts for all tenants are encrypted under one shared DEK with AES-GCM, and an attacker with write access to storage copies tenant A's ciphertext into tenant B's row. With associated data = tenant and object id, what happens when B reads the row?",
+      "choices": [
+        "B reads garbage but no error is raised",
+        "Decryption succeeds but is logged",
+        "Authentication fails and decryption is refused, because the tag covers the associated data",
+        "B reads A's plaintext, since the key is the same"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "GCM authenticates the associated data; a ciphertext moved to a different tenant/object context fails verification. Without AAD, decryption would succeed because the key is shared. GCM does not return garbage silently: it returns an authentication error.",
+      "ref": "unit-2-data-protection-audit.md#3-envelope-encryption-and-key-management"
+    },
+    {
+      "id": "A9-043",
+      "type": "single",
+      "tags": [
+        "encryption",
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "Why is reusing a nonce with the same key in AES-GCM so dangerous?",
+      "choices": [
+        "It only matters for messages larger than 64 GB",
+        "Two messages under the same key and nonce reveal the XOR of the plaintexts and allow forging authentication tags",
+        "It only slows down encryption",
+        "It makes the key shorter"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Nonce reuse breaks both confidentiality (keystream reuse) and integrity (the authentication key can be recovered). It is not a performance matter, does not change the key, and applies to any message size.",
+      "ref": "unit-2-data-protection-audit.md#3-envelope-encryption-and-key-management"
+    },
+    {
+      "id": "A9-044",
+      "type": "numeric",
+      "tags": [
+        "encryption",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A tenant's DEK encrypts 2,000 messages per second with random 96-bit nonces. Following the NIST limit of 2^32 messages per key, after about how many days must the DEK be retired? (2^32 is about 4.29 billion.)",
+      "value": 24.8,
+      "tolerance": 0.1,
+      "unit": "days",
+      "explanation": "4.29e9 / 2,000 per second = 2.15e6 s, about 24.8 days (so rotate DEKs monthly or cap by message count).",
+      "ref": "unit-2-data-protection-audit.md#3-envelope-encryption-and-key-management"
+    },
+    {
+      "id": "A9-045",
+      "type": "single",
+      "tags": [
+        "encryption",
+        "reliability",
+        "secrets"
+      ],
+      "difficulty": 3,
+      "prompt": "After rotating the KEK you destroy version 1 without re-wrapping the stored DEKs. Everything works for days. Then a restart causes widespread decryption failures. Why did it work before?",
+      "choices": [
+        "The KMS caches the destroyed key for a week",
+        "Restarting corrupts ciphertext",
+        "The new KEK version could decrypt data encrypted under the old one",
+        "Services were holding unwrapped DEKs in an in-memory cache; the restart forced fresh unwraps, which needed the destroyed KEK version"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Cached plaintext DEKs hid the missing key until the cache was lost. Re-wrap all DEKs (and verify) before destroying an old KEK version. KMS does not keep destroyed material, restarts do not alter ciphertext, and a new KEK version cannot unwrap keys wrapped under the old version.",
+      "ref": "unit-2-data-protection-audit.md#3-envelope-encryption-and-key-management"
+    },
+    {
+      "id": "A9-046",
+      "type": "single",
+      "tags": [
+        "audit",
+        "security"
+      ],
+      "difficulty": 3,
+      "prompt": "An operator with write access to the entire audit store deletes the last 5,000 entries of a hash-chained log. Verification of the remaining chain passes. What detects the deletion?",
+      "choices": [
+        "Verifying each entry's hash more carefully",
+        "Increasing the hash length to 512 bits",
+        "An externally anchored head (published outside the operator's control) that records a longer log",
+        "Nothing; hash chains detect all deletions by themselves"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A truncated chain is still a valid chain; only an independent record of the head says how long it should be. Hash chains alone detect middle edits, deletions and reordering, not tail truncation. Per-entry hash checks pass on the remaining entries, and a longer hash does not change this.",
+      "ref": "unit-2-data-protection-audit.md#4-audit-trails-and-tamper-evidence"
+    },
+    {
+      "id": "A9-047",
+      "type": "multi",
+      "tags": [
+        "audit",
+        "security"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL attacks that a hash chain WITHOUT any external anchor will still detect.",
+      "choices": [
+        "Swapping two adjacent entries",
+        "Deleting the last 100 entries",
+        "Rewriting the whole log, recomputing every hash, link and sequence number",
+        "Editing an entry's content while leaving its stored hash unchanged",
+        "Deleting an entry from the middle without touching other entries"
+      ],
+      "answer": [
+        0,
+        3,
+        4
+      ],
+      "explanation": "A stale hash, a broken link and out-of-order links are all visible internally. Tail truncation and a complete consistent rewrite produce a valid chain, so they need an anchor held somewhere the attacker cannot write.",
+      "ref": "unit-2-data-protection-audit.md#4-audit-trails-and-tamper-evidence"
+    },
+    {
+      "id": "A9-048",
+      "type": "numeric",
+      "tags": [
+        "audit",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Verifying a hash-chained audit log costs about 2 microseconds per entry on one core. How long does it take to verify 1.8 billion entries (about a year of logs for a busy platform)? Answer in minutes.",
+      "value": 60,
+      "tolerance": 0.15,
+      "unit": "min",
+      "explanation": "1.8e9 x 2e-6 s = 3,600 s = 60 minutes on one core. It is linear in the number of entries, so verify per tenant and per segment in parallel and start segments from stored checkpoints.",
+      "ref": "unit-2-data-protection-audit.md#4-audit-trails-and-tamper-evidence"
+    },
+    {
+      "id": "A9-049",
+      "type": "single",
+      "tags": [
+        "audit",
+        "security"
+      ],
+      "difficulty": 3,
+      "prompt": "Why must a canonical encoding for hashed audit entries length-prefix each field rather than just concatenate them?",
+      "choices": [
+        "Length prefixes make the hash faster to compute",
+        "SHA-256 requires its input to be length-prefixed",
+        "It reduces storage",
+        "Concatenation is ambiguous: bytes can move between adjacent fields (\"ab\",\"c\" vs \"a\",\"bc\") while the hash stays the same"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Without delimiters two different entries can produce identical bytes, so an attacker can alter field boundaries without changing the hash. Length prefixes are not about speed or storage, and SHA-256 accepts any input.",
+      "ref": "unit-2-data-protection-audit.md#4-audit-trails-and-tamper-evidence"
+    },
+    {
+      "id": "A9-050",
+      "type": "single",
+      "tags": [
+        "audit",
+        "reliability",
+        "compliance"
+      ],
+      "difficulty": 3,
+      "prompt": "The audit store is down while a customer submits a $48,000 wire. What is the best design?",
+      "choices": [
+        "Make the wire wait synchronously on the remote audit store with a long timeout",
+        "Process the wire and rebuild the audit trail from application logs later",
+        "Write the audit event to an outbox in the same database transaction as the wire and ship it asynchronously; the wire fails only if that local database write fails",
+        "Process the wire and drop the audit event"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The outbox makes the audit record atomic with the effect without making the remote store a synchronous dependency, and the action still fails closed if the record cannot be committed. Dropping or reconstructing audit events leaves an unaudited money movement. A long synchronous wait makes the store's outage a customer-facing outage.",
+      "ref": "unit-2-data-protection-audit.md#4-audit-trails-and-tamper-evidence"
+    },
+    {
+      "id": "A9-051",
+      "type": "single",
+      "tags": [
+        "audit",
+        "multitenancy"
+      ],
+      "difficulty": 2,
+      "prompt": "What is the main benefit of keeping a separate hash chain per tenant (credit union)?",
+      "choices": [
+        "It lets tenants edit their own entries",
+        "Each tenant can verify and anchor its own history without seeing anyone else's, and chains scale out by tenant",
+        "It makes hashes shorter",
+        "It removes the need for sequence numbers"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Per-tenant chains give each credit union independent verifiability and parallelism. Hash length is unchanged, sequence numbers are still used to order entries within a chain, and entries stay append-only.",
+      "ref": "unit-2-data-protection-audit.md#4-audit-trails-and-tamper-evidence"
+    },
+    {
+      "id": "A9-052",
+      "type": "numeric",
+      "tags": [
+        "audit",
+        "estimation",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "A platform records 5 million audit events per day at about 500 bytes each. How many terabytes of raw (uncompressed, unreplicated) audit data accumulate over 7 years of retention?",
+      "value": 6.4,
+      "tolerance": 0.1,
+      "unit": "TB",
+      "explanation": "5e6 x 500 B = 2.5 GB/day; x 365 x 7 = 6.4 TB. Compression of JSON-like logs is often 5-10x and replication multiplies by about 3, so plan for roughly 1-3 TB stored.",
+      "ref": "unit-2-data-protection-audit.md#4-audit-trails-and-tamper-evidence"
+    },
+    {
+      "id": "A9-053",
+      "type": "single",
+      "tags": [
+        "compliance",
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "What is the difference between a SOC 2 Type I and a Type II report?",
+      "choices": [
+        "Type I covers security only; Type II covers all five criteria",
+        "Type I is self-assessed; Type II is certified by the government",
+        "Type II applies only to payment processors",
+        "Type I assesses the design of controls at a point in time; Type II assesses whether they operated effectively over a period"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Type II adds evidence of operation over time (commonly 3-12 months). Both are CPA attestations; the criteria chosen are independent of the type, and SOC 2 is not a government certification or limited to payment processors.",
+      "ref": "unit-2-data-protection-audit.md#5-compliance-data-lifecycle-and-separation-of-duties"
+    },
+    {
+      "id": "A9-054",
+      "type": "single",
+      "tags": [
+        "compliance",
+        "security",
+        "architecture"
+      ],
+      "difficulty": 3,
+      "prompt": "Full card numbers are stored in 14 of your services, putting all of them in PCI DSS scope. What is the highest-return move?",
+      "choices": [
+        "Add more logging to the 14 services",
+        "Rename the field so scanners do not find it",
+        "Tokenise or use hosted payment fields so card numbers never reach your systems, and confine any remaining handling to one segmented service",
+        "Encrypt the 14 databases with a stronger cipher"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Scope is determined by where cardholder data is stored, processed or transmitted (and systems that can affect it), so removing the data removes systems from scope. Stronger encryption leaves the systems in scope, logging adds evidence but not scope reduction, and renaming hides nothing from an assessor.",
+      "ref": "unit-2-data-protection-audit.md#5-compliance-data-lifecycle-and-separation-of-duties"
+    },
+    {
+      "id": "A9-055",
+      "type": "single",
+      "tags": [
+        "compliance",
+        "security",
+        "encryption"
+      ],
+      "difficulty": 3,
+      "prompt": "A member asks for deletion of their data, while banking rules require keeping transaction records for several years. What is the right architecture?",
+      "choices": [
+        "Move the data to a different table with the same retention",
+        "Classify data: retain required records (restricted access) for the legal period, delete or anonymise the erasable personal data, and crypto-shred keys at the end of the retention period, with a deletion record",
+        "Delete everything immediately; legal requirements are the compliance team's problem",
+        "Refuse all deletion requests"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Regulatory retention and privacy deletion apply to different classes of data; separate them, honour each, and keep evidence. Deleting required records breaks retention duties; refusing everything ignores erasure obligations; relabelling storage changes neither.",
+      "ref": "unit-2-data-protection-audit.md#5-compliance-data-lifecycle-and-separation-of-duties"
+    },
+    {
+      "id": "A9-056",
+      "type": "single",
+      "tags": [
+        "compliance",
+        "security",
+        "auth"
+      ],
+      "difficulty": 2,
+      "prompt": "How should a support engineer be given access to a member's data so that it satisfies a SOC 2 access-control review?",
+      "choices": [
+        "Just-in-time: a ticket-linked, approved, time-boxed grant with masked data by default and every unmasking logged",
+        "A standing admin account reviewed once a year",
+        "A shared support login with a strong password",
+        "Direct database access through the engineer's personal account"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "JIT access leaves approval and usage evidence, limits exposure to the case, and avoids standing privilege. Standing or shared accounts and direct DB access fail least-privilege and attribution requirements.",
+      "ref": "unit-2-data-protection-audit.md#5-compliance-data-lifecycle-and-separation-of-duties"
+    },
+    {
+      "id": "A9-057",
+      "type": "single",
+      "tags": [
+        "security",
+        "auth",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "In a Zanzibar-style authorisation system, bob is removed from an account and a new statement is then added to it. A check served from a stale replica still says bob may view. What is this called and what addresses it?",
+      "choices": [
+        "The thundering herd; add jitter to cache expiry",
+        "The split-brain problem; add a third replica",
+        "The confused deputy; use capabilities",
+        "The new enemy problem; consistency tokens (zookies) so checks are at least as fresh as the content write"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Ordering an ACL change before later content requires checks evaluated at a snapshot no older than that content's write, which zookies provide. The other names describe different problems (cache synchronisation, partitions, authority misuse).",
+      "ref": "unit-1-authorization-tenancy.md#6-stretch-relationship-based-access-control-zanzibar-style"
+    },
+    {
+      "id": "A9-058",
+      "type": "numeric",
+      "tags": [
+        "audit",
+        "security",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A Merkle tree covers 2^30 (about 1.07 billion) log entries. How many sibling hashes are in an inclusion proof for one entry?",
+      "value": 30,
+      "tolerance": 0.05,
+      "unit": "hashes",
+      "explanation": "A proof needs one sibling hash per tree level: log2(2^30) = 30, about 960 bytes with SHA-256, versus hashing a billion entries with a chain.",
+      "ref": "unit-2-data-protection-audit.md#6-stretch-merkle-trees-transparency-logs-and-external-witnesses"
+    },
+    {
+      "id": "A9-059",
+      "type": "single",
+      "tags": [
+        "audit",
+        "security",
+        "encryption"
+      ],
+      "difficulty": 3,
+      "prompt": "Why do RFC 6962-style Merkle trees hash leaves and interior nodes with different prefixes?",
+      "choices": [
+        "To allow the tree to have more than two children",
+        "To prevent an interior node (two concatenated child hashes) from being presented as a leaf, which would let two different logs share a root",
+        "To make hashing faster",
+        "To compress the tree"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Domain separation removes the second-preimage confusion between nodes and leaves. It does not change speed or size, and the tree remains binary.",
+      "ref": "unit-2-data-protection-audit.md#6-stretch-merkle-trees-transparency-logs-and-external-witnesses"
+    }
+  ]
+}

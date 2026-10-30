@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "id": "B0",
+  "slug": "go-concurrency",
+  "title": "Go concurrency for interviews",
+  "track": "B",
+  "status": "written",
+  "core": true,
+  "summary": "Goroutines, channels, locks and the memory model; context, bounded concurrency, leak-free pipelines, vendor fan-out under budgets, graceful shutdown, and testing concurrent code for machine-coding rounds.",
+  "hours": {
+    "core": 12,
+    "stretch": 1.5,
+    "total": 13.5
+  },
+  "prerequisites": [],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/B0-go-concurrency",
+    "readme": "modules/B0-go-concurrency/README.md",
+    "quiz": "modules/B0-go-concurrency/quiz.json",
+    "design_exercise": "modules/B0-go-concurrency/design-exercise.md",
+    "teachback": "modules/B0-go-concurrency/teachback.md",
+    "lab": "labs/b0",
+    "solution": "solutions/b0"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Primitives and the memory model",
+      "file": "modules/B0-go-concurrency/unit-1-primitives.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "batcher",
+        "safemap"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Cancellation and structured concurrency",
+      "file": "modules/B0-go-concurrency/unit-2-cancellation.md",
+      "hours": {
+        "core": 7,
+        "stretch": 0.5
+      },
+      "labs": [
+        "group",
+        "pipeline",
+        "fanout"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "batcher",
+      "title": "Size-or-time batcher with backpressure and idempotent Close",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "safemap",
+      "title": "Generic sharded concurrent map with atomic Update",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "group",
+      "title": "errgroup clone: WithContext, Go, TryGo, SetLimit, Wait",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "pipeline",
+      "title": "Cancellable pipeline stages: Generate, Map, MapOrdered, Merge",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "fanout",
+      "title": "Vendor fan-out with timeouts, deadline, concurrency cap and partial-result policy",
+      "unit": 2,
+      "core": true
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Predict the behaviour of short concurrent Go programs: output, deadlock, panic vs fatal error, race.",
+      "core": true
+    },
+    {
+      "text": "Explain the G/M/P scheduler model and when goroutines cost OS threads.",
+      "core": true
+    },
+    {
+      "text": "Choose between channels, mutexes, RWMutex, atomics, sync.Map and sharding for a sharing pattern, and say when the answer flips.",
+      "core": true
+    },
+    {
+      "text": "Explain happens-before in the Go memory model and what the race detector can and cannot find.",
+      "core": true
+    },
+    {
+      "text": "Implement a size-or-time batcher and a sharded concurrent map that pass go test -race with no leaks.",
+      "core": true
+    },
+    {
+      "text": "Propagate cancellation and deadlines with context, and budget per-call timeouts inside an overall deadline.",
+      "core": true
+    },
+    {
+      "text": "Implement bounded concurrency, leak-free pipelines and a vendor fan-out with an explicit partial-results policy.",
+      "core": true
+    },
+    {
+      "text": "Design a graceful shutdown sequence that fits a platform's termination grace period.",
+      "core": true
+    },
+    {
+      "text": "Test concurrent code deterministically and narrate a component's concurrency safety in a machine-coding round.",
+      "core": true
+    },
+    {
+      "text": "Benchmark locking strategies and explain contention vs cache-coherence costs.",
+      "core": false
+    }
+  ]
+}

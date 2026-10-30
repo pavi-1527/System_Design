@@ -1,0 +1,741 @@
+{
+  "module": "E1",
+  "title": "Build: URL shortener service",
+  "draw": 12,
+  "questions": [
+    {
+      "id": "E1-001",
+      "type": "single",
+      "tags": [
+        "durability",
+        "testing"
+      ],
+      "difficulty": 2,
+      "prompt": "Your store runs with -sync never. A test SIGKILLs it after 1,000 acknowledged writes, restarts it, and finds all 1,000. What has the test proved?",
+      "choices": [
+        "That recovery and the log-before-ack rule work for process crashes; it says nothing about power loss, because the page cache survives SIGKILL",
+        "That the store is durable against power loss, since SIGKILL is the harshest way to stop a process",
+        "That -sync never is as durable as -sync always, so fsync can be dropped",
+        "Nothing, because SIGKILL flushes the process's buffers to disk before it dies"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "SIGKILL ends the process, not the kernel: bytes already handed to write() are in the page cache and the kernel writes them back later. So the test passes with or without fsync; it proves the recovery logic and that the ack happens after the write. Power loss is a different failure class (the page cache is lost), so it can't show -sync always and -sync never are equivalent. SIGKILL flushes nothing: user-space buffers are simply lost, which is why the log must call write() before acknowledging.",
+      "ref": "unit-1-durable-store.md#1-the-append-only-log-and-what-durable-means"
+    },
+    {
+      "id": "E1-002",
+      "type": "single",
+      "tags": [
+        "durability",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "In Put, why must the store append the record to the log before updating the in-memory index?",
+      "choices": [
+        "So that a failed append never leaves readers seeing a value the file doesn't have, which would vanish on restart",
+        "Because the index must be rebuilt from the log on every Put",
+        "Because updating a Go map before a write is a data race",
+        "So the fsync can run while the map is being updated, in parallel"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Log first, then apply, is the WAL rule: if the append fails (disk full, I/O error) and the index was updated first, a reader may already have been redirected by a value that disappears at the next restart. The index is rebuilt only on start, not per Put. Ordering inside one critical section isn't a race question. And overlapping the fsync with the map update doesn't change the visibility problem.",
+      "ref": "unit-1-durable-store.md#1-the-append-only-log-and-what-durable-means"
+    },
+    {
+      "id": "E1-003",
+      "type": "numeric",
+      "tags": [
+        "durability",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "fsync takes 2 ms. Writes take one mutex, append, fsync and release it. Eight clients write back to back concurrently. Roughly how many acknowledged writes per second does the store do in total? Answer in writes/s.",
+      "value": 500,
+      "tolerance": 0.25,
+      "unit": "writes/s",
+      "explanation": "The mutex serialises the fsyncs: one write per 2 ms regardless of how many clients are waiting, so ≈ 1 / 0.002 = 500 writes/s in total (≈ 62/s per client). Concurrency without batching buys nothing at the disk; that is what group commit fixes.",
+      "ref": "unit-1-durable-store.md#1-the-append-only-log-and-what-durable-means"
+    },
+    {
+      "id": "E1-004",
+      "type": "numeric",
+      "tags": [
+        "durability",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "Same store (fsync 2 ms, eight concurrent writers), now with group commit: every write that arrives while an fsync runs shares the next one, and in steady state each fsync covers all eight writers' records. Roughly how many acknowledged writes per second? Answer in writes/s.",
+      "value": 4000,
+      "tolerance": 0.25,
+      "unit": "writes/s",
+      "explanation": "Each 2 ms fsync now makes eight records durable: 8 / 0.002 = 4,000 writes/s. The durability guarantee is unchanged (every ack still follows an fsync covering that record); the cost is that each writer may wait for up to one extra fsync.",
+      "ref": "unit-1-durable-store.md#1-the-append-only-log-and-what-durable-means"
+    },
+    {
+      "id": "E1-005",
+      "type": "multi",
+      "tags": [
+        "durability",
+        "recovery"
+      ],
+      "difficulty": 2,
+      "prompt": "On start, which of these should recovery treat as a torn tail (truncate and start) rather than corruption? Select ALL that apply.",
+      "choices": [
+        "5 bytes after the last valid record",
+        "A final record whose length field runs past the end of the file",
+        "A final, complete-length record with a bad CRC",
+        "4,096 zero bytes after the last valid record",
+        "Record 4 of 10 has a bad CRC; records 5–10 are valid"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "The first four are what an interrupted append leaves behind: a prefix of a record, a length that reached disk before the bytes, or a file extended before its data blocks were written. Each damaged record is the last thing in the file, the one write that was never acknowledged. A bad record followed by valid ones is damage to acknowledged data: refuse to start and leave the file for an operator.",
+      "ref": "unit-1-durable-store.md#2-recovery-torn-tails-versus-corruption"
+    },
+    {
+      "id": "E1-006",
+      "type": "single",
+      "tags": [
+        "durability",
+        "recovery"
+      ],
+      "difficulty": 2,
+      "prompt": "A store's recovery rule is 'stop at the first bad record anywhere and truncate there'. Six weeks in, a bad sector flips one bit in the middle of the log. What happens at the next restart?",
+      "choices": [
+        "It starts cleanly and silently deletes every acknowledged record after the flipped bit",
+        "It refuses to start, because the CRC fails",
+        "It starts and skips the one damaged record, losing only that link",
+        "It starts and repairs the record from the CRC"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Truncating at the first bad record is right only when that record is the tail. Mid-file, it deletes everything after it, and the restart looks healthy. It wouldn't refuse (that's the correct policy, not this one), it doesn't skip (a different, also unsafe policy), and a CRC detects damage but can't repair it.",
+      "ref": "unit-1-durable-store.md#2-recovery-torn-tails-versus-corruption"
+    },
+    {
+      "id": "E1-007",
+      "type": "single",
+      "tags": [
+        "durability",
+        "recovery"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does recovery fsync the file right after truncating a torn tail?",
+      "choices": [
+        "Otherwise a crash just after recovery can bring the torn bytes back, and the next append lands after garbage, which looks like mid-file corruption",
+        "Because Truncate is not atomic without fsync",
+        "To flush the in-memory index to disk",
+        "Because the CRC table must be persisted"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The truncation itself is a change that must be durable before new records are appended after it; otherwise the garbage can reappear in front of good records. Truncate's atomicity isn't the issue, the index is never persisted, and the CRC table is a constant.",
+      "ref": "unit-1-durable-store.md#2-recovery-torn-tails-versus-corruption"
+    },
+    {
+      "id": "E1-008",
+      "type": "single",
+      "tags": [
+        "recovery",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "A recovery policy skips any record with a bad CRC and keeps going. The log contains: put link/x → A, delete link/x (this record is corrupted), then 10,000 good records. What does a member who clicks link/x get after restart?",
+      "choices": [
+        "A redirect to A: the taken-down link is live again",
+        "A 410, because the delete was logged",
+        "A 404, because the corrupted record removes the key",
+        "A 503 until an operator intervenes"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Skipping the corrupted delete means replay never applies it, so link/x maps to A again: a resurrected link. A CRC tells you a record is bad, not what it said. 410 needs the delete (or tombstone) to have been applied; a 404 would require the key to be absent; refusing to start is the safe policy, not this one.",
+      "ref": "unit-1-durable-store.md#2-recovery-torn-tails-versus-corruption"
+    },
+    {
+      "id": "E1-009",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "id-generation"
+      ],
+      "difficulty": 2,
+      "prompt": "Two API instances allocate codes by GET-ing a random code from the store and PUT-ing the link on 404, each holding its own mutex around the two calls. Why can two links still end up with the same code?",
+      "choices": [
+        "Each mutex only orders its own instance's requests; the check and the write must be one atomic operation inside the store",
+        "Because the mutexes are not reentrant",
+        "Because HTTP requests can be reordered by the kernel",
+        "They can't: the mutexes make the sequence atomic"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Check-then-act across processes is a race: both instances can see 404 before either writes. Only the store sees both requests, so only an atomic insert-if-absent there prevents it. Reentrancy is irrelevant, the kernel doesn't reorder one connection's requests, and per-process mutexes cannot order other processes.",
+      "ref": "unit-1-durable-store.md#3-the-store-as-a-process-insert-if-absent-over-http"
+    },
+    {
+      "id": "E1-010",
+      "type": "numeric",
+      "tags": [
+        "id-generation",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Codes are 7 random base-62 characters (62^7 ≈ 3.5 × 10^12). One billion links exist. About one new create in how many collides with an existing code? Answer as a count of creates.",
+      "value": 3500,
+      "tolerance": 0.25,
+      "unit": "creates",
+      "explanation": "The chance per create is 10^9 / 3.52 × 10^12 ≈ 2.8 × 10^-4 = 0.028%: about one create in 3,500. Rare, not impossible, and growing with the table, so a retry-with-a-new-code loop on insert-if-absent conflict is worth its few lines.",
+      "ref": "unit-1-durable-store.md#3-the-store-as-a-process-insert-if-absent-over-http"
+    },
+    {
+      "id": "E1-011",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does the store's 409 for a lost insert-if-absent carry the existing value in its body?",
+      "choices": [
+        "Because the caller's next step depends on it (retry with a new code, or replay the winner's intent) and a second read would be another chance to race",
+        "Because HTTP requires a 409 to have a body",
+        "So the store can be used as a cache",
+        "To let the client overwrite the value with a follow-up PUT"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "For a code collision the caller compares and re-codes; for an idempotency key the existing value is the first request's intent, which the retry replays in the same round trip. HTTP doesn't require it, caching is unrelated, and overwriting would defeat insert-if-absent.",
+      "ref": "unit-1-durable-store.md#3-the-store-as-a-process-insert-if-absent-over-http"
+    },
+    {
+      "id": "E1-012",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "A create writes idem/<client>/<key> (the intent: fingerprint plus the full link) with insert-if-absent, then link/<code>. The API instance crashes between the two writes, and the client retries with the same key. What happens?",
+      "choices": [
+        "The retry loses the claim, reads the intent from the 409, writes the same link with insert-if-absent, and returns the original response",
+        "The retry creates a second link with a new code, because the first link was never written",
+        "The retry gets 409 and must wait until the intent record expires",
+        "The retry gets 422 because the key is already used"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Because the intent record contains everything the response needs, whoever reads it can finish the work: roll-forward. The other write order (link first) is what creates duplicates or orphans. Nothing here makes the client wait, and 422 is only for a reused key with a different request.",
+      "ref": "unit-2-api-and-cache.md#1-the-api-creates-you-can-retry-redirects-that-say-what-they-mean"
+    },
+    {
+      "id": "E1-013",
+      "type": "multi",
+      "tags": [
+        "idempotency",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "Twenty identical creates (same client, same Idempotency-Key, same body) arrive at once. Select ALL statements that hold for a correct implementation.",
+      "choices": [
+        "Exactly one link exists afterwards",
+        "Exactly one response lacks the Idempotent-Replayed header",
+        "The store holds exactly two keys for this request: one idem/ and one link/",
+        "Nineteen requests get 409 Conflict",
+        "Each request creates its own link, and the losers' links are deleted afterwards"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "The insert-if-absent on the intent record has exactly one winner; the other nineteen read the intent, make sure the link exists (one of them may write it, with identical content) and replay 201 with Idempotent-Replayed. That's one link, two store keys, one original response. 409 is the store's answer to the API, not the API's answer to the client in this design, and creating then deleting links is the broken write order.",
+      "ref": "unit-2-api-and-cache.md#1-the-api-creates-you-can-retry-redirects-that-say-what-they-mean"
+    },
+    {
+      "id": "E1-014",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "api-design"
+      ],
+      "difficulty": 2,
+      "prompt": "A client reuses Idempotency-Key k1 (already used for https://a.example) for a request to https://b.example. What should the API answer?",
+      "choices": [
+        "422: the key is bound to a different request, and replaying the first result would silently send users to the wrong place",
+        "201 with the link for https://a.example, marked as a replay",
+        "201 with a new link for https://b.example",
+        "409 with Retry-After"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The fingerprint (URL and TTL) doesn't match, so this is a client bug, not a retry. Replaying the first link would be a silent wrong redirect; creating a new one ignores the key's contract; 409 is for an in-flight duplicate of the same request in designs that block on it.",
+      "ref": "unit-2-api-and-cache.md#1-the-api-creates-you-can-retry-redirects-that-say-what-they-mean"
+    },
+    {
+      "id": "E1-015",
+      "type": "single",
+      "tags": [
+        "security",
+        "api-design"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does DELETE /v1/links/{code} by someone who doesn't own the link return 404 rather than 403?",
+      "choices": [
+        "A 403 confirms the code exists, which turns the endpoint into an existence oracle for enumerating live links",
+        "Because 403 responses can't carry a body",
+        "Because 404 is cacheable and 403 isn't",
+        "Because the owner check happens after the store read"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "'Not yours' must be indistinguishable from 'not there' (object-level authorisation, A9 Unit 1 §3). 403 can carry a body; cacheability isn't the reason (both answers here are no-store); and the order of checks doesn't dictate the status code.",
+      "ref": "unit-2-api-and-cache.md#1-the-api-creates-you-can-retry-redirects-that-say-what-they-mean"
+    },
+    {
+      "id": "E1-016",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does the redirect answer 302 with Cache-Control: private, no-store instead of 301?",
+      "choices": [
+        "A 301 is cacheable by default, so a browser that saw it never asks again: no takedown, no expiry, no analytics for that browser",
+        "Because 301 redirects can't carry a Location header",
+        "Because browsers don't follow 301 for cross-origin URLs",
+        "Because 302 is faster to process than 301"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Heuristic caching of 301 by browsers and intermediaries means a deleted or expired link keeps working for anyone who clicked it once. 301 carries Location like any redirect, browsers follow both across origins, and neither is faster.",
+      "ref": "unit-2-api-and-cache.md#1-the-api-creates-you-can-retry-redirects-that-say-what-they-mean"
+    },
+    {
+      "id": "E1-017",
+      "type": "single",
+      "tags": [
+        "caching",
+        "api-design"
+      ],
+      "difficulty": 2,
+      "prompt": "A link expires in 10 s; its cache entry has a 30 s TTL; -redirect-max-age is 60 s. What must the API do?",
+      "choices": [
+        "Check expiry when serving (answer 410 once it passes) and cap max-age at the seconds left until expiry",
+        "Shorten the cache entry to 10 s and send max-age=60",
+        "Nothing: the entry is refreshed from the store when it expires",
+        "Send max-age=60 and rely on the browser to re-check"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The cache must not outlive the link, and neither may a browser's copy. Checking ExpiresAt at serve time handles any cached entry; capping max-age stops a browser from following the link after expiry. Shortening the entry alone still sends a 60 s max-age; waiting for the TTL serves an expired link for 20 s.",
+      "ref": "unit-2-api-and-cache.md#2-the-redirect-cache-misses-that-dont-hurt"
+    },
+    {
+      "id": "E1-018",
+      "type": "single",
+      "tags": [
+        "stampede",
+        "caching",
+        "context"
+      ],
+      "difficulty": 3,
+      "prompt": "A link goes viral on an instance with a cold cache; 50 requests miss at once and join one singleflight lookup. The lookup uses the first request's context, and that client disconnects after 100 ms. What do the other 49 get?",
+      "choices": [
+        "The cancellation error (here a 503), although they were willing to wait: the shared work must run on a detached context with its own deadline",
+        "The redirect, because singleflight retries the lookup for them",
+        "The redirect, because context cancellation only affects the first caller",
+        "A 404, because the cancelled lookup is cached as not found"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Every waiter shares the one execution, so cancelling its context fails all of them. Singleflight doesn't retry; cancellation of the shared context isn't per-caller; and an error must never be cached as not found. Run the lookup on context.WithTimeout(context.Background(), StoreTimeout).",
+      "ref": "unit-2-api-and-cache.md#2-the-redirect-cache-misses-that-dont-hurt"
+    },
+    {
+      "id": "E1-019",
+      "type": "numeric",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 1,
+      "prompt": "12,000 redirects/s across the fleet, 95% cache hit ratio. Roughly how many store reads per second reach the store from misses? Answer in reads/s.",
+      "value": 600,
+      "tolerance": 0.25,
+      "unit": "reads/s",
+      "explanation": "Store load = rate × (1 − h) = 12,000 × 0.05 = 600 reads/s (plus a small number of per-instance expiry reads for hot keys).",
+      "ref": "unit-2-api-and-cache.md#2-the-redirect-cache-misses-that-dont-hurt"
+    },
+    {
+      "id": "E1-020",
+      "type": "numeric",
+      "tags": [
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Same fleet (12,000 redirects/s, normally 95% hits). Every API instance restarts at once and the caches are empty. By what factor does store read load jump compared with normal? Answer as a multiplier.",
+      "value": 20,
+      "tolerance": 0.25,
+      "unit": "×",
+      "explanation": "Cold, every redirect misses: 12,000 reads/s versus 600, a factor of 1 / (1 − h) = 1 / 0.05 = 20. That's the cold factor: stagger restarts, warm the hottest keys, and make sure the store survives it.",
+      "ref": "unit-2-api-and-cache.md#2-the-redirect-cache-misses-that-dont-hurt"
+    },
+    {
+      "id": "E1-021",
+      "type": "single",
+      "tags": [
+        "caching",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A bug caches store errors as 404 with the negative TTL (5 s). The store is down for one second. What do members see?",
+      "choices": [
+        "Working links answer 404 for up to 5 s after the store is back: an outage turned into wrong answers that outlive it",
+        "503s for one second, then normal redirects",
+        "Stale redirects for one second",
+        "Nothing changes, because negative entries are only used for unknown codes"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "An error says nothing about the data. Caching it as 'not found' makes real links disappear for the negative TTL after the dependency recovers. 503s then recovery is the correct behaviour; stale redirects need stale-if-error; and the bug writes negative entries for known codes too.",
+      "ref": "unit-2-api-and-cache.md#2-the-redirect-cache-misses-that-dont-hurt"
+    },
+    {
+      "id": "E1-022",
+      "type": "single",
+      "tags": [
+        "invalidation",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "On one instance: a redirect misses and reads link/x (302); then a delete writes the tombstone and removes x from the cache; then the redirect stores its 302. How does the lab's cache prevent the deleted link being served for a full TTL?",
+      "choices": [
+        "The lookup takes a token before reading the store and stores with SetIfToken, which refuses if any Delete happened since",
+        "The delete holds a lock on the store until the cache is cleared",
+        "The cache entry for x is pinned until the next store read",
+        "The TTL is reset to zero on every delete"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The fix is to reject fills that started before an invalidation: a token (here a cache-wide epoch, bumped by every Delete) taken before the read and checked on the fill. Store locks don't reach another component's cache; pinning would keep the stale value; and a delete can't change the TTL of an entry that is written after it.",
+      "ref": "unit-2-api-and-cache.md#3-invalidation-across-instances-how-long-does-a-takedown-take"
+    },
+    {
+      "id": "E1-023",
+      "type": "numeric",
+      "tags": [
+        "invalidation",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A phishing link gets 5,000 clicks/s spread across six API instances. Invalidation is local and the cache TTL is 30 s; the other five instances cached the link just before the delete on instance one. Roughly how many clicks are still redirected across the fleet after the delete? Answer in clicks.",
+      "value": 125000,
+      "tolerance": 0.25,
+      "unit": "clicks",
+      "explanation": "Five of six instances (≈ 5/6 of 5,000 ≈ 4,170 clicks/s) keep redirecting for up to 30 s: ≈ 125,000 clicks. The deleting instance answers 410 at once. Exposure ≈ click rate on stale instances × staleness window, which is the number that should choose the TTL.",
+      "ref": "unit-2-api-and-cache.md#3-invalidation-across-instances-how-long-does-a-takedown-take"
+    },
+    {
+      "id": "E1-024",
+      "type": "multi",
+      "tags": [
+        "invalidation",
+        "compliance"
+      ],
+      "difficulty": 3,
+      "prompt": "Compliance requires a deleted link to stop redirecting everywhere within 60 s, and invalidation is local. Which settings must you bound to honour it? Select ALL that apply.",
+      "choices": [
+        "The API cache's freshness TTL (-cache-ttl)",
+        "The stale-if-error window, or an explicit exception for outages",
+        "The browser max-age sent on redirects (-redirect-max-age)",
+        "The negative-cache TTL (-neg-ttl)",
+        "The create rate limit"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "A deleted link can be served from a fresh API entry (TTL), from a stale entry during a store outage (stale-if-error) and from a browser's own cache (max-age). Negative entries are for codes that don't exist, which only shortens how fast a new link appears; the rate limit is unrelated.",
+      "ref": "unit-2-api-and-cache.md#3-invalidation-across-instances-how-long-does-a-takedown-take"
+    },
+    {
+      "id": "E1-025",
+      "type": "numeric",
+      "tags": [
+        "rate-limiting",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Six API instances each enforce '5 creates/s, burst 20' per client in memory. A load balancer spreads one client's requests round-robin. In steady state, roughly how many creates per second does the client actually get? Answer in creates/s.",
+      "value": 30,
+      "tolerance": 0.25,
+      "unit": "creates/s",
+      "explanation": "Each instance has its own bucket for the client: 6 × 5 = 30/s sustained (and 6 × 20 = 120 in the first instant). Per-instance limits multiply by the instances a client can reach; exact fleet limits need shared state.",
+      "ref": "unit-3-limits-failure-load.md#1-the-rate-limiter-refuse-early-refuse-truthfully"
+    },
+    {
+      "id": "E1-026",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "api-design"
+      ],
+      "difficulty": 2,
+      "prompt": "A limiter computes a wait of 200 ms and writes Retry-After: 0 (truncated). What does a client that honours Retry-After do?",
+      "choices": [
+        "Retries immediately, is refused again, and loops: Retry-After must round up to at least 1",
+        "Waits 200 ms, because clients interpret 0 as 'sub-second'",
+        "Gives up, because 0 means 'never retry'",
+        "Waits the default backoff of one second"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Retry-After is whole seconds; 0 tells the client to come back now, before a token exists. The limiter has created a tight retry loop. Clients can't know the sub-second wait, 0 doesn't mean never, and there is no standard default.",
+      "ref": "unit-3-limits-failure-load.md#1-the-rate-limiter-refuse-early-refuse-truthfully"
+    },
+    {
+      "id": "E1-027",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "The store is down. A client over its create limit sends another create. What should it get, and why?",
+      "choices": [
+        "A fast 429: the limiter runs before any other work, so refusing stays cheap even when the dependency is failing",
+        "A 503, because the store is down and that's the more important error",
+        "A 429, but only after the store call times out",
+        "A 201 from the stale cache"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A refusal must cost less than the work it prevents, especially during an incident. 503 would mean the limiter ran after a store call; a 429 after a timeout means the same mistake; creates never come from a cache.",
+      "ref": "unit-3-limits-failure-load.md#1-the-rate-limiter-refuse-early-refuse-truthfully"
+    },
+    {
+      "id": "E1-028",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "memory"
+      ],
+      "difficulty": 2,
+      "prompt": "The limiter keeps at most 10,000 client buckets in an LRU. An attacker cycles through 50,000 forged client IDs. What is the trade-off of this bound?",
+      "choices": [
+        "Memory stays bounded, but an evicted ID comes back with a full bucket, so the attacker gets a burst per request; client identity should come from authentication",
+        "Memory grows to 50,000 buckets until the attacker stops",
+        "The limiter refuses all new clients once 10,000 are tracked",
+        "Evicted clients are permanently blocked"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Bounding memory forgets idle clients, and a forgotten client starts full. That's acceptable for honest clients and exploitable with forgeable IDs, which is why identity must be authenticated. The bound prevents unbounded growth; the design admits new clients by evicting old ones; nothing blocks evicted clients.",
+      "ref": "unit-3-limits-failure-load.md#1-the-rate-limiter-refuse-early-refuse-truthfully"
+    },
+    {
+      "id": "E1-029",
+      "type": "single",
+      "tags": [
+        "timeouts",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "Which store failure can only be detected by your own timeout firing?",
+      "choices": [
+        "A partition or a hung process: connections stay open and nothing comes back",
+        "A crashed process: connections are refused",
+        "A full disk: the store returns 500",
+        "A restart: the store's port is closed"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Silence produces no error; only a deadline ends the wait, and TCP may take minutes to notice a dead peer on an idle connection. A crash or closed port gives connection refused or a reset immediately; a full disk returns a 500.",
+      "ref": "unit-3-limits-failure-load.md#2-failure-injection-the-store-is-down-slow-or-gone-quiet"
+    },
+    {
+      "id": "E1-030",
+      "type": "numeric",
+      "tags": [
+        "timeouts",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "During a store outage, creates keep arriving at 120/s and each waits for its 300 ms store timeout before the API answers 503. How many create requests are in flight in the API at any moment? Answer in requests.",
+      "value": 36,
+      "tolerance": 0.25,
+      "unit": "requests",
+      "explanation": "Little's law: in flight = arrival rate × time in system = 120 × 0.3 s = 36. With no timeout, time in system is the outage's length and the count grows without bound.",
+      "ref": "unit-3-limits-failure-load.md#2-failure-injection-the-store-is-down-slow-or-gone-quiet"
+    },
+    {
+      "id": "E1-031",
+      "type": "single",
+      "tags": [
+        "reliability",
+        "caching"
+      ],
+      "difficulty": 3,
+      "prompt": "-stale-if-error is 5 minutes and the store is down for 10 minutes. A popular link's entry went stale 1 minute into the outage. What do members see for it, and when?",
+      "choices": [
+        "302 marked STALE until 5 minutes after its freshness ended (≈ minute 6), then 503 with Retry-After until the store returns",
+        "302 marked STALE for the whole outage",
+        "503 from the start of the outage",
+        "302 marked HIT for the whole outage"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The stale window starts when freshness ends, so the entry is servable until ≈ 1 + 5 = 6 minutes into the outage; after that it's a Miss and, with the store down, 503. It isn't servable forever, it isn't unavailable while stale-but-in-window, and it's no longer a fresh HIT once its TTL passed.",
+      "ref": "unit-3-limits-failure-load.md#2-failure-injection-the-store-is-down-slow-or-gone-quiet"
+    },
+    {
+      "id": "E1-032",
+      "type": "single",
+      "tags": [
+        "graceful-shutdown",
+        "deploys"
+      ],
+      "difficulty": 2,
+      "prompt": "An API receives SIGTERM with 20 creates in flight. Which implementation fails some of them?",
+      "choices": [
+        "Calling http.Server.Close (or os.Exit) on the signal",
+        "Calling http.Server.Shutdown with a 10 s context, when each create needs ≈ 600 ms",
+        "Stopping the listener and waiting for active requests to finish",
+        "Draining, then exiting with code 0"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Close and os.Exit cut active connections, so accepted requests fail and their clients can't tell whether the link was created. Shutdown with a sufficient deadline (and the equivalent listener-close-then-wait) lets them finish; exiting 0 after a completed drain is the contract.",
+      "ref": "unit-3-limits-failure-load.md#2-failure-injection-the-store-is-down-slow-or-gone-quiet"
+    },
+    {
+      "id": "E1-033",
+      "type": "single",
+      "tags": [
+        "testing",
+        "durability"
+      ],
+      "difficulty": 2,
+      "prompt": "TestM4_AcknowledgedCreatesSurviveAStoreCrash resolves every acknowledged code through a new API instance after restarting the store. Why a new instance?",
+      "choices": [
+        "The original instance's cache would answer from memory and hide a store that lost the link",
+        "Because the original instance is killed with the store",
+        "Because the old instance's rate limiter would refuse the lookups",
+        "Because codes are only valid on the instance that created them"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The test is about the end-to-end promise of a 201, and a warm cache can make a lost write look present. The original instance is still running, redirects aren't rate limited, and codes are global.",
+      "ref": "unit-3-limits-failure-load.md#2-failure-injection-the-store-is-down-slow-or-gone-quiet"
+    },
+    {
+      "id": "E1-034",
+      "type": "single",
+      "tags": [
+        "latency",
+        "observability"
+      ],
+      "difficulty": 2,
+      "prompt": "A closed-loop tester (send, wait, send) runs at an intended 100 req/s. The server stalls for 1 s once. What does the tester's p99 miss?",
+      "choices": [
+        "The ≈ 100 requests real users would have sent during the stall, each waiting up to 1 s; it records one slow sample instead",
+        "Nothing; closed-loop and open-loop testers measure the same latencies",
+        "Only the single slow request, which it drops as an outlier",
+        "The connection setup time of the first request"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The tester stops sending while it waits, so the stall shows up once instead of in every request that would have queued behind it: coordinated omission. Open loop measured from the intended start captures them. Closed loop doesn't drop the slow sample; it never sends the others. Connection setup is unrelated.",
+      "ref": "unit-3-limits-failure-load.md#3-stretch--load-test-and-the-p99-report"
+    },
+    {
+      "id": "E1-035",
+      "type": "numeric",
+      "tags": [
+        "latency",
+        "percentiles"
+      ],
+      "difficulty": 2,
+      "prompt": "Twenty latency samples are 1 ms, 2 ms, …, 20 ms. What is the nearest-rank p95? Answer in ms.",
+      "value": 19,
+      "tolerance": 0.01,
+      "unit": "ms",
+      "explanation": "Nearest rank = ceil(0.95 × 20) = 19, so the 19th smallest sample: 19 ms. No interpolation: every reported value is a latency that actually happened.",
+      "ref": "unit-3-limits-failure-load.md#3-stretch--load-test-and-the-p99-report"
+    },
+    {
+      "id": "E1-036",
+      "type": "single",
+      "tags": [
+        "latency",
+        "percentiles"
+      ],
+      "difficulty": 2,
+      "prompt": "Six instances report p99s of 4, 4, 5, 5, 6 and 90 ms with equal traffic. Why is 19 ms (their average) not the fleet's p99?",
+      "choices": [
+        "Percentiles don't compose: one slow instance can hold most of the fleet's slowest 1%, so merge samples or mergeable histograms and recompute",
+        "Because the median of p99s should be used instead",
+        "Because the fleet p99 is always the maximum of the instance p99s",
+        "It is the fleet's p99 when traffic is equal"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Here the 90 ms instance alone contributes the fleet's slowest ≈ 1% and more, so the fleet p99 is near its tail, not 19 ms. Neither the median nor the max of percentiles is correct in general; only recomputing over merged data is. Equal traffic doesn't make averaging percentiles valid.",
+      "ref": "unit-3-limits-failure-load.md#3-stretch--load-test-and-the-p99-report"
+    },
+    {
+      "id": "E1-037",
+      "type": "single",
+      "tags": [
+        "security",
+        "operations"
+      ],
+      "difficulty": 1,
+      "prompt": "Why do the store and API processes refuse to bind anything but a loopback address?",
+      "choices": [
+        "They have no authentication; binding 0.0.0.0 would expose every link and the raw key-value API to any network the laptop joins",
+        "Because loopback is faster than any other interface",
+        "Because the tests can't connect to non-loopback addresses",
+        "Because HTTP/1.1 only works over loopback"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "An unauthenticated store reachable from café Wi-Fi is an open database. Loopback being fast is true but irrelevant, tests could reach 0.0.0.0, and HTTP has no such restriction. It's the A9 threat-modelling habit applied to a lab.",
+      "ref": "unit-1-durable-store.md#3-the-store-as-a-process-insert-if-absent-over-http"
+    }
+  ]
+}

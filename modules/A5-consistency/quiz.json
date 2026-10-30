@@ -1,0 +1,1734 @@
+{
+  "module": "A5",
+  "title": "Consistency and distributed-systems basics",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "A5-001",
+      "type": "single",
+      "tags": [
+        "cap",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Two data centres replicate a ledger. A fibre cut isolates West from East for 40 s. Both sites stay healthy and keep serving withdrawals from their own local copy of each balance. In CAP terms, what did this design choose during the partition?",
+      "choices": [
+        "Neither: CAP only applies to systems with a single leader",
+        "Availability: it gave up linearizability, so the two copies can diverge and must be reconciled afterwards",
+        "Both: because each data centre is healthy, it is consistent and available, and the partition did not matter",
+        "Consistency: it refused requests it could not coordinate, so it is a CP design"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Answering from a local copy while cut off from the other site is the available branch: every request gets an answer, but two sites accepting writes independently cannot be linearizable (the 221-overdrawn-accounts simulation). A CP design would have made West refuse. Healthy data centres do not escape the theorem; the network between them is what partitioned. CAP is not limited to leader-based systems.",
+      "ref": "unit-1-consistency-quorums.md#2-cap-and-pacelc"
+    },
+    {
+      "id": "A5-002",
+      "type": "single",
+      "tags": [
+        "cap",
+        "consistency"
+      ],
+      "difficulty": 1,
+      "prompt": "In the CAP theorem, what does the letter C refer to?",
+      "choices": [
+        "Linearizability: the system behaves as if there were a single copy and operations respect real time",
+        "Serializability of multi-object transactions",
+        "Convergence: replicas eventually hold the same value if writes stop",
+        "The ACID property that a transaction moves the database from one valid state to another"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "CAP's C is linearizability (Gilbert and Lynch's atomic consistency). ACID's C is an application invariant and is unrelated. Convergence is the guarantee of eventual consistency, which is one of the things you get when you give up C. Serializability is about transactions and does not by itself imply recency across replicas.",
+      "ref": "unit-1-consistency-quorums.md#2-cap-and-pacelc"
+    },
+    {
+      "id": "A5-003",
+      "type": "multi",
+      "tags": [
+        "cap",
+        "pacelc",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL statements about CAP and PACELC that are correct.",
+      "choices": [
+        "CAP says a system with no partition cannot be both fast and consistent",
+        "A system classified as CP can still answer requests on the majority side of a partition",
+        "A system is either AP or CP for all of its operations, once, at design time",
+        "Network partitions are not optional, so the real choice is between consistency and availability when one occurs",
+        "Even with no partition, a system that wants stronger consistency pays extra latency for coordination (the 'E' in PACELC)"
+      ],
+      "answer": [
+        1,
+        3,
+        4
+      ],
+      "explanation": "Partitions are a fact, a CP system keeps serving the majority side, and the latency price of consistency without a partition is PACELC's 'E': those three are correct. The theorem applies only when a partition occurs and the choice can be made per operation, so labelling a whole system once as AP or CP is a simplification, not part of CAP. And CAP says nothing about normal operation: the claim that consistency and speed cannot coexist without a partition is not CAP (it is the latency trade-off PACELC describes, and it is a cost, not an impossibility).",
+      "ref": "unit-1-consistency-quorums.md#2-cap-and-pacelc"
+    },
+    {
+      "id": "A5-004",
+      "type": "single",
+      "tags": [
+        "pacelc",
+        "consistency",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A ledger service keeps three voters: leader in us-east, one voter in us-west (70 ms RTT) and one in Europe (100 ms RTT). A write is committed when a majority has it. There is no partition. Which statement about commit latency is right?",
+      "choices": [
+        "It is about 35 ms, because a one-way trip is enough for the acknowledgement",
+        "It is at least 100 ms, because the write must reach every voter before it commits",
+        "It is close to 0 ms, because with no partition the replicas do not need to coordinate",
+        "It is at least the round trip to the nearest other voter, about 70 ms, because a majority is the leader plus one other voter"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A majority of 3 is 2: the leader plus the fastest other voter, so the write waits for one round trip to us-west (about 70 ms), not the slowest voter. Waiting for all voters would be W = N and would make every write as slow as the farthest replica. Coordination is exactly what costs latency even without a partition. The acknowledgement needs a round trip, not a one-way trip.",
+      "ref": "unit-1-consistency-quorums.md#2-cap-and-pacelc"
+    },
+    {
+      "id": "A5-005",
+      "type": "single",
+      "tags": [
+        "cap",
+        "consistency",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "A card processor cannot reach the issuing bank's core during an outage. It approves purchases under $50 on the issuer's behalf, within a daily limit per card, and the bank reconciles afterwards. Which description fits best?",
+      "choices": [
+        "Choosing availability with bounded risk: accept a limited chance of overdraft rather than decline every purchase",
+        "A CA design: consistent and available because the processor holds a cache",
+        "Avoiding the CAP trade-off by using a very reliable network",
+        "Choosing consistency: every approval is checked against the latest balance"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Approving from limits while the authoritative balance is unreachable is the available branch with a bounded cost (the limit caps the worst case), the same idea as escrow budgets. It is not consistent, since the processor has no up-to-date balance. Reliable networks reduce partitions but do not remove the choice when one happens. A cache that answers instead of failing is an availability choice, not a way to have both.",
+      "ref": "unit-1-consistency-quorums.md#2-cap-and-pacelc"
+    },
+    {
+      "id": "A5-006",
+      "type": "numeric",
+      "tags": [
+        "pacelc",
+        "estimation",
+        "consensus"
+      ],
+      "difficulty": 2,
+      "prompt": "A consistent ledger commits each posting with a round trip to a voter 70 ms away. Postings to ONE account are serialised through its single writer. Roughly how many postings per second can that one account sustain? Answer in postings/s.",
+      "value": 14,
+      "tolerance": 0.15,
+      "unit": "postings/s",
+      "explanation": "Each posting holds the account for about one commit, so throughput is about 1 / 0.070 s ≈ 14 per second. In one region at 1–2 ms it would be 500–1,000 per second. This is the hot-account arithmetic behind keeping an entity's writes in its home region.",
+      "ref": "unit-3-consensus-leases.md#4-choosing-a-model-for-money-movement"
+    },
+    {
+      "id": "A5-007",
+      "type": "single",
+      "tags": [
+        "cap",
+        "consistency",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "Two sites may each spend from the same account while disconnected, and the bank wants no overdraft without making either site wait for the other. What does giving each site half of the balance as a private spending budget achieve?",
+      "choices": [
+        "It lets last-write-wins pick the right balance after the partition heals",
+        "The budgets sum to at most the balance, so the sites cannot jointly overspend; the price is that a site refuses requests larger than its budget",
+        "It removes the need to reconcile because each site's view is always current",
+        "It makes the two copies linearizable without any communication"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Escrow (a bounded counter) preserves the invariant by construction: what each side may spend cannot exceed the total. It does not make anything linearizable, it does not rely on timestamps, and sites still have to rebalance and reconcile when connected. The cost is refused requests when a site's share is too small (all $300 withdrawals were refused in the experiment with $250 shares).",
+      "ref": "unit-1-consistency-quorums.md#2-cap-and-pacelc"
+    },
+    {
+      "id": "A5-008",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "session-guarantees",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "A member completes a transfer and the app immediately reloads the balances. The reload is served by a read replica that has not applied the transfer yet, so the old balances appear. Which guarantee was violated?",
+      "choices": [
+        "Monotonic reads: the member saw a newer value and then an older one",
+        "Read-your-writes: the member's own acknowledged write was not visible to their next read",
+        "Writes-follow-reads: a write was ordered before the read it depended on",
+        "Monotonic writes: the member's writes were applied out of order"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The member wrote, then read a state that predates the write: read-your-writes. Monotonic reads concerns going from newer to older across reads of the same session and needs two reads that both succeeded with different freshness. Monotonic writes is about the order in which one session's writes are applied. Writes-follow-reads is about a write that depends on a value just read.",
+      "ref": "unit-1-consistency-quorums.md#1-consistency-models-what-a-read-may-return"
+    },
+    {
+      "id": "A5-009",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "linearizability"
+      ],
+      "difficulty": 2,
+      "prompt": "A write to a register finished at 12:00:00.000. A read that starts at 12:00:00.050 returns the old value. Which consistency model forbids this?",
+      "choices": [
+        "Linearizability, because a read that starts after a write completed must return that write or a later one",
+        "Sequential consistency, because every process must see the same real-time order",
+        "Causal consistency, because the read depends on the write",
+        "Eventual consistency, because replicas must agree immediately"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Only linearizability ties the order to real time. Sequential and causal consistency allow the stale read (they do not respect wall-clock order between different processes), and eventual consistency makes no recency promise at all.",
+      "ref": "unit-1-consistency-quorums.md#1-consistency-models-what-a-read-may-return"
+    },
+    {
+      "id": "A5-010",
+      "type": "multi",
+      "tags": [
+        "consistency",
+        "session-guarantees",
+        "linearizability"
+      ],
+      "difficulty": 3,
+      "prompt": "A single user reads the same key twice in a row and the second read returns an OLDER value than the first. Select ALL models or guarantees that forbid this.",
+      "choices": [
+        "The monotonic reads session guarantee",
+        "Eventual consistency",
+        "Linearizability",
+        "Sequential consistency",
+        "The read-your-writes session guarantee on its own"
+      ],
+      "answer": [
+        0,
+        2,
+        3
+      ],
+      "explanation": "Linearizability and sequential consistency both keep one process's operations in program order within a single total order, so a read that returned the new value cannot be followed by one returning the old value. Monotonic reads is the session guarantee designed for exactly this. Eventual consistency allows anything before convergence, and read-your-writes only constrains reads relative to the same session's own writes.",
+      "ref": "unit-1-consistency-quorums.md#1-consistency-models-what-a-read-may-return"
+    },
+    {
+      "id": "A5-011",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "linearizability",
+        "isolation"
+      ],
+      "difficulty": 2,
+      "prompt": "A teammate says: 'we run the database at SERIALIZABLE isolation, so reads can never be stale.' What is wrong with that claim?",
+      "choices": [
+        "Nothing: serializable isolation implies real-time freshness on every replica",
+        "Serializable isolation is weaker than read committed",
+        "Serializability orders transactions but says nothing about which replica answers or how recent its snapshot is, so a lagging replica can serve a stale yet serializable view",
+        "Serializability only applies to writes, never to reads"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Serializability means the outcome equals some serial order of the transactions. It does not require that order to match real time or that every replica is current. Strict serializability adds the real-time requirement. Serializability covers reads and writes within transactions, and it is the strongest of the standard isolation levels, not weaker than read committed.",
+      "ref": "unit-1-consistency-quorums.md#1-consistency-models-what-a-read-may-return"
+    },
+    {
+      "id": "A5-012",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "session-guarantees",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "Reads go to replicas that lag by up to a few hundred milliseconds. You want read-your-writes for members who just wrote, without sending every read to the primary. Which design does that?",
+      "choices": [
+        "Return a version token from the write; serve the member's next reads from a replica only if it has reached that version, otherwise from the primary",
+        "Add more read replicas so that the average lag drops",
+        "Send all reads to the primary",
+        "Pin each member to one replica for the session"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A token lets only the members who just wrote pay for freshness (in the simulation ≈ 6.8% of reads went to the primary). Pinning to one replica gives monotonic reads but not read-your-writes, because the pinned replica can still be behind (10.7% violations). Reading everything from the primary works but defeats the point. More replicas do not reduce the lag of any one of them.",
+      "ref": "unit-1-consistency-quorums.md#1-consistency-models-what-a-read-may-return"
+    },
+    {
+      "id": "A5-013",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "eventual-consistency"
+      ],
+      "difficulty": 1,
+      "prompt": "What does eventual consistency promise?",
+      "choices": [
+        "All replicas apply every write in the same order at the same time",
+        "If no new writes occur, all replicas eventually converge to the same value",
+        "A client always sees its own writes",
+        "A read always returns the latest acknowledged write"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Convergence is the whole promise. Reading the latest write is linearizability, identical application order at the same time is a much stronger (and unachievable under partitions) property, and seeing one's own writes is a session guarantee that must be added.",
+      "ref": "unit-1-consistency-quorums.md#1-consistency-models-what-a-read-may-return"
+    },
+    {
+      "id": "A5-014",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "linearizability"
+      ],
+      "difficulty": 3,
+      "prompt": "Alice writes 1 to a register (the write occurs during [0, 10]). Bob's read during [20, 30] returns 0. Nobody else is involved. How does this history classify?",
+      "choices": [
+        "Not linearizable (the read started after the write finished) but sequentially consistent (Bob's read can be ordered before Alice's write)",
+        "Linearizable, because the read and write are by different processes",
+        "Sequentially consistent only if Bob later reads 1",
+        "Neither, because every stale read violates all models"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Real time forces the write before the read, so returning 0 is not linearizable. Sequential consistency ignores real time between different processes, so ordering Bob's read first explains it. Different processes does not excuse a real-time violation. The classification does not depend on a later read. Stale reads violate linearizability but not necessarily weaker models.",
+      "ref": "unit-1-consistency-quorums.md#1-consistency-models-what-a-read-may-return"
+    },
+    {
+      "id": "A5-015",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "Which pairing of data and consistency level is most sensible for a credit-union platform?",
+      "choices": [
+        "Both transfer approval and the home screen read from a cache, for speed",
+        "Transfer approval uses eventual consistency; the home screen uses linearizable reads",
+        "Both use whatever the database defaults to, because consistency levels do not affect correctness",
+        "Transfer approval reads the latest balance linearizably; the home-screen balance uses replicas with session guarantees and an 'as of' label"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A decision that reads the balance and then debits needs the latest value; a display tolerates bounded staleness. Reversing them wastes money and risks overdrafts. Approving from a cache or at eventual consistency risks approving against a stale balance, and defaults are exactly where hidden weak guarantees live.",
+      "ref": "unit-1-consistency-quorums.md#1-consistency-models-what-a-read-may-return"
+    },
+    {
+      "id": "A5-016",
+      "type": "single",
+      "tags": [
+        "quorum",
+        "replication"
+      ],
+      "difficulty": 1,
+      "prompt": "With N = 3 replicas, which setting of (R, W) does NOT guarantee that a read overlaps every acknowledged write?",
+      "choices": [
+        "R = 2, W = 1",
+        "R = 1, W = 3",
+        "R = 3, W = 1",
+        "R = 2, W = 2"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The rule is R + W > N, strictly greater. R = 2, W = 1 sums to 3 = N, so there is a read set (two replicas) that avoids the single replica that took the write. The other three sum to 4 and always overlap. R + W = N is the classic off-by-one.",
+      "ref": "unit-1-consistency-quorums.md#3-quorums-n-r-and-w"
+    },
+    {
+      "id": "A5-017",
+      "type": "numeric",
+      "tags": [
+        "quorum",
+        "replication",
+        "estimation"
+      ],
+      "difficulty": 1,
+      "prompt": "A store has N = 5 replicas and uses majority quorums for reads and writes. How many replicas must acknowledge a write? Answer in replicas.",
+      "value": 3,
+      "tolerance": 0.01,
+      "unit": "replicas",
+      "explanation": "A majority of 5 is ⌊5/2⌋ + 1 = 3. With R = W = 3, R + W = 6 > 5, and the system tolerates 5 − 3 = 2 replica failures.",
+      "ref": "unit-1-consistency-quorums.md#3-quorums-n-r-and-w"
+    },
+    {
+      "id": "A5-018",
+      "type": "single",
+      "tags": [
+        "quorum",
+        "replication",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "In a quorum store with N = 3, R = 2, W = 2 a write is applied by replica A and then the coordinator times out; B and C never received it. The client gets an error and shows 'failed'. Minutes later a read returns the new value. What explains it?",
+      "choices": [
+        "The client library automatically retried the write successfully",
+        "Clock skew made the write appear later than it was made",
+        "Quorum writes have no rollback: A kept the value, and a read set that includes A (or later repair) exposes it, so a failed write can become visible",
+        "Read repair is only allowed to restore deleted keys"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Replicas that applied a write keep it even if the coordinator reports failure, because there is no atomic commit across replicas. That is why an error is an ambiguous outcome and clients should retry with the same identity. Nothing here depends on clocks, no retry was described, and read repair propagates the newest version rather than being limited to deletes.",
+      "ref": "unit-1-consistency-quorums.md#4-what-quorums-do-not-guarantee"
+    },
+    {
+      "id": "A5-019",
+      "type": "multi",
+      "tags": [
+        "quorum",
+        "consistency",
+        "replication"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL situations in which a read from a store with R + W > N can still return a surprising result.",
+      "choices": [
+        "Two clients wrote concurrently and the store resolves conflicts by last-write-wins on timestamps",
+        "A write reached fewer than W replicas, was reported as failed, and is visible on some replicas",
+        "All N replicas are healthy and the write completed before the read started",
+        "A strict quorum write was acknowledged by W replicas and the read consults R replicas, with no other writes in flight",
+        "A sloppy quorum accepted the write on stand-in nodes outside the key's preference list"
+      ],
+      "answer": [
+        0,
+        1,
+        4
+      ],
+      "explanation": "Sloppy stand-ins are not on the read path, partial writes are not rolled back, and LWW can discard a write: each breaks an assumption behind the overlap argument. An acknowledged strict-quorum write with no concurrency, and a completed write on healthy replicas, are exactly the cases the formula covers, where overlap guarantees that at least one answer carries the latest version.",
+      "ref": "unit-1-consistency-quorums.md#4-what-quorums-do-not-guarantee"
+    },
+    {
+      "id": "A5-020",
+      "type": "single",
+      "tags": [
+        "quorum",
+        "availability",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Three replicas are each up 99.9% of the time, independently. How does write availability compare for W = 2 versus W = 3?",
+      "choices": [
+        "W = 2 is about 99.9% and W = 3 about 99.99%",
+        "W = 2 is about 99.9997% available while W = 3 is about 99.7%, so requiring all replicas is worse than a single replica",
+        "They are equal, because the same number of replicas exist",
+        "W = 3 is more available because it writes to more replicas"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "W = 2 needs at least two of three up: unavailability ≈ 3 × (0.001)² ≈ 3×10⁻⁶. W = 3 needs all three: unavailability ≈ 3 × 0.001 = 0.3%, i.e. 99.7%, worse than one 99.9% replica. More replicas written to means more things that must all be up, not fewer. The figures '99.9% for W = 2 and 99.99% for W = 3' do not match the arithmetic either: the direction is backwards.",
+      "ref": "unit-1-consistency-quorums.md#3-quorums-n-r-and-w"
+    },
+    {
+      "id": "A5-021",
+      "type": "numeric",
+      "tags": [
+        "quorum",
+        "latency",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "N = 3 replicas, each independently faster than 50 ms in 99% of requests. With W = 3 (wait for all replicas), roughly what percentage of writes take longer than 50 ms? Answer in percent.",
+      "value": 3,
+      "tolerance": 0.2,
+      "unit": "%",
+      "explanation": "The write is slow if any replica is slow: 1 − 0.99³ ≈ 2.97%, about 3%. With W = 2 it would be about 0.03% and with W = 1 about 0.0001%. Waiting for the W-th fastest acknowledgement instead of the slowest cuts tail exposure.",
+      "ref": "unit-1-consistency-quorums.md#3-quorums-n-r-and-w"
+    },
+    {
+      "id": "A5-022",
+      "type": "single",
+      "tags": [
+        "quorum",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "What does read repair fix, and what does it NOT fix?",
+      "choices": [
+        "It makes quorum reads linearizable",
+        "It merges concurrent siblings automatically without application code",
+        "It repairs every replica for every key on each read",
+        "It brings stale replicas among those read up to date for keys that get read; keys that are never read stay stale until background anti-entropy repairs them"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Read repair writes the reconciled version back to the responders that were behind, so hot keys heal; cold keys need scheduled anti-entropy (for example Merkle-tree comparison). It does not touch replicas that were not consulted, it does not decide which sibling is correct (that is the application's merge), and it does not by itself prevent a read from seeing a write in flight, so it does not make reads linearizable.",
+      "ref": "unit-1-consistency-quorums.md#4-what-quorums-do-not-guarantee"
+    },
+    {
+      "id": "A5-023",
+      "type": "single",
+      "tags": [
+        "quorum",
+        "replication",
+        "availability"
+      ],
+      "difficulty": 3,
+      "prompt": "A five-node store (A to E) has N = 3, R = 2, W = 2 with sloppy quorums. For one key the home replicas are A, B and C. B and C are down when a write happens; the write is accepted using A plus stand-ins D and E. B and C come back, hints are not yet delivered, and a read consults B and C. What does the read return?",
+      "choices": [
+        "An error, because B and C are not in the quorum that accepted the write",
+        "The new value, because R + W > N guarantees overlap",
+        "Nothing or the old value: the write is acknowledged but sits as hints on D and E, so the read set misses it until handoff completes",
+        "The new value, because read repair runs before the read returns"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Sloppy quorums keep writes available but remove the overlap guarantee: the write set {A, D, E} and the read set {B, C} are disjoint. After hinted handoff the guarantee returns. The read is not an error (B and C answer), and read repair works on what the responders return, which here contains nothing newer.",
+      "ref": "unit-1-consistency-quorums.md#4-what-quorums-do-not-guarantee"
+    },
+    {
+      "id": "A5-024",
+      "type": "single",
+      "tags": [
+        "quorum",
+        "replication"
+      ],
+      "difficulty": 1,
+      "prompt": "What is hinted handoff?",
+      "choices": [
+        "Moving hot keys to dedicated replicas to reduce load",
+        "A protocol that merges concurrent writes using vector clocks",
+        "A background process that compares hash trees between replicas",
+        "A node outside the key's preference list holds a write on behalf of a replica that is down and forwards it when that replica returns"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Hinted handoff is how sloppy quorums keep writes available: the stand-in stores a hint tagged with the intended owner. Moving hot keys is load management, comparing hash trees is Merkle-tree anti-entropy, and merging by vector clocks is conflict resolution.",
+      "ref": "unit-1-consistency-quorums.md#4-what-quorums-do-not-guarantee"
+    },
+    {
+      "id": "A5-025",
+      "type": "single",
+      "tags": [
+        "quorum",
+        "idempotency",
+        "exactly-once"
+      ],
+      "difficulty": 2,
+      "prompt": "In the quorum lab a version is identified by (client, counter) plus its context. A client's write times out after all three replicas applied it, so the client retries with the same client ID, the same context and the same value. What does the store end up with?",
+      "choices": [
+        "One version: the retry recreates the same identity and reconcile collapses the duplicate",
+        "Two sibling versions with the same value",
+        "A version with a higher counter that supersedes the first, so the value is written twice",
+        "The retry is rejected with an error because the key already exists"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Because the clock is context.Tick(client), a retry from the same context yields the same clock and value, which is an exact duplicate and is collapsed. A different value from the same context would instead have produced siblings. There is no 'already exists' rejection in this design, and the retry does not get a new counter because the context did not change.",
+      "ref": "unit-1-consistency-quorums.md#4-what-quorums-do-not-guarantee"
+    },
+    {
+      "id": "A5-026",
+      "type": "single",
+      "tags": [
+        "quorum",
+        "linearizability",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "Which technique makes a plain replicated register linearizable, using only quorums and no leader?",
+      "choices": [
+        "Increase N to 7 and keep R = W = 4",
+        "Use last-write-wins timestamps so the newest value always wins",
+        "Have each reader write back the value it is about to return to a quorum before returning (the ABD approach), so later readers must see it",
+        "Set W = N so every replica has every write"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A write-back phase ensures that once any reader has returned a value, a quorum holds it, so no later read can return an older one. W = N does not help while a write is in flight: one reader may hit a replica that has the new value and the next an old one. A bigger quorum has the same in-flight problem. Timestamps pick winners but do not constrain what concurrent readers see.",
+      "ref": "unit-1-consistency-quorums.md#4-what-quorums-do-not-guarantee"
+    },
+    {
+      "id": "A5-027",
+      "type": "numeric",
+      "tags": [
+        "quorum",
+        "replication",
+        "availability"
+      ],
+      "difficulty": 2,
+      "prompt": "A storage layer keeps 6 copies of each segment across 3 availability zones, with a write quorum of 4. How many copies can be lost while writes still succeed? Answer in copies.",
+      "value": 2,
+      "tolerance": 0.01,
+      "unit": "copies",
+      "explanation": "Writes need 4 of 6, so up to 6 − 4 = 2 copies can be unavailable; that is exactly one availability zone. Reads need only 3 of 6, so they survive 3 lost copies (an AZ plus one more). And 4 + 3 = 7 > 6 gives the read/write overlap.",
+      "ref": "unit-1-consistency-quorums.md#4-what-quorums-do-not-guarantee"
+    },
+    {
+      "id": "A5-028",
+      "type": "multi",
+      "tags": [
+        "quorum",
+        "replication",
+        "availability"
+      ],
+      "difficulty": 2,
+      "prompt": "A store uses N = 5, R = 3, W = 3. Select ALL true statements.",
+      "choices": [
+        "It stores five copies of every key, which costs more storage than N = 3",
+        "Reads and writes can each tolerate two replica failures",
+        "It is linearizable because R + W > N",
+        "Any read set shares at least one replica with any acknowledged write set",
+        "It tolerates three failures for writes"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "Majority quorums of 3 out of 5 tolerate 5 − 3 = 2 failures on both paths, overlap by pigeonhole (3 + 3 > 5), and cost five copies. Overlap does not imply linearizability (in-flight writes, sloppy quorums, concurrent writes) and three failures would leave only two replicas, short of W = 3.",
+      "ref": "unit-1-consistency-quorums.md#3-quorums-n-r-and-w"
+    },
+    {
+      "id": "A5-029",
+      "type": "single",
+      "tags": [
+        "quorum",
+        "consistency",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "A promotions service uses N = 3, R = 1, W = 1 'for speed'. During a campaign, about 30% of replicas lag on any write. Members who double-tap read the redemption flag a second after the first tap. What is the most appropriate change if you still want to survive one replica failure?",
+      "choices": [
+        "Switch to W = 3, R = 1 so that every write reaches every replica",
+        "Set R = 1, W = 1 but use timestamps to pick the newest value",
+        "Keep R = 1, W = 1 but add read repair, which makes reads consistent",
+        "Move to R = 2, W = 2 so that reads overlap writes, and make the redemption itself idempotent with a key"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "R = 2, W = 2 gives overlap and tolerates one failure on each path; idempotency stops the double credit even when a read is stale. Read repair only fixes replicas that are read, after the fact. Timestamps choose a winner but do not make a read see a write it missed. W = 3 gives overlap but loses write availability the moment any replica is down.",
+      "ref": "unit-1-consistency-quorums.md#3-quorums-n-r-and-w"
+    },
+    {
+      "id": "A5-030",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "lww",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "A store resolves conflicts by last-write-wins on timestamps. Node A (accurate clock) writes status=settled. Node B, whose clock is 30 s slow, reads that value and then writes status=reconciled a few seconds later. What do the replicas keep?",
+      "choices": [
+        "settled: B's write carries an older timestamp, so it is discarded, and B is told the write succeeded",
+        "Both versions, as siblings for the application to merge",
+        "An error is returned to B because the clocks disagree",
+        "reconciled: B read the value first, so the store recognises its write as causally later"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "LWW compares timestamps, not causality. B's timestamp is about 30 s in the past relative to A's, so B's write loses silently on every replica. LWW has no sibling mechanism and no conflict detection, and a store cannot tell that a client's clock is wrong.",
+      "ref": "unit-2-time-ordering.md#1-physical-clocks-and-last-write-wins"
+    },
+    {
+      "id": "A5-031",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "go"
+      ],
+      "difficulty": 1,
+      "prompt": "In a Go service, how should you measure how long a request took?",
+      "choices": [
+        "Ask the NTP daemon for the current offset and subtract it",
+        "time.Now().Unix() - start.Unix(), because wall-clock seconds are always accurate",
+        "time.Since(start): the time.Time from time.Now() carries a monotonic reading that is unaffected by wall-clock changes",
+        "Compare time.Now().UnixMilli() values, because NTP keeps clocks monotonic"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Since Go 1.9, time.Now() includes a monotonic clock reading that Since and Sub use, so an NTP step backwards cannot produce a negative or huge duration. Wall-clock timestamps can jump (NTP steps, leap seconds, VM resume), NTP does not guarantee monotonic wall time, and querying the daemon is not a way to time an operation.",
+      "ref": "unit-2-time-ordering.md#1-physical-clocks-and-last-write-wins"
+    },
+    {
+      "id": "A5-032",
+      "type": "numeric",
+      "tags": [
+        "clocks",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A server's clock drifts 50 ppm (parts per million) relative to true time and is never synchronised. About how many seconds off is it after one day? Answer in seconds.",
+      "value": 4.32,
+      "tolerance": 0.1,
+      "unit": "s",
+      "explanation": "50 ppm = 50 × 10⁻⁶. One day is 86,400 s, so the error is 86,400 × 50×10⁻⁶ = 4.32 s. Over one hour it is 0.18 s, which is why unsynchronised clocks drift apart quickly and why a sync daemon is needed.",
+      "ref": "unit-2-time-ordering.md#1-physical-clocks-and-last-write-wins"
+    },
+    {
+      "id": "A5-033",
+      "type": "numeric",
+      "tags": [
+        "clocks",
+        "lww",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "Two causally related writes are between 5 and 60 seconds apart (uniformly distributed). The second writer's clock is 40 s slow. Under last-write-wins, what percentage of the second writes are discarded? Answer in percent.",
+      "value": 64,
+      "tolerance": 0.1,
+      "unit": "%",
+      "explanation": "The second write loses whenever the gap is shorter than the 40 s error: the gap must fall in [5, 40) out of [5, 60], so (40 − 5) / (60 − 5) = 35/55 ≈ 63.6%.",
+      "ref": "unit-2-time-ordering.md#1-physical-clocks-and-last-write-wins"
+    },
+    {
+      "id": "A5-034",
+      "type": "multi",
+      "tags": [
+        "clocks",
+        "lww"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL uses where a wall-clock timestamp is an acceptable basis for a decision.",
+      "choices": [
+        "Showing a human-readable time next to a log line",
+        "Defining the authoritative order of audit events produced by different services",
+        "Choosing a 'last seen' value where losing a concurrent update is harmless",
+        "Expiring a cache entry with a TTL, with some slack",
+        "Deciding which of two concurrent balance updates survives"
+      ],
+      "answer": [
+        0,
+        2,
+        3
+      ],
+      "explanation": "Wall-clock time is fine where an error of hundreds of milliseconds changes nothing that matters: TTLs with slack, display, last-seen fields. It is not a safe way to choose between writes that must both be respected or to order events across machines, because skew can reverse the order of causally related events.",
+      "ref": "unit-2-time-ordering.md#1-physical-clocks-and-last-write-wins"
+    },
+    {
+      "id": "A5-035",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "go",
+        "banking"
+      ],
+      "difficulty": 3,
+      "prompt": "A Go service computes a request's duration as time.Now().UnixMilli() at the end minus the same at the start. After an NTP correction steps the clock back, some durations are negative and a rate limiter panics. What is the fix?",
+      "choices": [
+        "Take the absolute value of the difference",
+        "Measure with time.Since(start), which uses the monotonic clock, and treat wall-clock stamps only as data to record",
+        "Round durations to whole seconds so small corrections vanish",
+        "Run NTP more frequently so steps never happen"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Elapsed time must come from the monotonic reading, which cannot go backwards. More frequent sync does not guarantee no steps, abs() turns an invalid measurement into a plausible wrong one, and rounding does not remove large negative steps.",
+      "ref": "unit-2-time-ordering.md#1-physical-clocks-and-last-write-wins"
+    },
+    {
+      "id": "A5-036",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "lamport"
+      ],
+      "difficulty": 1,
+      "prompt": "What does a Lamport clock guarantee?",
+      "choices": [
+        "Timestamps approximate the wall-clock time of each event",
+        "If event a happened before event b, then the timestamp of a is smaller than that of b",
+        "Concurrent events always receive equal timestamps",
+        "If the timestamp of a is smaller than that of b, then a happened before b"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Lamport clocks guarantee only the forward implication. The converse fails: concurrent events get arbitrary relative numbers. They are logical counters with no relation to real time, which is the price of not depending on synchronised clocks.",
+      "ref": "unit-2-time-ordering.md#2-logical-time-lamport-and-vector-clocks"
+    },
+    {
+      "id": "A5-037",
+      "type": "numeric",
+      "tags": [
+        "clocks",
+        "lamport"
+      ],
+      "difficulty": 2,
+      "prompt": "Process P (Lamport time 6) sends a message stamped 6. Process Q, currently at time 20, receives it. What is Q's Lamport time immediately after the receive?",
+      "value": 21,
+      "tolerance": 0.01,
+      "explanation": "Receive sets the clock to max(local, message) + 1 = max(20, 6) + 1 = 21. The clock never goes backwards.",
+      "ref": "unit-2-time-ordering.md#2-logical-time-lamport-and-vector-clocks"
+    },
+    {
+      "id": "A5-038",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "vector-clocks",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Version X has vector clock {a:2, b:1} and version Y has {a:1, b:2}. How do they relate?",
+      "choices": [
+        "X is newer, because its total is higher",
+        "They are equal, because both sum to three",
+        "Concurrent: neither has seen everything the other has, so both must be kept as siblings",
+        "Y is newer, because it has the larger b entry"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Compare entry by entry: X is ahead on a and behind on b, so neither descends the other. Summing entries or picking one entry is not a valid comparison. Concurrent versions mean two writers did not see each other's write.",
+      "ref": "unit-2-time-ordering.md#2-logical-time-lamport-and-vector-clocks"
+    },
+    {
+      "id": "A5-039",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "vector-clocks",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Two clients read the same version with clock {a:1}. One writes through coordinator B and one through coordinator C, giving {a:1, b:1} and {a:1, c:1}. What should the next reader receive?",
+      "choices": [
+        "Both versions as siblings, with a context covering both, so the application can merge and write back",
+        "Only the one with the later wall-clock arrival time",
+        "Whichever has the lexicographically smaller coordinator name",
+        "An error until an operator resolves the conflict"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Neither descends the other, so both are legitimate and discarding one would lose a write. Choosing by arrival time or name is arbitrary LWW; the store can serve both and let the application merge, using the returned context to supersede them. An operator is not needed for a mergeable conflict.",
+      "ref": "unit-2-time-ordering.md#2-logical-time-lamport-and-vector-clocks"
+    },
+    {
+      "id": "A5-040",
+      "type": "multi",
+      "tags": [
+        "clocks",
+        "vector-clocks"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL true statements about vector clocks in a replicated store.",
+      "choices": [
+        "They record the wall-clock time of each write",
+        "Merging two clocks takes the entry-wise maximum",
+        "A clock keyed by client grows with the number of distinct writers of the key",
+        "They can distinguish a write that supersedes another from a write that is concurrent with it",
+        "They make last-write-wins unnecessary because concurrent writes cannot occur"
+      ],
+      "answer": [
+        1,
+        2,
+        3
+      ],
+      "explanation": "Vector clocks capture causal history: comparison yields before, after, equal or concurrent; per-writer entries make them grow with writers; merge is entry-wise max. They carry no real time, and concurrent writes certainly occur; the clock's job is to detect them.",
+      "ref": "unit-2-time-ordering.md#2-logical-time-lamport-and-vector-clocks"
+    },
+    {
+      "id": "A5-041",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "vector-clocks",
+        "replication"
+      ],
+      "difficulty": 3,
+      "prompt": "A store keys its vector clocks by server. Two clients read the same version and both write through the same server. The server increments its own entry in each case. What goes wrong?",
+      "choices": [
+        "The clock gets larger than any client clock, so the later write always loses",
+        "The store raises a conflict error because the clocks are equal",
+        "Both writes get the same clock, so one silently replaces the other; dotted version vectors name each write with a unique dot to avoid this",
+        "Nothing: the server serialises the two writes, so both are kept as siblings"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Server-keyed clocks start from the same context and tick the same entry, so the two clocks are equal and look like the same version: one write is lost. Dotted version vectors add a unique (server, counter) dot per write while keeping the clock compact. The server does not detect this as a conflict, and clock size is not the problem.",
+      "ref": "unit-2-time-ordering.md#2-logical-time-lamport-and-vector-clocks"
+    },
+    {
+      "id": "A5-042",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "lww",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "An audit log merges events from three services, each stamped with its own wall clock, and sorts by timestamp. Reviewers see 'member notified' before 'transfer approved' in about 1 in 18 related pairs. What is the most appropriate fix?",
+      "choices": [
+        "Use Lamport timestamps to detect which events are concurrent",
+        "Sort by the order in which events arrive at the log",
+        "Order each entity's events by a per-entity sequence or a hybrid logical timestamp, and keep wall-clock time as informational data",
+        "Tighten NTP so the services agree to within a millisecond, and keep sorting by timestamp"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Sequences or hybrid logical clocks never order an effect before its cause. Tighter NTP reduces but does not bound error and gives no guarantee when it fails. Arrival order reflects network delays, not causality. Lamport timestamps order causally related events consistently but cannot tell concurrent from ordered events.",
+      "ref": "unit-2-time-ordering.md#2-logical-time-lamport-and-vector-clocks"
+    },
+    {
+      "id": "A5-043",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "hlc"
+      ],
+      "difficulty": 2,
+      "prompt": "What does a hybrid logical clock timestamp give you that a plain wall-clock timestamp does not?",
+      "choices": [
+        "Exact agreement with true time on all nodes",
+        "The ability to detect concurrent writes",
+        "Freedom from any dependence on physical clocks",
+        "Timestamps that stay close to physical time but never order an effect before its cause, whatever the machines' clocks say"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "An HLC takes the maximum of the physical time and the largest timestamp seen, with a counter for ties, so it respects causality while remaining near wall time. It does not detect concurrency (that needs vector clocks), does not make clocks agree with true time, and still reads the physical clock.",
+      "ref": "unit-2-time-ordering.md#3-hybrid-and-bounded-uncertainty-clocks"
+    },
+    {
+      "id": "A5-044",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "hlc"
+      ],
+      "difficulty": 3,
+      "prompt": "In a hybrid-logical-clock cluster, one node's wall clock is an hour ahead and it sends a single message. What is the effect on a receiving node whose clock is correct?",
+      "choices": [
+        "Its timestamps jump to the sender's time and stay an hour ahead of its own clock, so systems cap the allowed offset and alert on it",
+        "The sender is automatically corrected by the receiver",
+        "Its timestamps run backwards to match the sender",
+        "Nothing: the receiver ignores timestamps from the future"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "An HLC takes the maximum, so the receiver's logical time follows the far-ahead clock and later local events only increment the counter until its own clock catches up. Production systems therefore enforce a maximum clock offset. Timestamps never run backwards and receivers cannot correct the sender's clock.",
+      "ref": "unit-2-time-ordering.md#3-hybrid-and-bounded-uncertainty-clocks"
+    },
+    {
+      "id": "A5-045",
+      "type": "numeric",
+      "tags": [
+        "clocks",
+        "hlc",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A TrueTime-style clock reports an uncertainty of ε = 7 ms (the interval [earliest, latest] is 2ε wide). A transaction picks its commit timestamp at 'latest' and may release only when 'earliest' has passed it. About how long is the commit wait? Answer in milliseconds.",
+      "value": 14,
+      "tolerance": 0.2,
+      "unit": "ms",
+      "explanation": "At the start the interval is 14 ms wide. The timestamp is at its upper edge and the transaction waits until the lower edge has passed it, which takes about 2ε = 14 ms of real time (Spanner overlaps part of this with replication).",
+      "ref": "unit-2-time-ordering.md#3-hybrid-and-bounded-uncertainty-clocks"
+    },
+    {
+      "id": "A5-046",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "hlc",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "Why does a TrueTime-style commit wait make a transaction's commit timestamp safe?",
+      "choices": [
+        "It waits for all replicas to acknowledge, which makes the data durable",
+        "It guarantees that no other transaction touches the same key",
+        "It averages several clocks, which makes the timestamp exact",
+        "After the wait, the timestamp is certainly in the past everywhere, so any transaction starting later gets a larger timestamp and order by timestamp matches real-time order"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Commit wait is about time, not replication: it holds the commit until the clock's lower bound has passed the chosen timestamp, so later transactions' intervals lie entirely beyond it. Durability comes from replication, averaging does not give a bound, and locking is a separate mechanism.",
+      "ref": "unit-2-time-ordering.md#3-hybrid-and-bounded-uncertainty-clocks"
+    },
+    {
+      "id": "A5-047",
+      "type": "single",
+      "tags": [
+        "exactly-once",
+        "idempotency",
+        "delivery"
+      ],
+      "difficulty": 2,
+      "prompt": "Can a network or message broker deliver every message exactly once?",
+      "choices": [
+        "No: the sender cannot distinguish a lost message from a lost acknowledgement, so it must choose between possible loss and possible duplication; exactly-once effect comes from idempotent processing",
+        "Yes, with TCP, which guarantees exactly-once delivery",
+        "No, but only in networks that lose packets; on reliable networks exactly-once is guaranteed",
+        "Yes, if the broker stores every message on disk before acknowledging it"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "This is the Two Generals problem. TCP gives ordered, reliable bytes within a connection, not once-only effects across retries and restarts. Durable storage does not resolve the ambiguity of a lost acknowledgement. Even on reliable networks, crashes between 'effect applied' and 'acknowledged' create the same ambiguity.",
+      "ref": "unit-2-time-ordering.md#4-exactly-once-is-an-end-to-end-property"
+    },
+    {
+      "id": "A5-048",
+      "type": "single",
+      "tags": [
+        "exactly-once",
+        "idempotency",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "A consumer reads a 'deposit accepted' event, calls the core banking API to credit the member, then acknowledges the message. It sometimes crashes after the call and before the acknowledgement. Which design makes the credit happen once?",
+      "choices": [
+        "Use the event ID as the idempotency key on the core call, record an 'attempt' before calling, and reconcile unresolved attempts against the core",
+        "Acknowledge the message before calling the core so it is never redelivered",
+        "Store the event ID in Redis after the core call succeeds and skip events found there",
+        "Enable the broker's exactly-once setting"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The effect is outside the broker's control, so the downstream must deduplicate by a stable key and the consumer must be able to resume safely after a crash. Acknowledging first turns duplicates into possible losses (a crash after the ack drops the credit). A Redis record written after the call has the same crash window and lives in a different store. A broker setting cannot cover an HTTP call it does not control.",
+      "ref": "unit-2-time-ordering.md#4-exactly-once-is-an-end-to-end-property"
+    },
+    {
+      "id": "A5-049",
+      "type": "single",
+      "tags": [
+        "exactly-once",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "A consumer applies a credit to the database and then, in a separate statement, inserts the event ID into a dedupe table. It crashes between the two statements. What happens when the message is redelivered?",
+      "choices": [
+        "The dedupe table skips it, because the credit already happened",
+        "The message is lost, because the dedupe row was never written",
+        "The database rolls back the first statement automatically",
+        "The event is not yet marked, so the credit is applied again: the design is still at-least-once with duplicate effects"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The credit and the dedupe row are not atomic, so the crash leaves the effect applied and the event unmarked; the redelivery repeats the effect (+$2,190 in the simulation). Nothing rolls back a committed statement, and the message is redelivered rather than lost.",
+      "ref": "unit-2-time-ordering.md#4-exactly-once-is-an-end-to-end-property"
+    },
+    {
+      "id": "A5-050",
+      "type": "single",
+      "tags": [
+        "exactly-once",
+        "idempotency"
+      ],
+      "difficulty": 1,
+      "prompt": "Where must the dedupe record live relative to a database effect for the guarantee to hold?",
+      "choices": [
+        "In the message broker's metadata",
+        "In a cache in front of the database, for speed",
+        "In application memory on the consumer",
+        "In the same database transaction as the effect, with a unique constraint on the event ID"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Atomicity between the record and the effect is what closes the crash window. A cache or the broker is a different system and cannot commit together with the database write; application memory is lost on restart.",
+      "ref": "unit-2-time-ordering.md#4-exactly-once-is-an-end-to-end-property"
+    },
+    {
+      "id": "A5-051",
+      "type": "multi",
+      "tags": [
+        "exactly-once",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL good choices for a deduplication identity.",
+      "choices": [
+        "An event UUID created by the producer when the fact was created and persisted with it",
+        "The vendor's own event ID carried in the callback",
+        "A hash of (account, amount, minute)",
+        "A fresh UUID generated by the consumer for each delivery attempt"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "Identity must come from the creator of the fact and stay the same across retries. Content-based keys collide on legitimate repeats (two $600 rent payments) and miss true duplicates a minute apart, and per-attempt IDs defeat deduplication entirely.",
+      "ref": "unit-2-time-ordering.md#4-exactly-once-is-an-end-to-end-property"
+    },
+    {
+      "id": "A5-052",
+      "type": "numeric",
+      "tags": [
+        "exactly-once",
+        "idempotency",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A dedupe table stores one row of about 100 bytes per event. At 1 million events per day, how much storage do 90 days of rows need? Answer in GB.",
+      "value": 9,
+      "tolerance": 0.15,
+      "unit": "GB",
+      "explanation": "1,000,000 × 100 B = 100 MB per day; × 90 days = 9 GB. Cheap compared with a duplicate credit, which is why 'keep it for the lifetime of the ledger entry' is defensible for money movement.",
+      "ref": "unit-2-time-ordering.md#4-exactly-once-is-an-end-to-end-property"
+    },
+    {
+      "id": "A5-053",
+      "type": "single",
+      "tags": [
+        "exactly-once",
+        "idempotency",
+        "delivery"
+      ],
+      "difficulty": 2,
+      "prompt": "A team enables exactly-once semantics in Kafka for a stream processor that reads credit events, calls an HTTP API to post each credit, and writes a result event. After a restart the API shows duplicate credits. Why?",
+      "choices": [
+        "HTTP calls are always idempotent so the duplicates must come from the vendor",
+        "Exactly-once mode is only available for producers, never for consumers",
+        "Kafka's transactional guarantee covers the read-process-write loop within Kafka; the HTTP call is an external effect that repeats when processing is retried",
+        "The transaction timed out, so Kafka disabled exactly-once for the topic"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Kafka's exactly-once semantics make offsets, state and output records atomic inside Kafka. An external side effect is outside that boundary and needs its own idempotency (an idempotency key and attempt record). The other explanations misstate what the feature covers; HTTP POSTs are not idempotent by default.",
+      "ref": "unit-2-time-ordering.md#4-exactly-once-is-an-end-to-end-property"
+    },
+    {
+      "id": "A5-054",
+      "type": "single",
+      "tags": [
+        "exactly-once",
+        "ordering",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "Events for an entity carry a version number. The entity is at version 3 and an event with version 5 arrives. What should the consumer do?",
+      "choices": [
+        "Apply it and set the entity to version 5",
+        "Hold or park it (or fetch the missing version 4): applying it would skip an event, and a dedupe table alone would not reveal the gap",
+        "Apply it and then re-apply version 4 when it shows up",
+        "Acknowledge and drop it as a duplicate"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A version number turns the consumer into a one-dimensional version vector: apply only version 4 next; a lower version is a duplicate; a higher one means an earlier event is missing. Applying 5 immediately skips 4, dropping it loses 5, and applying out of order may violate state-machine rules.",
+      "ref": "unit-2-time-ordering.md#4-exactly-once-is-an-end-to-end-property"
+    },
+    {
+      "id": "A5-055",
+      "type": "numeric",
+      "tags": [
+        "consensus",
+        "availability",
+        "estimation"
+      ],
+      "difficulty": 1,
+      "prompt": "What is the smallest number of nodes in a majority-quorum consensus group that tolerates two simultaneous node failures? Answer in nodes.",
+      "value": 5,
+      "tolerance": 0.01,
+      "unit": "nodes",
+      "explanation": "A group of 2f + 1 nodes tolerates f failures; for f = 2 that is 5 (a majority of 3 remains).",
+      "ref": "unit-3-consensus-leases.md#1-why-consensus-needs-a-majority"
+    },
+    {
+      "id": "A5-056",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "availability"
+      ],
+      "difficulty": 2,
+      "prompt": "Why are consensus groups usually 3 or 5 nodes rather than 4 or 6?",
+      "choices": [
+        "Even-sized groups violate the safety property of consensus",
+        "An even size tolerates no more failures than the odd size below it but adds a node that can fail, so availability is slightly lower and cost higher",
+        "Odd sizes are required by the Raft protocol's message format",
+        "Even-sized groups cannot elect a leader"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A group of 4 needs 3 up, tolerating one failure, the same as 3 nodes, but it has more nodes that can fail (0.999408 against 0.999702 at 1% node unavailability). Even sizes work correctly, just wastefully; they can elect leaders and remain safe.",
+      "ref": "unit-3-consensus-leases.md#1-why-consensus-needs-a-majority"
+    },
+    {
+      "id": "A5-057",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "availability",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "A three-node consensus group is deployed as two nodes in data centre A and one in data centre B 'for disaster recovery'. What happens if data centre A is lost?",
+      "choices": [
+        "It continues read-only with full consistency, so no availability is lost",
+        "It keeps working because data centre B holds a copy of the data",
+        "The group loses its majority (1 of 3) and stops accepting writes, because the two lost nodes were a majority",
+        "It elects the remaining node as leader after a timeout"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A majority of 3 is 2. Losing the two-node site leaves one node, which can neither elect a leader nor commit. Having a copy is not the same as having a quorum. A lone node must not elect itself, or a partition would produce two leaders. The remedy is three failure domains (or a witness) so no single site holds a majority.",
+      "ref": "unit-3-consensus-leases.md#1-why-consensus-needs-a-majority"
+    },
+    {
+      "id": "A5-058",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "theory"
+      ],
+      "difficulty": 3,
+      "prompt": "What does the FLP result say?",
+      "choices": [
+        "Consensus is impossible in any distributed system",
+        "In a fully asynchronous system where even one process may crash, no deterministic algorithm can guarantee that consensus terminates; practical protocols keep safety always and liveness when the network is timely",
+        "Consensus is possible only if all clocks are synchronised",
+        "Consensus needs at least 2f + 1 nodes to tolerate f failures, and no fewer"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "FLP is about termination under asynchrony with a crash fault; safety is unaffected, which is why Paxos and Raft never decide two values but may fail to make progress during bad network periods. The 2f + 1 bound is a separate result, and consensus protocols do not rely on synchronised clocks for safety.",
+      "ref": "unit-3-consensus-leases.md#1-why-consensus-needs-a-majority"
+    },
+    {
+      "id": "A5-059",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "raft"
+      ],
+      "difficulty": 2,
+      "prompt": "Why do Raft nodes choose their election timeouts at random within a range?",
+      "choices": [
+        "To guarantee that the node with the longest log always wins",
+        "To make elections slower so that stale leaders can finish their work",
+        "To break symmetry: one node usually times out first and wins before the others campaign, preventing endless split votes",
+        "To spread network traffic evenly across the cluster"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "With identical timeouts, all nodes become candidates together, each votes for itself and refuses the others, and the term climbs with no leader (in the lab's harness, term 40 and no leader after 600 ticks). Randomisation is not about delaying elections, spreading traffic or choosing the most up-to-date node; the vote rule handles that.",
+      "ref": "unit-3-consensus-leases.md#2-raft-terms-elections-and-the-log"
+    },
+    {
+      "id": "A5-060",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "raft",
+        "replication"
+      ],
+      "difficulty": 3,
+      "prompt": "In Raft, a candidate with a shorter log than the voter's asks for a vote. What does the voter do, and why?",
+      "choices": [
+        "Grants it only after the candidate copies the voter's log",
+        "Refuses, because granting would let a candidate lacking committed entries become leader and overwrite them",
+        "Grants it, since a shorter log is easier to bring up to date",
+        "Grants it if the candidate's term is higher, since terms decide everything"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Voters grant only to candidates whose logs are at least as up to date (last term, then length). Every committed entry is on a majority, so some voter in any winning majority has it and will refuse a candidate lacking it (Leader Completeness). A higher term updates the voter's term but does not override the log check. Logs are copied by the leader after election, not before.",
+      "ref": "unit-3-consensus-leases.md#2-raft-terms-elections-and-the-log"
+    },
+    {
+      "id": "A5-061",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "raft",
+        "replication"
+      ],
+      "difficulty": 3,
+      "prompt": "When may a Raft leader treat a log entry as committed?",
+      "choices": [
+        "As soon as the leader has appended it to its own log",
+        "When every node in the cluster has acknowledged it",
+        "When it is stored on a majority, regardless of which term created it",
+        "When it is stored on a majority of nodes and belongs to the leader's current term; older entries are committed along with it"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Counting replicas alone is unsafe for entries from earlier terms (the Figure 8 scenario: an old-term entry on a majority can still be overwritten by a leader with a higher last term). Requiring a current-term entry on a majority, and committing earlier entries with it, fixes that. Appending locally is not replication, and requiring all nodes would sacrifice availability.",
+      "ref": "unit-3-consensus-leases.md#2-raft-terms-elections-and-the-log"
+    },
+    {
+      "id": "A5-062",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "raft"
+      ],
+      "difficulty": 3,
+      "prompt": "Why does a newly elected Raft leader append a no-op entry in its own term?",
+      "choices": [
+        "To tell clients that a new leader has been elected",
+        "So that it can commit entries inherited from earlier terms: committing the no-op (a current-term entry) commits everything before it",
+        "To increase the term number of the log",
+        "To reset the followers' election timers"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A leader may only commit current-term entries by counting replicas, so without a current-term entry it could not safely advance the commit index over inherited entries. Heartbeats, not the no-op, reset timers; the term is carried by messages and does not need an entry; client notification is a side effect at most.",
+      "ref": "unit-3-consensus-leases.md#2-raft-terms-elections-and-the-log"
+    },
+    {
+      "id": "A5-063",
+      "type": "multi",
+      "tags": [
+        "consensus",
+        "raft"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL true statements about terms in Raft.",
+      "choices": [
+        "Terms are wall-clock epochs that must be synchronised with NTP",
+        "A message carrying a higher term makes any node, including a leader, step down to follower",
+        "A node may vote for several different candidates in the same term",
+        "Each term has at most one leader",
+        "A term works like a logical clock for leadership"
+      ],
+      "answer": [
+        1,
+        3,
+        4
+      ],
+      "explanation": "Terms are integers that increase with each election; higher terms win, which is the Lamport-clock idea applied to leadership. One vote per term guarantees at most one leader per term. They are not wall-clock epochs and do not need synchronised clocks.",
+      "ref": "unit-3-consensus-leases.md#2-raft-terms-elections-and-the-log"
+    },
+    {
+      "id": "A5-064",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "raft",
+        "cap"
+      ],
+      "difficulty": 3,
+      "prompt": "A five-node Raft cluster partitions into groups of 3 and 2, and the old leader is in the group of 2. A client sends it a write. What happens to that write?",
+      "choices": [
+        "It commits on the group of 3 automatically once clocks are compared",
+        "It is committed on both sides and merged when the partition heals",
+        "It commits after a timeout, because the leader is still in charge",
+        "It cannot reach a majority so it is never committed; when the partition heals the old leader steps down and the uncommitted entry is overwritten"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A leader needs a majority to commit and the group of 2 has none. Meanwhile the group of 3 elects a new leader in a higher term; on heal the old leader sees the higher term, steps down, and its conflicting uncommitted entries are discarded. Raft never commits on both sides and never merges.",
+      "ref": "unit-3-consensus-leases.md#2-raft-terms-elections-and-the-log"
+    },
+    {
+      "id": "A5-065",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "raft",
+        "replication"
+      ],
+      "difficulty": 3,
+      "prompt": "In a Raft-style implementation, the leader receives a refusal to an AppendEntries message because the follower's log lacks the previous entry. What should the leader do?",
+      "choices": [
+        "Step down, because a refusal means the leader has the wrong log",
+        "Mark the follower as failed and exclude it from the majority permanently",
+        "Decrement nextIndex for that follower and resend with an earlier previous entry, repeating until the logs agree, then overwrite the follower's conflicting suffix",
+        "Delete its own latest entries to match the follower"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The consistency check lets the leader find the point where the logs agree by backing up one entry at a time. A refusal at the same term says nothing about the leader's legitimacy; the leader's log is authoritative and never shrinks; and a lagging follower is not removed from the cluster.",
+      "ref": "unit-3-consensus-leases.md#2-raft-terms-elections-and-the-log"
+    },
+    {
+      "id": "A5-066",
+      "type": "single",
+      "tags": [
+        "leases",
+        "fencing",
+        "consensus"
+      ],
+      "difficulty": 2,
+      "prompt": "What is the lease TTL for in a distributed lock?",
+      "choices": [
+        "Safety: after the TTL expires, the old holder is prevented from acting",
+        "Ordering: it assigns each acquisition a number",
+        "Durability: it makes sure the lock survives a restart of the lock service",
+        "Liveness: it lets the system recover when the holder dies, but it cannot by itself guarantee that only one holder acts"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Expiry frees the lock for someone else but cannot stop a holder that is paused or partitioned and does not know it expired; safety needs a fencing check at the resource. Ordering of grants comes from a monotonic token, and durability from the lock service's replication.",
+      "ref": "unit-3-consensus-leases.md#3-leases-and-fencing-tokens"
+    },
+    {
+      "id": "A5-067",
+      "type": "single",
+      "tags": [
+        "leases",
+        "fencing",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "A batch runner takes a 10 s lease, then freezes for 15 s mid-run. Another instance takes the lease and runs. The first instance resumes and keeps posting interest. Which fix protects the ledger?",
+      "choices": [
+        "A fencing token issued with each lease grant, passed with every write and rejected by the ledger if lower than the highest token seen",
+        "Having the runner check 'do I still hold the lease?' immediately before each write",
+        "Running the batch on a faster machine so that pauses are shorter",
+        "A longer lease TTL of 5 minutes"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A token checked at the resource rejects the stale holder whatever caused the pause. A longer TTL tolerates longer pauses but not unbounded ones and slows failover. The check-then-write has the same race, with the pause after the check. Faster hardware reduces but does not eliminate pauses (VM freezes, packet delays).",
+      "ref": "unit-3-consensus-leases.md#3-leases-and-fencing-tokens"
+    },
+    {
+      "id": "A5-068",
+      "type": "single",
+      "tags": [
+        "leases",
+        "fencing"
+      ],
+      "difficulty": 3,
+      "prompt": "Why does 'check that I still hold the lease, then write' fail to protect a resource?",
+      "choices": [
+        "A lease can only be checked by the lock service, never by the holder",
+        "The holder can pause (or the message can be delayed) between the check and the write, so the check may be stale when the write arrives",
+        "The check is safe, but only if it is repeated twice",
+        "Lease checks are too slow to run before every write"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "It is a time-of-check to time-of-use race, and the holder is exactly the party that cannot observe its own pause. Speed, who performs the check, and repetition do not close the window; only a check made at the resource atomically with the write does.",
+      "ref": "unit-3-consensus-leases.md#3-leases-and-fencing-tokens"
+    },
+    {
+      "id": "A5-069",
+      "type": "multi",
+      "tags": [
+        "leases",
+        "fencing",
+        "consensus"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL values that make valid fencing tokens.",
+      "choices": [
+        "A database sequence value or row version incremented at each grant",
+        "The mod_revision of the lock key in etcd at the time the lock was granted",
+        "A random UUID generated for each grant",
+        "The holder's wall-clock time when it acquired the lock",
+        "A ZooKeeper zxid or the sequence number of a sequential znode created at acquisition"
+      ],
+      "answer": [
+        0,
+        1,
+        4
+      ],
+      "explanation": "A fencing token must increase with every grant and be produced by the (linearizable) lock service so the resource can compare them. Wall-clock times can be wrong or equal across holders and a random UUID has no order to compare.",
+      "ref": "unit-3-consensus-leases.md#3-leases-and-fencing-tokens"
+    },
+    {
+      "id": "A5-070",
+      "type": "single",
+      "tags": [
+        "leases",
+        "fencing"
+      ],
+      "difficulty": 2,
+      "prompt": "A lock only prevents two service instances from both rebuilding a cache; an occasional double rebuild is harmless. Which lock is appropriate?",
+      "choices": [
+        "A lock that never expires, to be safe",
+        "No lock is possible, because distributed locks cannot exist",
+        "A lease plus fencing token plus synchronous replication of the cache",
+        "A plain lease: it is an efficiency lock, so rare double holders are acceptable"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The efficiency-versus-correctness distinction decides how much machinery you need. Fencing is needed when a double holder breaks an invariant; here it only wastes work. A lock without expiry would wedge forever after a crash.",
+      "ref": "unit-3-consensus-leases.md#3-leases-and-fencing-tokens"
+    },
+    {
+      "id": "A5-071",
+      "type": "numeric",
+      "tags": [
+        "leases",
+        "fencing",
+        "banking",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A monthly interest run covers 50,000 accounts averaging $4.20 of interest each. A paused runner resumes after 18,000 accounts and, alongside the instance that took over, double-posts the other 32,000. How many dollars of interest are credited twice? Answer in dollars.",
+      "value": 134400,
+      "tolerance": 0.05,
+      "unit": "USD",
+      "explanation": "32,000 accounts × $4.20 = $134,400. The accounts already processed before the pause are covered once by the first runner and, if the second run restarts from the beginning, only the 32,000 later accounts are double-posted by both.",
+      "ref": "unit-3-consensus-leases.md#3-leases-and-fencing-tokens"
+    },
+    {
+      "id": "A5-072",
+      "type": "single",
+      "tags": [
+        "leases",
+        "fencing",
+        "locks"
+      ],
+      "difficulty": 3,
+      "prompt": "A critic says a multi-instance Redis lock algorithm is unsafe for protecting correctness-critical writes. What is the core of the critique?",
+      "choices": [
+        "It always grants the same lock to two clients at once",
+        "Redis cannot store keys with a time-to-live",
+        "It cannot acquire locks across more than one Redis instance",
+        "It issues no fencing token and relies on bounded clock drift and bounded process pauses, neither of which can be guaranteed, so a stale holder can still act"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The argument is about assumptions: without a monotonic token checked at the resource, a pause or delay after expiry lets a stale holder write. The algorithm does acquire across instances, it does not grant duplicates in the common case, and Redis supports TTLs.",
+      "ref": "unit-3-consensus-leases.md#3-leases-and-fencing-tokens"
+    },
+    {
+      "id": "A5-073",
+      "type": "numeric",
+      "tags": [
+        "consistency",
+        "estimation",
+        "consensus"
+      ],
+      "difficulty": 2,
+      "prompt": "A payroll file credits one settlement account 50,000 times. Postings to that account are serialised and each commit takes about 70 ms (cross-region consensus). Roughly how long does the file take? Answer in seconds.",
+      "value": 3500,
+      "tolerance": 0.1,
+      "unit": "s",
+      "explanation": "50,000 × 0.070 s = 3,500 s, close to an hour. In one region at 1–2 ms the same file takes 50–100 s. Hot accounts are bounded by 1 / commit latency.",
+      "ref": "unit-3-consensus-leases.md#4-choosing-a-model-for-money-movement"
+    },
+    {
+      "id": "A5-074",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "replication",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "A team proposes running the transfers service active-active in two regions, with every account writable in either region, asynchronous replication in both directions and last-write-wins. What is the main flaw?",
+      "choices": [
+        "LWW cannot be configured on a relational database",
+        "Asynchronous replication makes reads slower in both regions",
+        "Two regions cannot hold the same account number",
+        "Concurrent debits in the two regions are concurrent writes: one can be lost or both applied (overdraft), and clock skew can discard causally later writes; give each account a home region instead"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The invariant (a balance that must not go negative) spans copies, and neither LWW nor asynchronous replication can enforce it. A home region per account keeps a single writer for each entity. Reads are not made slower by asynchronous replication, and the last two statements are simply false.",
+      "ref": "unit-3-consensus-leases.md#4-choosing-a-model-for-money-movement"
+    },
+    {
+      "id": "A5-075",
+      "type": "numeric",
+      "tags": [
+        "consistency",
+        "replication",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A ledger replicates asynchronously to a DR region with a replication lag of 200 ms. Peak load is 70 postings per second. About how many acknowledged postings could a region loss at peak lose? Answer in postings.",
+      "value": 14,
+      "tolerance": 0.15,
+      "unit": "postings",
+      "explanation": "RPO ≈ replication lag × rate = 0.2 s × 70/s = 14 postings. That is the honest RPO of the design; synchronous replication to a nearby second site would make it zero at the cost of that site's round trip on every posting.",
+      "ref": "unit-3-consensus-leases.md#4-choosing-a-model-for-money-movement"
+    },
+    {
+      "id": "A5-076",
+      "type": "multi",
+      "tags": [
+        "consistency",
+        "banking",
+        "consensus"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL pieces of state in a banking platform that should be strongly consistent (a decision reads the value and then writes).",
+      "choices": [
+        "The 'recent activity' feed shown on the home screen",
+        "Idempotency keys for the transfers API",
+        "A member's notification preferences",
+        "Ledger postings for an account",
+        "Leadership of the nightly interest job"
+      ],
+      "answer": [
+        1,
+        3,
+        4
+      ],
+      "explanation": "Strong consistency belongs where a decision reads a value and acts on it: balances for postings, the key that decides whether a request has been processed, and the identity of the one runner. Feeds and preferences tolerate staleness and are mergeable, so weaker models and higher availability are appropriate.",
+      "ref": "unit-3-consensus-leases.md#4-choosing-a-model-for-money-movement"
+    },
+    {
+      "id": "A5-077",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "replication",
+        "banking"
+      ],
+      "difficulty": 3,
+      "prompt": "Automatic failover for a two-node database pair is configured to promote the standby after 10 s without heartbeats. What can go wrong, and what is the standard remedy?",
+      "choices": [
+        "Failover will be too slow, which a shorter timeout always fixes",
+        "The standby will lose data because heartbeats use too much bandwidth",
+        "Nothing: 10 s is long enough to be certain the primary is dead",
+        "A partition looks identical to a dead peer, so both may become primary (split-brain); add a third voter or witness, decide by majority, and fence the old primary"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A timeout cannot distinguish a dead node from an unreachable one, so safe automatic failover needs a majority decision and fencing. A longer timeout reduces but does not remove the risk, heartbeat bandwidth is not the issue, and shortening the timeout makes false failovers more likely.",
+      "ref": "unit-3-consensus-leases.md#1-why-consensus-needs-a-majority"
+    },
+    {
+      "id": "A5-078",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "banking",
+        "cap"
+      ],
+      "difficulty": 2,
+      "prompt": "During a 5-minute link failure between regions, which behaviour is the most defensible for a credit-union platform?",
+      "choices": [
+        "Every operation continues independently in both regions and is merged later",
+        "Every operation, including balance display, returns an error until the link is restored",
+        "Postings refuse or queue where they cannot be coordinated, balances are served from replicas labelled 'as of', and card authorisations fall back to bounded limits",
+        "Every operation uses last-write-wins and ignores conflicts"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Choosing per operation matches the cost of a wrong answer: postings are consistent, displays are available, and authorisations are available with bounded risk. Treating everything the same either risks overdrafts and duplicates or makes the whole product unavailable for a problem only some operations care about.",
+      "ref": "unit-3-consensus-leases.md#4-choosing-a-model-for-money-movement"
+    },
+    {
+      "id": "A5-079",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "raft",
+        "replication"
+      ],
+      "difficulty": 3,
+      "prompt": "In the raftlite lab, a follower holds [(1,a),(1,b),(1,c)] and receives a delayed, duplicated AppendEntries from the same leader that carries only the first entry. What must the follower do with its log?",
+      "choices": [
+        "Keep it unchanged: entries that match the leader's are never deleted, and only a conflicting entry (different term at the same index) triggers truncation",
+        "Reject the message and clear its log",
+        "Truncate to the message and append the missing entries from the leader",
+        "Truncate it to the single entry in the message"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Truncating on a stale or duplicated message could delete entries a majority already holds and break committed state. The follower acknowledges the part the message covers and leaves matching entries alone; truncation happens only at the first index where the terms differ.",
+      "ref": "unit-3-consensus-leases.md#2-raft-terms-elections-and-the-log"
+    },
+    {
+      "id": "A5-080",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "raft",
+        "replication"
+      ],
+      "difficulty": 3,
+      "prompt": "The raftlite leader (3-node cluster, term 3) holds [(1,a),(2,b),(3,noop)] and its commit index is 0. A follower acknowledges match index 2, so entry 2 is now on a majority. What happens to the commit index?",
+      "choices": [
+        "It advances to 2, because a majority holds entry 2",
+        "It stays 0: entry 2 is from term 2, and the leader commits only entries of its own term by counting replicas, so it waits for the term-3 no-op to reach a majority",
+        "It advances to 3, because the leader holds the no-op",
+        "It advances to 1, because entry 1 is older than entry 2 and was replicated first"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Counting replicas for an earlier-term entry is unsafe (the Figure 8 scenario), so the commit index stays where it was until the no-op from term 3 is on a majority; then it jumps to 3 and entries 1 and 2 are committed with it. The leader holding the no-op locally is not replication, and entry 1, like entry 2, is from an earlier term and is committed only indirectly, never by being 'older'.",
+      "ref": "unit-3-consensus-leases.md#2-raft-terms-elections-and-the-log"
+    },
+    {
+      "id": "A5-081",
+      "type": "single",
+      "tags": [
+        "quorum",
+        "replication",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "In the quorum lab, a replica marked Lag receives a write. The coordinator wrongly counts that queued write as an acknowledgement. Which property breaks?",
+      "choices": [
+        "An acknowledged write can fail to be on W replicas yet be reported successful, so the overlap guarantee no longer covers acknowledged writes",
+        "Only read repair breaks, because it relies on acknowledgements",
+        "Nothing: queued writes are applied a moment later, so counting them is equivalent",
+        "The vector clocks of the versions become invalid"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "W is meant to count replicas that have applied the write. Counting a queue entry lets the coordinator say 'success' when fewer than W replicas hold the value, so a read set can miss it even with R + W > N (the exhaustive overlap test fails). Read repair and clocks are unaffected.",
+      "ref": "unit-1-consistency-quorums.md#4-what-quorums-do-not-guarantee"
+    },
+    {
+      "id": "A5-082",
+      "type": "single",
+      "tags": [
+        "quorum",
+        "replication",
+        "banking"
+      ],
+      "difficulty": 3,
+      "prompt": "Your quorum store keeps idempotency keys for money movement with N = 3, R = 2, W = 2 and sloppy quorums on. Why is that configuration questionable for this data?",
+      "choices": [
+        "Idempotency keys cannot be stored in a replicated store",
+        "R = 2 is too low; keys need R = W = 3 for correctness",
+        "A sloppy-quorum write can be acknowledged yet invisible to the next read, so a retry may not find the key and may execute the transfer again",
+        "Sloppy quorums are slower than strict ones"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The idempotency check is a read-then-decide, which needs the latest value; a stale read after an acknowledged sloppy write misses the key. Keys can be replicated, R = W = 3 is neither necessary nor sufficient (sloppiness is the problem), and sloppy quorums are for availability, not speed. Prefer the transfer database in the same transaction, or at least a strict quorum or consensus-backed store, failing closed.",
+      "ref": "unit-1-consistency-quorums.md#4-what-quorums-do-not-guarantee"
+    }
+  ]
+}

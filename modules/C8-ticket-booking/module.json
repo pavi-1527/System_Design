@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "id": "C8",
+  "slug": "ticket-booking",
+  "title": "Case study: ticket booking",
+  "track": "C",
+  "status": "written",
+  "core": true,
+  "summary": "Contended inventory: requirements and on-sale estimation, API and data model, oversell prevention (conditional writes, locks, constraints, isolation levels), holds with lazy expiry, general-admission counters, payment in flight with idempotent confirmation and reconciliation, and a flash-sale waiting room with signed passes.",
+  "hours": {
+    "core": 5,
+    "stretch": 1,
+    "total": 6
+  },
+  "prerequisites": [
+    "A2",
+    "A5"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/C8-ticket-booking",
+    "readme": "modules/C8-ticket-booking/README.md",
+    "quiz": "modules/C8-ticket-booking/quiz.json",
+    "design_exercise": "modules/C8-ticket-booking/design-exercise.md",
+    "teachback": "modules/C8-ticket-booking/teachback.md",
+    "lab": "labs/c8",
+    "solution": "solutions/c8"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Guided design: requirements, estimation, API, data model, high-level design",
+      "file": "modules/C8-ticket-booking/unit-1-guided-design.md",
+      "hours": {
+        "core": 2.5,
+        "stretch": 0.5
+      },
+      "labs": []
+    },
+    {
+      "n": 2,
+      "title": "Deep dives: oversell prevention and holds; payment in flight; the flash sale and the waiting room",
+      "file": "modules/C8-ticket-booking/unit-2-deep-dives.md",
+      "hours": {
+        "core": 2.5,
+        "stretch": 0.5
+      },
+      "labs": [
+        "waitroom"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "waitroom",
+      "title": "Virtual waiting room: idempotent FIFO joins with position and ETA, token-bucket admission capped at a burst, HMAC-signed passes with a TTL verified without a database, expiry, a bounded queue",
+      "unit": 2,
+      "core": true
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Scope a ticket-booking system in six minutes: the clarifying questions whose answers change the design (assigned seats vs general admission, the on-sale peak, holds and their TTL, how payment confirms, per-customer limits, fairness, other sellers) and the two hard invariants.",
+      "core": true
+    },
+    {
+      "text": "Estimate an on-sale (arrivals, demand ratio, seat-map reads and bandwidth, an admission rate from Little's law, queue wait and sell-out time, hold transactions per second, the single-row ceiling, storage) and tie each number to a decision.",
+      "core": true
+    },
+    {
+      "text": "Design the API (idempotent hold returning 409 with the seat, checkout that extends the hold once, signed webhook, server-side price) and a data model partitioned by event with seat rows, self-routing hold ids, limit rows and the unique constraints that make oversell and double processing impossible.",
+      "core": true
+    },
+    {
+      "text": "Draw the high-level design with the on-sale path through the waiting room, the booking path and the payment path traced, and justify every box by a requirement or a number.",
+      "core": true
+    },
+    {
+      "text": "Choose an oversell-prevention mechanism (conditional UPDATE, sorted SELECT FOR UPDATE, optimistic versions, insert-to-claim, Redis holds, an in-memory owner per event), say which isolation level each needs and where each breaks, and treat general admission as a hot counter.",
+      "core": true
+    },
+    {
+      "text": "Design the payment-in-flight path: a selection hold and a payment window, lazy expiry, cancel-then-release, idempotent confirmation keyed on the provider's event id, authorise-then-capture, the late-payment path and reconciliation.",
+      "core": true
+    },
+    {
+      "text": "Implement the waiting room (labs/c8/waitroom): idempotent FIFO joins with position and ETA, token-bucket admission capped at a burst, HMAC-signed passes verified in constant time, expiry and a bounded queue, passing under -race.",
+      "core": true
+    },
+    {
+      "text": "Handle the hot event past the room: rows every transaction touches, a CDN-served availability snapshot, position by sequence number and watermark, an adaptive admission rate and an honest sold-out message.",
+      "core": true
+    },
+    {
+      "text": "Evaluate bot and fairness controls (randomised pre-queue, registration lotteries, account and card limits, passes bound to accounts, rate limits at join) and what each costs.",
+      "core": false
+    }
+  ]
+}

@@ -1,0 +1,854 @@
+{
+  "module": "C2",
+  "title": "Case study: distributed rate limiter",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "C2-001",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "requirements"
+      ],
+      "difficulty": 2,
+      "prompt": "An interviewer says 'design a rate limiter for our public API' and nothing else. Which clarifying question changes the MOST boxes on the board?",
+      "choices": [
+        "What each limit is for: protecting our backends, or enforcing a customer's paid or plan limit",
+        "Whether to use a token bucket or a sliding-window counter",
+        "Whether the response header is spelled RateLimit-Remaining or X-RateLimit-Remaining",
+        "Which language the gateway is written in"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Protective limits can be per node, approximate and fail open, with no shared state at all; contractual limits need shared state, accuracy, a store, a round trip and a failure policy. That one answer decides whether most of the design exists. The algorithm is a two-minute decision once you know the purpose; header spelling and implementation language change no boxes.",
+      "ref": "unit-1-rate-limiter-service.md#1-requirements-and-the-questions-that-change-the-design-000006"
+    },
+    {
+      "id": "C2-002",
+      "type": "multi",
+      "tags": [
+        "rate-limiting",
+        "availability",
+        "security",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL limits on the partner API that should FAIL CLOSED (reject) when the shared limiter's store is unreachable.",
+      "choices": [
+        "5 login attempts per member per 15 minutes",
+        "3 OTP text messages per phone number per hour",
+        "The Pro plan's 100 req/s per partner API key",
+        "The protective 300 req/s limit in front of the core-banking adapter"
+      ],
+      "answer": [
+        0,
+        1
+      ],
+      "explanation": "Security limits fail closed: a limiter outage must not become a credential-stuffing or SMS-pumping window. The Pro plan limit is contractual and customer-facing, so it falls back to a local per-gateway limit (≈ 2× the fair share) to keep the API up. The protective adapter limit is local by design and has no shared store to lose, so the question doesn't apply to it.",
+      "ref": "unit-1-rate-limiter-service.md#7-deep-dive-3-when-the-limiter-fails-rule-rollout-and-10-038045"
+    },
+    {
+      "id": "C2-003",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "latency",
+        "multi-region"
+      ],
+      "difficulty": 2,
+      "prompt": "A customer asks for one limit enforced 'globally and exactly to 1%' across three regions; cross-region RTT is ≈ 80 ms and the limiter's budget is ≤ 5 ms p99. What is the honest design answer?",
+      "choices": [
+        "Per-region limits whose shares are rebalanced periodically from observed usage, stated as approximately global",
+        "A synchronous cross-region check on every request",
+        "A static equal split per region, described as exact globally",
+        "Consensus (Raft) across the three regions on every decision"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Any synchronous cross-region step costs ≈ 80 ms, 16× the budget, and consensus costs at least that plus a majority. A static split is exact per region but wrong globally when traffic shifts between regions. Rebalanced shares keep the hot path local and are approximately global within the rebalance period, which is what customers usually need; exactness for billing comes from logs.",
+      "ref": "unit-1-rate-limiter-service.md#1-requirements-and-the-questions-that-change-the-design-000006"
+    },
+    {
+      "id": "C2-004",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "quotas",
+        "algorithms"
+      ],
+      "difficulty": 2,
+      "prompt": "Free accounts get 100,000 requests per calendar day, and the count is billed. Which mechanism fits best?",
+      "choices": [
+        "A per-account counter keyed by the day (q:{acct}:2026-10-29), incremented atomically, with the billed number reconciled from request logs",
+        "A token bucket with rate 100,000 / 86,400 per second and burst 100,000",
+        "A sliding-window log of every request timestamp over 24 hours",
+        "GCRA with burst 1 and an interval of 0.864 s"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The contract is calendar-aligned, so a fixed window keyed by the period is the product, not a bug, and putting the day in the key means a lost TTL can't lock anyone out. A token bucket with that rate and burst allows the whole day's quota at once and then refills continuously: no calendar reset. A 24-hour log stores up to 100,000 timestamps per account. GCRA with burst 1 forbids any burst at all, which is a rate, not a quota.",
+      "ref": "unit-1-rate-limiter-service.md#5-deep-dive-1-one-atomic-decision-per-request-025032"
+    },
+    {
+      "id": "C2-005",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "rate-limiting"
+      ],
+      "difficulty": 1,
+      "prompt": "The API serves 400,000 req/s at peak through 40 gateways, and every request is checked against 2 shared limits (per key and per account) plus a local protective limit. How many shared limiter decisions per second must the counter store handle?",
+      "value": 800000,
+      "tolerance": 0.15,
+      "unit": "req/s",
+      "explanation": "400,000 requests × 2 shared checks = 800,000 decisions/s. The local protective limit is evaluated in the gateway's memory and costs the store nothing. The limiter makes twice as many calls as the API serves, which is why it's sized by operations per second.",
+      "ref": "unit-1-rate-limiter-service.md#2-estimation-decisions-store-operations-and-the-hot-key-006010"
+    },
+    {
+      "id": "C2-006",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "capacity",
+        "sharding"
+      ],
+      "difficulty": 2,
+      "prompt": "The store must handle 800,000 limiter decisions per second. One shard runs ≈ 75,000 decision scripts per second, and you plan for 60% utilisation. How many shards (primaries) do you need?",
+      "value": 18,
+      "tolerance": 0.25,
+      "unit": "shards",
+      "explanation": "Usable per shard = 75,000 × 0.6 = 45,000. 800,000 / 45,000 ≈ 17.8 → ≈ 18 primaries, plus replicas in other AZs for failover. Planning at 100% utilisation (≈ 11) leaves no room for a node loss or a hot key.",
+      "ref": "unit-1-rate-limiter-service.md#2-estimation-decisions-store-operations-and-the-hot-key-006010"
+    },
+    {
+      "id": "C2-007",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "memory",
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "≈ 200,000 API keys are active at peak, each subject to 2 GCRA limits. Each entry (8-byte TAT, the key name and the store's per-key overhead) takes ≈ 110 B. How much memory does the counter state need, in MB?",
+      "value": 44,
+      "tolerance": 0.3,
+      "unit": "MB",
+      "explanation": "200,000 × 2 × 110 B ≈ 44 MB. That fits on any box, which is the point: memory never decides a limiter's store, operations per second do. (A sliding-window log at 100 req/s would need ≈ 100 entries per key, ≈ 2–3 GB.)",
+      "ref": "unit-1-rate-limiter-service.md#2-estimation-decisions-store-operations-and-the-hot-key-006010"
+    },
+    {
+      "id": "C2-008",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "rate-limiting",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "A team sized its limiter Redis by memory (2M keys × 100 B ≈ 200 MB: one small instance). In production it sits at 100% CPU and every API call's p99 rises. What did the estimate miss?",
+      "choices": [
+        "Operations per second: requests × shared checks per request is several times what one instance can execute",
+        "Key overhead: Redis needs ≈ 10× more memory per key than estimated",
+        "Network bandwidth: 200 MB of state saturates the NIC",
+        "Replication: the replica doubles CPU on the primary"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "At 400k req/s × 2 checks the store must run ≈ 800k atomic decisions a second, while one single-threaded instance does on the order of 100k simple operations. Memory was never the constraint; per-key overhead and bandwidth are small, and replication is not what saturates a primary's CPU here.",
+      "ref": "unit-1-rate-limiter-service.md#2-estimation-decisions-store-operations-and-the-hot-key-006010"
+    },
+    {
+      "id": "C2-009",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "hot-key"
+      ],
+      "difficulty": 1,
+      "prompt": "Your largest customer sends 20,000 req/s on one API key, spread evenly across 40 gateways. How many requests per second for that key does each gateway see?",
+      "value": 500,
+      "tolerance": 0.1,
+      "unit": "req/s",
+      "explanation": "20,000 / 40 = 500 req/s per gateway. That rate is what makes leasing worthwhile for this key: a batch of 20 lasts a gateway only 40 ms, far less than a 1 s lease TTL.",
+      "ref": "unit-1-rate-limiter-service.md#6-deep-dive-2-hot-keys-leases-and-the-price-of-accuracy-032038"
+    },
+    {
+      "id": "C2-010",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "hot-key",
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "The 20,000 req/s key is under its limit. Each gateway leases tokens in batches of 20 from the shared limiter. Roughly how many shared limiter decisions per second does the key now cost?",
+      "value": 1000,
+      "tolerance": 0.2,
+      "unit": "req/s",
+      "explanation": "Each lease is one decision taking 20 tokens, so 20,000 / 20 = 1,000 decisions/s (≈ 2,000 store ops with read + compare-and-swap), a 20× cut. Over its limit the saving is smaller, because gateways keep polling for new batches; the deny cache is what bounds that case.",
+      "ref": "unit-1-rate-limiter-service.md#6-deep-dive-2-hot-keys-leases-and-the-price-of-accuracy-032038"
+    },
+    {
+      "id": "C2-011",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "rate-limiting"
+      ],
+      "difficulty": 1,
+      "prompt": "The limiter denies a request and computes that the next token will be available in 120 ms. What should the gateway send in Retry-After?",
+      "choices": [
+        "Retry-After: 1",
+        "Retry-After: 0",
+        "Retry-After: 0.12",
+        "No Retry-After header, because the wait is under a second"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Retry-After is in whole seconds (or an HTTP date); round up and never send 0, or clients that honour it retry immediately and hot-loop against the hottest key. A fractional value isn't valid in the delta-seconds form, and omitting the header leaves SDKs to guess, which usually means retrying at once.",
+      "ref": "unit-1-rate-limiter-service.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C2-012",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "rate-limiting",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "A request is under its API-key limit but over its account limit. Both limits belong to the same account. What is the best design for charging?",
+      "choices": [
+        "Co-locate the account's counters on one shard (a hash tag on the account id) and evaluate both in one atomic script that charges only if every limit passes",
+        "Check both limits, then charge both in a second round trip if both passed",
+        "Charge the key limit first; if the account limit then rejects, decrement the key counter",
+        "Charge only the account limit; key limits are advisory"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "One script on one shard is atomic and costs one round trip. Check-then-charge across gateways is racy (two gateways both see room) and costs extra round trips. A compensating decrement can run after another gateway has already been rejected because of the temporary charge, and can be lost if the gateway dies. Making key limits advisory drops a contract. Across unrelated entities (key vs IP), independent charging with a bounded over-charge is the fallback.",
+      "ref": "unit-1-rate-limiter-service.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C2-013",
+      "type": "multi",
+      "tags": [
+        "api-design",
+        "observability",
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL fields the limiter's decision response should carry, beyond allowed or denied.",
+      "choices": [
+        "Remaining, retry-after and reset values, to build the client's headers",
+        "The violated rule's id and the rules snapshot version",
+        "The decision source: store, lease, fallback, fail-open or fail-closed",
+        "The complete rules snapshot, so the gateway can double-check",
+        "The request body, so the limiter can log it"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Headers need remaining/retry/reset; support and rollback need the rule and its version; operators need to know when decisions were degraded. The snapshot is already in the gateway's memory and is far too big per response, and the limiter has no business with request bodies (cost, privacy).",
+      "ref": "unit-1-rate-limiter-service.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C2-014",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "storage",
+        "ttl"
+      ],
+      "difficulty": 2,
+      "prompt": "A GCRA counter is written with a TTL equal to its ResetAfter (TAT − now). Why is that exactly the right TTL?",
+      "choices": [
+        "When now reaches TAT the bucket is full, which is indistinguishable from an absent key, so the store can forget it with no sweeper and memory follows active keys",
+        "It guarantees the key expires before the next request arrives",
+        "It makes denied requests cheaper, because expired keys need no read",
+        "It prevents clock skew between gateways"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A full bucket and a never-seen key are the same state, so expiring at that instant loses nothing and keeps memory proportional to keys active within one burst period. It doesn't predict arrivals, a denial still reads the key, and TTLs have nothing to do with gateway clock skew (the store's clock fixes that).",
+      "ref": "unit-1-rate-limiter-service.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C2-015",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "reliability",
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "During an incident the backends are overloaded for everyone, and the gateways start shedding 30% of requests regardless of customer. Which status should the shed requests get?",
+      "choices": [
+        "503 Service Unavailable with Retry-After: the condition isn't attributable to the client",
+        "429 Too Many Requests, because a limiter rejected them",
+        "403 Forbidden, so clients stop retrying",
+        "200 with an error body, to avoid alarming client dashboards"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "429 means 'you exceeded your allowance: slow down'; global overload is the service's condition, so 503 (with Retry-After) is correct and feeds every client's breaker and retry budget. 403 tells clients they're not allowed at all, and a 200 hides the failure from every client and monitor.",
+      "ref": "unit-1-rate-limiter-service.md#3-api-and-data-model-010016"
+    },
+    {
+      "id": "C2-016",
+      "type": "single",
+      "tags": [
+        "architecture",
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "Your callers include Envoy proxies owned by another team and internal services in three languages. Where should the shared limit decision run?",
+      "choices": [
+        "A separate decision service that every caller calls, accepting one extra hop (≈ 0.1–0.5 ms in-AZ) and another tier to operate",
+        "A client library inside each service, reimplemented in each language",
+        "A filter in your own API gateway only",
+        "In the counter store's clients on the backends, after the request has been processed"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "With heterogeneous callers you can't put one library everywhere, and a gateway filter doesn't see traffic that bypasses your gateway. A decision service gives one implementation of the script, leases and fail policy. Three reimplementations drift apart; deciding after processing defeats the purpose.",
+      "ref": "unit-1-rate-limiter-service.md#4-high-level-design-where-the-limiter-sits-016025"
+    },
+    {
+      "id": "C2-017",
+      "type": "single",
+      "tags": [
+        "replication",
+        "rate-limiting",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Why shouldn't the counter store's replicas serve the limiter's reads?",
+      "choices": [
+        "Every decision is a read-modify-write; deciding on a stale replica read admits against old counts, which is the lost-update bug again",
+        "Replicas are slower than primaries",
+        "Replicas don't store TTLs",
+        "Reading from replicas would double memory usage"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The decision and the update must see the same, current value; a replica that lags lets several gateways admit against the same tokens. Replicas exist for failover. Speed, TTL handling and memory aren't the reason.",
+      "ref": "unit-1-rate-limiter-service.md#4-high-level-design-where-the-limiter-sits-016025"
+    },
+    {
+      "id": "C2-018",
+      "type": "multi",
+      "tags": [
+        "operations",
+        "availability",
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "The rules publisher is down for an hour. Gateways hold the last snapshot in memory and evaluate each override's expires_at themselves. Select ALL that are true.",
+      "choices": [
+        "Gateways keep enforcing the last snapshot's rules",
+        "API traffic is unaffected",
+        "A temporary override expires on time",
+        "New rule changes take effect only when the publisher is back",
+        "Every limiter decision now needs a rules-database read"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "Rules are configuration held in gateway memory: the publisher is on the control path, not the data path. Because expiry is in the snapshot and evaluated locally, overrides still expire on time. Only new changes wait. Nothing on the hot path reads the database, before or during the outage.",
+      "ref": "unit-1-rate-limiter-service.md#4-high-level-design-where-the-limiter-sits-016025"
+    },
+    {
+      "id": "C2-019",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "rate-limiting",
+        "atomicity"
+      ],
+      "difficulty": 2,
+      "prompt": "Four gateways implement a shared limiter as GET bucket → compute in Go → SET bucket. 1,600 concurrent requests arrive for one key with burst 100 at one instant. Roughly how many are admitted?",
+      "choices": [
+        "Far more than 100, often nearly all 1,600: gateways read the same old state and overwrite each other's writes",
+        "Exactly 100, because Redis commands are atomic",
+        "About 400: each gateway admits its own 100",
+        "Fewer than 100, because concurrent SETs conflict and are rejected"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Each command is atomic but the sequence isn't: between a gateway's GET and SET others read the same 'full' bucket, and the last write wins (a lost update). The lab's reference run admits 1,598 of 1,600. 'Each admits 100' assumes a per-gateway share that doesn't exist, and SETs never conflict; that's the problem.",
+      "ref": "unit-1-rate-limiter-service.md#5-deep-dive-1-one-atomic-decision-per-request-025032"
+    },
+    {
+      "id": "C2-020",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "atomicity",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A per-minute limit is implemented as INCR key, then EXPIRE key 60 as a separate command. Occasionally a gateway is killed between the two. What is the symptom, and the fix?",
+      "choices": [
+        "The key never gets a TTL, so the counter never resets and that customer is rejected until someone deletes the key; set the TTL in the same atomic step, or put the window id in the key name",
+        "The counter resets too early; use a longer TTL",
+        "Two gateways double-count; use a mutex in the gateway",
+        "Nothing visible; Redis sets a default TTL"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Two commands are two chances to die in between. Without a TTL the count grows past the limit forever. A script or SET … NX EX before INCR makes it atomic; a key per window (q:{acct}:12:04) means a lost TTL only leaks memory, because the next window uses a new key. A gateway mutex can't coordinate processes, and Redis has no default TTL.",
+      "ref": "unit-1-rate-limiter-service.md#5-deep-dive-1-one-atomic-decision-per-request-025032"
+    },
+    {
+      "id": "C2-021",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "algorithms",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "Why is GCRA the default algorithm for a limiter whose state lives in a shared store?",
+      "choices": [
+        "It keeps one int64 per key (the theoretical arrival time), so a decision is one atomic update of one value, with the same decisions as a token bucket",
+        "It is the only algorithm that allows bursts",
+        "It needs no clock",
+        "It is exact over any window, unlike a token bucket"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "GCRA makes token-bucket decisions with a single value, which suits compare-and-swap or a three-line script, and its TTL is simply 'time until full'. A token bucket also allows bursts; GCRA very much needs a clock (ideally the store's); and it has the same burst + rate × T semantics as a token bucket, not more exactness.",
+      "ref": "unit-1-rate-limiter-service.md#5-deep-dive-1-one-atomic-decision-per-request-025032"
+    },
+    {
+      "id": "C2-022",
+      "type": "numeric",
+      "tags": [
+        "concurrency",
+        "atomicity"
+      ],
+      "difficulty": 3,
+      "prompt": "8 gateways update the same key with read + compare-and-swap at the same instant. In each round exactly one swap wins and every loser reloads and retries. How many compare-and-swap attempts does it take until all 8 have succeeded?",
+      "value": 36,
+      "tolerance": 0.15,
+      "unit": "attempts",
+      "explanation": "Round 1: 8 attempts, 1 wins; round 2: 7; … round 8: 1. Total 8 + 7 + … + 1 = 8 × 9 / 2 = 36 attempts to admit 8 requests. Contention cost grows ≈ k²/2, which is why hot keys need a server-side script (no retries) or leases.",
+      "ref": "unit-1-rate-limiter-service.md#5-deep-dive-1-one-atomic-decision-per-request-025032"
+    },
+    {
+      "id": "C2-023",
+      "type": "single",
+      "tags": [
+        "clocks",
+        "rate-limiting",
+        "fairness"
+      ],
+      "difficulty": 3,
+      "prompt": "Two gateways share one GCRA key but compute 'now' from their own clocks; gateway B's clock is 50 ms ahead. The limit is 100 req/s (T = 10 ms), and 300 req/s is offered, split evenly. What happens?",
+      "choices": [
+        "The total stays at ≈ 100/s, but almost all of it goes to B: A sees B's TATs as extra debt and its clients are starved",
+        "The total doubles to ≈ 200/s, because each gateway has its own view",
+        "Both gateways admit ≈ 50/s; 50 ms is negligible",
+        "Every request is rejected until the clocks are synchronised"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Skew of five intervals makes every TAT written by B look 50 ms further in the future to A, so A's requests appear over the limit. In the lab the split goes from 50/50 to 0.7/101 per second while the total doesn't move, so an aggregate dashboard shows nothing. Use the store's clock (TIME inside the script). Doubling would need independent state; nothing forces a total rejection.",
+      "ref": "unit-1-rate-limiter-service.md#5-deep-dive-1-one-atomic-decision-per-request-025032"
+    },
+    {
+      "id": "C2-024",
+      "type": "numeric",
+      "tags": [
+        "rate-limiting",
+        "algorithms"
+      ],
+      "difficulty": 2,
+      "prompt": "GCRA with rate 10 req/s and burst 5. A fresh key receives 6 requests at the same instant. The first 5 are admitted. What RetryAfter does the 6th get, in milliseconds?",
+      "value": 100,
+      "tolerance": 0.05,
+      "unit": "ms",
+      "explanation": "T = 1/10 s = 100 ms and τ = 5 × T = 500 ms. After 5 admissions TAT = now + 500 ms; the 6th would set newTAT = now + 600 ms, which exceeds τ by 100 ms, so RetryAfter = newTAT − τ − now = 100 ms: one interval, the time for one token to refill.",
+      "ref": "unit-1-rate-limiter-service.md#5-deep-dive-1-one-atomic-decision-per-request-025032"
+    },
+    {
+      "id": "C2-025",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "In the lab's Limiter, what does a DENIED request cost the store?",
+      "choices": [
+        "One read (Load) and no write",
+        "One read and one compare-and-swap, to record the attempt",
+        "Nothing: denials are decided locally",
+        "A delete of the key, to reset it"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The limiter must read the key's TAT to know it's over the limit, but a denial changes nothing, so it writes nothing (TestLimiter_DenialsReadButNeverWrite). Writing on denial would double the store's load from a key that is over its limit. Without a lease client's deny cache there is no local information, and deleting the key would reset the limit.",
+      "ref": "unit-1-rate-limiter-service.md#5-deep-dive-1-one-atomic-decision-per-request-025032"
+    },
+    {
+      "id": "C2-026",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "correctness"
+      ],
+      "difficulty": 3,
+      "prompt": "A store without TTLs holds a TAT from an hour ago for a key that has been idle. Burst is 5. Which expression in the GCRA computation keeps the next instant from admitting thousands of requests?",
+      "choices": [
+        "tat = max(stored, now)",
+        "newTAT = tat + n × T",
+        "admit iff newTAT − now ≤ τ",
+        "RetryAfter = newTAT − τ − now"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Without the clamp, tat is an hour in the past, newTAT − now stays negative for ≈ 36,000 increments of 100 ms, and every one of them is admitted. Clamping a past TAT to now treats idle time as 'full', never as credit beyond the burst (TestLimiter_StaleStateIsTreatedAsFull). The other lines are correct but don't stop the runaway.",
+      "ref": "unit-1-rate-limiter-service.md#5-deep-dive-1-one-atomic-decision-per-request-025032"
+    },
+    {
+      "id": "C2-027",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "atomicity",
+        "rate-limiting"
+      ],
+      "difficulty": 3,
+      "prompt": "In the read + compare-and-swap loop, which value must be passed as the swap's 'old' value?",
+      "choices": [
+        "Exactly the value Load returned (0 if the key was absent), not the clamped tat",
+        "max(stored, now), the value used in the computation",
+        "now, so the swap succeeds on fresh keys",
+        "Any value; the store compares only TTLs"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Compare-and-swap succeeds only if the store still holds what you read. The clamped tat exists only in your computation: comparing against it makes every swap on a fresh or stale key lose until ErrContended, a bug that busy-key tests never catch. The store compares values, not TTLs.",
+      "ref": "unit-1-rate-limiter-service.md#5-deep-dive-1-one-atomic-decision-per-request-025032"
+    },
+    {
+      "id": "C2-028",
+      "type": "numeric",
+      "tags": [
+        "hot-key",
+        "rate-limiting",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "40 gateways lease tokens for one key in batches of 20. At most how many tokens beyond the pool's own bound (burst + rate × window) can the fleet admit in a short window?",
+      "value": 800,
+      "tolerance": 0.1,
+      "unit": "requests",
+      "explanation": "After every decision each gateway holds fewer than one batch, so up to N × batch = 40 × 20 = 800 tokens taken earlier can be spent alongside everything the pool can give now. For a 20,000 req/s key that's ≈ 4% of one second's allowance. Over long windows leases are exact, because every token was taken from the pool first.",
+      "ref": "unit-1-rate-limiter-service.md#6-deep-dive-2-hot-keys-leases-and-the-price-of-accuracy-032038"
+    },
+    {
+      "id": "C2-029",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "rate-limiting"
+      ],
+      "difficulty": 3,
+      "prompt": "Which traffic pattern drives a leasing fleet to its worst-case overshoot (burst + N × (batch − 1) at one instant)?",
+      "choices": [
+        "Every gateway holds a part-spent lease, the fleet goes quiet long enough for the pool to refill, then traffic arrives everywhere at once",
+        "Steady Poisson traffic at 3× the limit",
+        "All traffic going through one gateway",
+        "Traffic exactly at the limit, spread evenly"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The overshoot is tokens taken earlier and spent later, stacked on a refilled pool; a quiet period lets the pool refill while leases are still live. The lab's synchronized burst admits 1,190 at once for 10 nodes, burst 200, batch 100. Steady random traffic never comes close (1,199 vs a bound of 2,200 in the sweep), and one gateway holds at most one batch.",
+      "ref": "unit-1-rate-limiter-service.md#6-deep-dive-2-hot-keys-leases-and-the-price-of-accuracy-032038"
+    },
+    {
+      "id": "C2-030",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "rate-limiting",
+        "trade-offs"
+      ],
+      "difficulty": 3,
+      "prompt": "A gateway sees 2.5 req/s of an ordinary key (a 100 req/s limit spread over 40 gateways). Should it lease batches of 20 for that key?",
+      "choices": [
+        "No: a batch would last 8 s, longer than the lease TTL, so most of it expires unspent while missing from the pool, causing wrong rejections elsewhere",
+        "Yes: leasing always reduces store load",
+        "Yes, but only if the batch is refunded on expiry",
+        "No, because leases are only correct for keys over their limit"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Lease only where batch ≪ per-gateway rate × lease TTL and N × batch ≪ burst. Here 20 ≫ 2.5 × 1 s, and 40 × 20 = 800 ≫ the burst, so stranded tokens would empty the pool. Refunding late tokens releases old allowance into the present (the overshoot leases must avoid). Leases are correct for any key; the issue is cost and accuracy.",
+      "ref": "unit-1-rate-limiter-service.md#6-deep-dive-2-hot-keys-leases-and-the-price-of-accuracy-032038"
+    },
+    {
+      "id": "C2-031",
+      "type": "multi",
+      "tags": [
+        "hot-key",
+        "rate-limiting",
+        "sharding"
+      ],
+      "difficulty": 2,
+      "prompt": "One customer's key sends 60,000 decisions/s to a single shard during a retry storm. Select ALL measures that actually reduce what that shard has to do.",
+      "choices": [
+        "Leases with a deny cache for that key on each gateway",
+        "A local per-gateway pre-filter at ≈ 2× the key's fair share in front of the shared check",
+        "Routing the key to one limiter node that owns its state in memory",
+        "Adding more shards to the cluster",
+        "Letting replicas serve the key's reads"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Leases turn per-request decisions into per-batch ones and the deny cache stops paying a round trip per rejection; a local pre-filter rejects most of the storm before it reaches the store; routing by key removes the store from the path (and moves the hot spot to one node). More shards don't split one key, and replica reads break atomicity.",
+      "ref": "unit-1-rate-limiter-service.md#6-deep-dive-2-hot-keys-leases-and-the-price-of-accuracy-032038"
+    },
+    {
+      "id": "C2-032",
+      "type": "single",
+      "tags": [
+        "hot-key",
+        "rate-limiting",
+        "trade-offs"
+      ],
+      "difficulty": 3,
+      "prompt": "Why does the lab's lease client cache a denial until a whole batch could be available, rather than until one token refills?",
+      "choices": [
+        "Waiting for one token makes every node dribble single tokens out of the pool at several round trips each, so over the limit leases cost MORE store ops than direct checks; the price is up to batch × T of extra wait",
+        "Because a one-token wait would admit more than the limit",
+        "Because GCRA can't compute the wait for a single token",
+        "To make Retry-After values round numbers"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Measured in the lab: with a one-token wait (or no deny cache at all) the over-the-limit store load was ≈ 4,600–4,800 ops/s, above the 4,024 without leases; with the batch-sized wait it fell to ≈ 2,000 at a batch of 20. A one-token wait never over-admits, and GCRA computes any wait exactly; round numbers are irrelevant.",
+      "ref": "unit-1-rate-limiter-service.md#6-deep-dive-2-hot-keys-leases-and-the-price-of-accuracy-032038"
+    },
+    {
+      "id": "C2-033",
+      "type": "numeric",
+      "tags": [
+        "availability",
+        "rate-limiting",
+        "failure-modes"
+      ],
+      "difficulty": 2,
+      "prompt": "The Pro plan allows 100 req/s per key across 40 gateways. When the shared store is unreachable, each gateway falls back to a local limit at 2× its fair share. What rate does each gateway allow per key, in req/s?",
+      "value": 5,
+      "tolerance": 0.1,
+      "unit": "req/s",
+      "explanation": "Fair share = 100 / 40 = 2.5 req/s; 2× = 5 req/s per gateway (burst scaled the same way). Customers under their limit are almost unaffected despite uneven balancing, and a storm is held to ≈ 2× its limit instead of passing at full rate (fail open) or being rejected entirely (fail closed).",
+      "ref": "unit-1-rate-limiter-service.md#7-deep-dive-3-when-the-limiter-fails-rule-rollout-and-10-038045"
+    },
+    {
+      "id": "C2-034",
+      "type": "single",
+      "tags": [
+        "timeouts",
+        "availability",
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "A counter shard hangs without closing connections. The limiter client has a connect timeout but no per-request timeout. What happens?",
+      "choices": [
+        "Requests for keys on that shard wait until the OS gives up, gateway worker pools fill, and the whole API fails: the limiter becomes the outage",
+        "Only keys on that shard are affected, and they fail open immediately",
+        "The connect timeout fires and the client reconnects",
+        "Redis Cluster automatically redirects the requests to a replica"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "An established connection that never answers isn't covered by a connect timeout. Every request waits, and because worker pools are shared, keys on healthy shards stop being served too. A 5–10 ms request timeout plus a breaker bounds the damage to a few milliseconds for 1/18 of keys. Failover takes seconds and doesn't rescue requests already waiting.",
+      "ref": "unit-1-rate-limiter-service.md#7-deep-dive-3-when-the-limiter-fails-rule-rollout-and-10-038045"
+    },
+    {
+      "id": "C2-035",
+      "type": "single",
+      "tags": [
+        "replication",
+        "availability",
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "A counter shard fails over to an asynchronously replicated replica that lost the last ≈ 1 s of writes. What do clients see, and should replication be synchronous?",
+      "choices": [
+        "Each key on the shard gets at most one fresh burst; keep replication asynchronous, because synchronous replication would add a round trip to every decision to protect soft state",
+        "Customers are locked out until the counters are rebuilt; use synchronous replication",
+        "Limits double permanently; rebuild counters from logs before serving",
+        "Nothing visible; replicas never lose writes"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Limiter state is soft: losing a second of it gives each key a fresh burst, a small and bounded over-admission. Synchronous replication would add a replica round trip to 800k decisions/s for a property nobody pays for. Lost state means more admissions, not lockouts; nothing doubles permanently; asynchronous replicas do lose recent writes.",
+      "ref": "unit-1-rate-limiter-service.md#7-deep-dive-3-when-the-limiter-fails-rule-rollout-and-10-038045"
+    },
+    {
+      "id": "C2-036",
+      "type": "multi",
+      "tags": [
+        "operations",
+        "rate-limiting",
+        "deploys"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL practices that would have prevented or quickly contained a typo that changed the Pro plan from 100 to 10 req/s.",
+      "choices": [
+        "Shadow mode: the new rule logs 'would deny' with its version before enforcing",
+        "A canary to one gateway, then one AZ, with automatic rollback when the rule's deny rate jumps",
+        "An alert on total denials across all rules",
+        "Rollback by publishing the previous immutable snapshot version",
+        "Editing the rules database directly and waiting for caches to expire"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "Shadow mode and a canary catch the change before or right after it reaches customers, and versioned snapshots make rollback one refresh (≈ 10 s). An aggregate denial alert is noisy, because denials are what limiters do, so the jump is hidden; a per-rule baseline catches it. Editing the database with no version or staging is how the incident happened.",
+      "ref": "unit-1-rate-limiter-service.md#7-deep-dive-3-when-the-limiter-fails-rule-rollout-and-10-038045"
+    },
+    {
+      "id": "C2-037",
+      "type": "single",
+      "tags": [
+        "reliability",
+        "rate-limiting",
+        "errors"
+      ],
+      "difficulty": 3,
+      "prompt": "A Guard in fail-open mode wraps the shared limiter. The primary returns ErrBadArgument because a request's cost exceeds the burst. What should the Guard do?",
+      "choices": [
+        "Return the error: it's the caller's bug, not a store outage, and admitting it would let an unbounded request through",
+        "Admit the request (fail open) and count a degraded decision",
+        "Deny the request with Retry-After of one second",
+        "Retry the primary with cost 1"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Only failures of the store (errors, timeouts, contention) trigger the fail mode. A bad argument passes through, and so does the caller's own cancellation (TestGuard_BadArgumentsAndCallerCancellationAreNotOutages). Failing open would admit an impossible request; denying with a retry hint invites a retry that can never succeed; silently changing the cost misbills.",
+      "ref": "unit-1-rate-limiter-service.md#7-deep-dive-3-when-the-limiter-fails-rule-rollout-and-10-038045"
+    },
+    {
+      "id": "C2-038",
+      "type": "single",
+      "tags": [
+        "availability",
+        "rate-limiting",
+        "failure-modes"
+      ],
+      "difficulty": 2,
+      "prompt": "10 gateways; one tenant storms at 3,000 req/s against a 1,000 req/s limit; a well-behaved tenant sends 500 req/s; the store is down for 5 s. Which fail mode lets the good tenant through at ≈ 500/s while holding the storm near 2× its limit?",
+      "choices": [
+        "Fail local, with each gateway enforcing 2 × the limit / 10",
+        "Fail open",
+        "Fail closed",
+        "Fail open for the good tenant, closed for the storming one, chosen at runtime by traffic volume"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Measured in the lab during the outage: fail open admits the storm at ≈ 2,994/s; fail closed admits nothing for either tenant; fail local holds the storm at ≈ 2,074/s and passes the good tenant at ≈ 495/s. Choosing a mode per tenant from traffic volume is what the local fallback already does, without guessing which tenant is 'bad'.",
+      "ref": "unit-1-rate-limiter-service.md#7-deep-dive-3-when-the-limiter-fails-rule-rollout-and-10-038045"
+    },
+    {
+      "id": "C2-039",
+      "type": "numeric",
+      "tags": [
+        "multi-region",
+        "rate-limiting",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "STRETCH. Three regions each enforce a customer's global 3,000 req/s limit against a sum of per-region counters replicated asynchronously with ≈ 200 ms lag. Roughly how many requests can be over-admitted in one lag window if all three regions see the customer at full rate?",
+      "value": 1800,
+      "tolerance": 0.25,
+      "unit": "requests",
+      "explanation": "Each region is blind to the others' last ≈ 200 ms, so each can admit up to the full rate during that window: ≈ regions × rate × lag = 3 × 3,000 × 0.2 s ≈ 1,800 requests beyond the limit. Rebalanced per-region shares avoid this, at the cost of lagging demand shifts.",
+      "ref": "unit-1-rate-limiter-service.md#stretch-multi-region-limits-and-the-cost-model"
+    },
+    {
+      "id": "C2-040",
+      "type": "single",
+      "tags": [
+        "multi-region",
+        "rate-limiting",
+        "trade-offs"
+      ],
+      "difficulty": 2,
+      "prompt": "STRETCH. Which multi-region design is the usual default for a contracted global API rate, and why?",
+      "choices": [
+        "Per-region limits with shares rebalanced every few seconds from observed usage (with a floor per region): no cross-region call on the hot path, approximately global",
+        "A home region that decides for all traffic: exact, and only ≈ 80 ms slower",
+        "A static equal split per region: simplest and exact",
+        "Synchronous replication of every counter to every region"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Rebalancing keeps decisions local and follows traffic shifts within the rebalance period. A home region adds ≈ 80 ms to two thirds of traffic and makes one region a global dependency, fine only for low-rate, high-value limits. A static split is wrong whenever traffic is uneven, and synchronous cross-region replication adds a cross-region RTT to every decision.",
+      "ref": "unit-1-rate-limiter-service.md#stretch-multi-region-limits-and-the-cost-model"
+    },
+    {
+      "id": "C2-041",
+      "type": "single",
+      "tags": [
+        "cost",
+        "rate-limiting",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "STRETCH. A limiter makes 800k decisions/s at ≈ 200 B each way, and two thirds of calls cross an AZ boundary. Which conclusion does the cost model support?",
+      "choices": [
+        "Cross-AZ traffic can cost about as much as the store instances, an argument for AZ-local shards (with the limit split per AZ) or for leases",
+        "Instance cost dominates, so traffic can be ignored",
+        "The limiter is free because it stores only ≈ 45 MB",
+        "Moving to synchronous replication would reduce the cost"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "800k × 200 B × 2 ≈ 320 MB/s ≈ 830 TB/month, two thirds cross-AZ ≈ 550 TB; at ≈ $0.01/GB in each direction (verify for your cloud) that's ≈ $11k/month, comparable to ≈ 36 small instances. Memory is irrelevant to cost here, and synchronous replication adds traffic.",
+      "ref": "unit-1-rate-limiter-service.md#stretch-multi-region-limits-and-the-cost-model"
+    }
+  ]
+}

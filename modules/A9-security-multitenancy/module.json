@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "id": "A9",
+  "slug": "security-multitenancy",
+  "title": "Security and multi-tenancy",
+  "track": "A",
+  "status": "written",
+  "core": true,
+  "summary": "Threat modelling for system design: authn/authz at scale, secrets, encryption at rest/in transit, tenant isolation models, audit trails.",
+  "hours": {
+    "core": 10,
+    "stretch": 2,
+    "total": 12
+  },
+  "prerequisites": [
+    "A1"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/A9-security-multitenancy",
+    "readme": "modules/A9-security-multitenancy/README.md",
+    "quiz": "modules/A9-security-multitenancy/quiz.json",
+    "design_exercise": "modules/A9-security-multitenancy/design-exercise.md",
+    "teachback": "modules/A9-security-multitenancy/teachback.md",
+    "lab": "labs/a9",
+    "solution": "solutions/a9"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Who can do what, to whose data",
+      "file": "modules/A9-security-multitenancy/unit-1-authorization-tenancy.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "tenancy"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Protecting data and proving what happened",
+      "file": "modules/A9-security-multitenancy/unit-2-data-protection-audit.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "auditlog",
+        "envelope"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "tenancy",
+      "title": "Tenant-scoped data access and a weighted-fair noisy-neighbour limiter",
+      "unit": 1,
+      "core": true
+    },
+    {
+      "package": "auditlog",
+      "title": "Tamper-evident (hash-chained) audit log with per-tenant chains and anchors",
+      "unit": 2,
+      "core": true
+    },
+    {
+      "package": "envelope",
+      "title": "Envelope encryption sketch: KEK/DEK, AAD, rewrap rotation, crypto-shredding",
+      "unit": 2,
+      "core": false
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Threat-model a feature in five minutes (assets, actors, trust boundaries, STRIDE-lite, ranked abuse cases) and turn the top threats into testable security requirements.",
+      "core": true
+    },
+    {
+      "text": "Decide where tokens are validated and where authorisation decisions are made (gateway, service, data layer), choose between RBAC, ABAC and relationship-based models, and state the revocation trade-off.",
+      "core": true
+    },
+    {
+      "text": "Prevent BOLA/IDOR and confused-deputy bugs structurally by authorising at the data layer, and explain 404 versus 403 for out-of-scope objects.",
+      "core": true
+    },
+    {
+      "text": "Implement a tenant-scoped data-access layer whose API shape makes cross-tenant reads and writes impossible (labs/a9/tenancy).",
+      "core": true
+    },
+    {
+      "text": "Choose between silo, pool and bridge/cell isolation for tenants of different sizes, and enforce the boundary with scoped repositories, row-level security (per-transaction variables) and composite keys.",
+      "core": true
+    },
+    {
+      "text": "Implement a per-tenant weighted-fair limiter with borrowing and a cap, size concurrency limits with Little's law, and explain why a global limit does not protect against noisy neighbours (labs/a9/tenancy).",
+      "core": true
+    },
+    {
+      "text": "Design secrets management (workload identity, dynamic short-lived credentials, rotation without downtime with dual-key windows) and keep secrets out of env vars, images and logs.",
+      "core": true
+    },
+    {
+      "text": "Explain which attacker each encryption layer defeats (TLS, mTLS, volume, TDE, application-level, tokenisation) and where verification and identity checks are required.",
+      "core": true
+    },
+    {
+      "text": "Explain envelope encryption and key hierarchies: KEK/DEK, AAD binding, DEK caching and KMS cost, rotation by re-wrapping, nonce limits, BYOK and crypto-shredding.",
+      "core": true
+    },
+    {
+      "text": "Implement a tamper-evident hash-chained audit log, state exactly which attacks the chain detects and which need an external anchor, and design the audit pipeline (what to log, separation of duties, retention, PII) (labs/a9/auditlog).",
+      "core": true
+    },
+    {
+      "text": "Map compliance frameworks (SOC 2, PCI DSS, GLBA/NCUA, FFIEC) onto concrete controls and evidence, and design data lifecycle, retention and just-in-time privileged access.",
+      "core": true
+    },
+    {
+      "text": "Implement an envelope-encryption sketch (KMS wrap/unwrap/rewrap, per-tenant DEKs, AAD, shredding) with the standard library (labs/a9/envelope).",
+      "core": false
+    },
+    {
+      "text": "Explain Zanzibar-style relationship-based access control: tuples, rewrites, usersets, consistency tokens and the new enemy problem.",
+      "core": false
+    },
+    {
+      "text": "Explain Merkle trees and transparency logs: inclusion and consistency proofs, domain separation, signed tree heads and witnesses.",
+      "core": false
+    }
+  ]
+}

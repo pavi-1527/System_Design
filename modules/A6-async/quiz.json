@@ -1,0 +1,1630 @@
+{
+  "module": "A6",
+  "title": "Async: queues, logs, outbox, sagas, backpressure",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "A6-001",
+      "type": "numeric",
+      "tags": [
+        "queues",
+        "backpressure",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Posting capacity is 100 transfers/s and a queue sits in front of it. Arrivals run at 130/s for 10 minutes and then drop to 80/s. Assume evenly spaced arrivals. How many minutes after the surge ends until the queue is empty?",
+      "value": 15,
+      "tolerance": 0.1,
+      "unit": "min",
+      "explanation": "Backlog at the end of the surge = (130 - 100) x 600 s = 18,000. After the surge the queue drains only at the spare capacity, 100 - 80 = 20/s, so 18,000 / 20 = 900 s = 15 minutes. The tempting answer of 10 minutes (the length of the surge) ignores that the drain rate is the spare capacity, not the full capacity; answering 3 minutes divides by the full 100/s.",
+      "ref": "unit-1-queues-logs.md#1-when-a-queue-helps-and-when-it-hides-a-problem"
+    },
+    {
+      "id": "A6-002",
+      "type": "single",
+      "tags": [
+        "queues",
+        "async",
+        "backpressure"
+      ],
+      "difficulty": 2,
+      "prompt": "A team puts a queue between its transfers API and the core-banking adapter and returns 202 immediately. The API dashboards show 0% errors and a 15 ms p99. During a 30-minute surge at 1.5x the adapter's capacity, members complain that transfers take over an hour to post. What did the queue change about the failure?",
+      "choices": [
+        "It moved the failure from a visible rejection at the API into invisible waiting time in the queue, which only the age of the oldest message exposes",
+        "It removed the failure: a 202 response tells the client the work will complete within a bounded time, so only the app's own timeout was misconfigured",
+        "It raised the core's effective capacity during the surge, because queued work is processed in larger and more efficient batches",
+        "It caused the surge itself, because adding a queue to the path always raises the arrival rate the core sees"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A queue converts overload into waiting time (queue length / drain rate). With 50/s of excess for 1,800 s the backlog is 90,000 and the last item waits 15 minutes; draining takes another 37 minutes at 40/s spare capacity. The API metrics stay green because they measure acceptance, not completion, so you need age-of-oldest-message and a status for the member. A 202 only promises acceptance, not bounded completion. The queue does not add capacity to the core; the adapter's rate is unchanged. And a queue does not change the arrival rate, although impatient retries from members can add to it.",
+      "ref": "unit-1-queues-logs.md#1-when-a-queue-helps-and-when-it-hides-a-problem"
+    },
+    {
+      "id": "A6-003",
+      "type": "single",
+      "tags": [
+        "queues",
+        "backpressure",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "A server finishes 100 requests/s behind a FIFO queue. Clients time out after 1 s and retry up to twice. A 5-second spike at 200 req/s ends and the fresh load returns to 80/s, yet goodput stays at zero and the queue keeps growing for minutes. What is the best explanation and the fix?",
+      "choices": [
+        "The queued requests are still legitimate work and will finish soon, so the right operational move is to wait and keep the retries enabled",
+        "The queue is deeper than timeout x capacity, so everything served is already abandoned and retries add more attempts: a metastable failure. Drop expired work and bound the queue by age",
+        "Clients retry too late after a timeout, so shortening the client timeout to 200 ms so they retry sooner restores goodput once the spike has ended and the queue has had time to drain",
+        "The spike permanently reduced the server's capacity (for example by exhausting its memory), so the only real fix is to add servers until the queue drains"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Once the queue holds more than timeout x service rate (1 s x 100/s = 100 entries) the head of the line has always waited longer than the client was willing to, so the server does 100% busy work for 0% goodput. Retries then add attempts faster than stale ones drain (80 fresh/s x 3 attempts = 240/s against a capacity of 100/s), a feedback loop that persists after the trigger is gone. The capacity of the server did not change; adding servers might eventually drain it but does not explain or prevent the loop. Waiting does not work because the offered attempts exceed capacity. A shorter timeout makes clients retry sooner and adds even more attempts.",
+      "ref": "unit-1-queues-logs.md#1-when-a-queue-helps-and-when-it-hides-a-problem"
+    },
+    {
+      "id": "A6-004",
+      "type": "numeric",
+      "tags": [
+        "queues",
+        "estimation",
+        "backpressure"
+      ],
+      "difficulty": 1,
+      "prompt": "A consumer handles 250 messages/s and the user gives up after 10 seconds. What is the longest queue, in messages, that still holds work worth doing?",
+      "value": 2500,
+      "tolerance": 0.1,
+      "unit": "messages",
+      "explanation": "Queue length is waiting time in disguise: wait = length / drain rate. A message at position n waits n / 250 s, so anything beyond 10 s x 250/s = 2,500 messages will be served after the user has left. Size the queue by age (latency budget x service rate), not by an arbitrary count.",
+      "ref": "unit-1-queues-logs.md#1-when-a-queue-helps-and-when-it-hides-a-problem"
+    },
+    {
+      "id": "A6-005",
+      "type": "multi",
+      "tags": [
+        "queues",
+        "async"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL situations where putting a queue between producer and consumer is the right tool.",
+      "choices": [
+        "A balance lookup that must return the current balance within 300 ms",
+        "Sending a 'statement ready' email that the member does not wait for",
+        "Arrivals permanently exceed the consumer's capacity by 20%, and the team wants to avoid returning errors to callers",
+        "Month-end statement generation: arrivals run at 1.5x worker capacity for 2 minutes then at half capacity, and a wait of up to about a minute is acceptable"
+      ],
+      "answer": [
+        1,
+        3
+      ],
+      "explanation": "A queue is a latency buffer when the burst is short, the average is below capacity and the added wait fits the job: the statement run builds a backlog of 0.5C x 120 s = 60C of work (about a minute of wait at the end) and drains at 0.5C in 2 more minutes, and the email is work nobody waits for. The balance lookup needs the answer inline, so a queue just adds latency. Permanently exceeding capacity makes the queue debt: it grows without bound and turns visible errors into unbounded waiting.",
+      "ref": "unit-1-queues-logs.md#1-when-a-queue-helps-and-when-it-hides-a-problem"
+    },
+    {
+      "id": "A6-006",
+      "type": "single",
+      "tags": [
+        "queues",
+        "estimation",
+        "latency"
+      ],
+      "difficulty": 2,
+      "prompt": "Under a simple random-arrival model (M/M/1), mean time in the system is service time divided by (1 - utilisation). Moving a stage from 80% to 95% utilisation changes its mean time in the system by roughly what factor?",
+      "choices": [
+        "It stays the same until utilisation reaches 100%",
+        "About 4x (from 5 service times to 20)",
+        "About 15x, because the last percent points are the most expensive",
+        "About 1.2x, because utilisation only rose 15 points"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "At 80% the factor is 1 / 0.2 = 5 service times; at 95% it is 1 / 0.05 = 20, so 4x worse for 15 points of utilisation. This is the shape to remember, not a prediction for your traffic: queues form well before 100% when arrivals are random, which is why capacity planning targets 50-70% utilisation. 1.2x treats the relationship as linear, 15x overshoots (it would apply moving from about 50% to 97%), and the 'nothing until 100%' view ignores random arrivals.",
+      "ref": "unit-1-queues-logs.md#1-when-a-queue-helps-and-when-it-hides-a-problem"
+    },
+    {
+      "id": "A6-007",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "async",
+        "queues"
+      ],
+      "difficulty": 2,
+      "prompt": "The fraud team found a bug in how it consumed TransferPosted events and needs to rebuild features from the last 7 days. The events went through a queue where each consumer's ack deletes the message. What is the most accurate statement?",
+      "choices": [
+        "Lower the consumer group's committed offset on the queue to the start of the 7-day window and it will re-read the history from there",
+        "Reset the visibility timeout to zero and the queue will redeliver everything that was acknowledged during the last 7 days to the new consumer",
+        "Enable a dead-letter queue on the source queue and the broker will copy every already acknowledged message into it for later replay",
+        "The acked messages are gone; a log with at least 7 days of retention would let a new consumer group re-read them from an earlier offset"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A queue forgets a message when it is acked; replay needs a data model that keeps records until retention removes them and tracks position per consumer, which is a log. Visibility timeouts only hide unacked messages, a DLQ receives messages that failed repeatedly (not acked ones), and 'lowering the committed offset' is how you replay a log, not a queue. The cost of the log is storage: 8,000 events/s x 1 KB x 7 days is about 4.8 TB before replication.",
+      "ref": "unit-1-queues-logs.md#2-queues-versus-logs-and-partitions"
+    },
+    {
+      "id": "A6-008",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "queues",
+        "ordering"
+      ],
+      "difficulty": 2,
+      "prompt": "Image tasks take 50 ms, but one in 10,000 takes 30 s. Design A: 10 competing consumers on a queue. Design B: a 10-partition log with one consumer per partition. A 30-second task arrives. Which statement describes the difference?",
+      "choices": [
+        "In A every consumer stalls until the slow task finishes because they share one lock and one ack; in B nothing is delayed at all because partitions are independent",
+        "In both designs the slow task delays every message in the system equally, because the broker serialises delivery of all messages across consumers",
+        "In B the broker detects the slow task and moves it to another partition automatically, so it never blocks the messages queued behind it",
+        "In A one consumer is busy for 30 s while the other nine continue; in B every later message in that partition waits behind it while the other nine partitions are unaffected"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A queue's unit of progress is the message, so a slow message occupies one consumer and others overtake it (at the price of ordering). A log's unit of progress is the offset within a partition, so a slow message blocks everything behind it in that partition, in order. The other statements reverse or blur this: competing consumers do not stall each other, partitions are independent only of other partitions (not of their own backlog), and brokers do not relocate a message to dodge a slow consumer.",
+      "ref": "unit-1-queues-logs.md#2-queues-versus-logs-and-partitions"
+    },
+    {
+      "id": "A6-009",
+      "type": "numeric",
+      "tags": [
+        "messaging",
+        "estimation",
+        "ordering"
+      ],
+      "difficulty": 2,
+      "prompt": "Peak load is 20,000 events/s. One consumer instance handles 200 events/s, and each partition can be read by only one member of the consumer group. What is the minimum number of partitions needed to run enough consumers?",
+      "value": 100,
+      "tolerance": 0.1,
+      "unit": "partitions",
+      "explanation": "20,000 / 200 = 100 consumers are needed, and a group cannot have more active consumers than partitions, so at least 100 partitions; in practice round up for headroom (128). The byte rate (20 MB/s at 1 KB per event) is not the constraint here; the consumers' processing rate is.",
+      "ref": "unit-1-queues-logs.md#2-queues-versus-logs-and-partitions"
+    },
+    {
+      "id": "A6-010",
+      "type": "multi",
+      "tags": [
+        "messaging",
+        "ordering"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL statements that are true of a partitioned log.",
+      "choices": [
+        "A partition is read by at most one member of a given consumer group at a time",
+        "Records in different partitions have no defined order relative to each other",
+        "Adding a partition to a topic keyed with hash(key) mod N leaves every existing key on the same partition",
+        "Records in the same partition are totally ordered by offset"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "Per-partition order, no cross-partition order and one active reader per partition per group are the defining properties. The last statement is false: changing N changes hash mod N, so most keys (about 96% when going from 24 to 25 partitions) land on a different partition than their history.",
+      "ref": "unit-1-queues-logs.md#2-queues-versus-logs-and-partitions"
+    },
+    {
+      "id": "A6-011",
+      "type": "numeric",
+      "tags": [
+        "messaging",
+        "estimation",
+        "queues"
+      ],
+      "difficulty": 3,
+      "prompt": "A log receives 5,000 messages/s of 1 KB (take 1 KB = 1,000 bytes), retains them for 3 days and uses replication factor 3. Roughly how much disk does it need in total, ignoring indexes and compression?",
+      "value": 3.9,
+      "tolerance": 0.15,
+      "unit": "TB",
+      "explanation": "5,000 x 1,000 B = 5 MB/s. Three days is 259,200 s, so 5 MB/s x 259,200 s = 1.296 TB for one copy, and 3 copies make about 3.9 TB. Forgetting the replication factor gives 1.3 TB; using one day instead of three gives 1.3 TB for all copies.",
+      "ref": "unit-1-queues-logs.md#2-queues-versus-logs-and-partitions"
+    },
+    {
+      "id": "A6-012",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "ordering",
+        "partitioning"
+      ],
+      "difficulty": 3,
+      "prompt": "A 24-partition topic is keyed by account ID with hash(key) mod N and holds days of history. Someone adds a 25th partition on the running system. What is the most important consequence for consumers that rely on per-account ordering?",
+      "choices": [
+        "Consumers must be restarted so they rebalance, but ordering is unaffected once they have rejoined the group and resumed from their offsets",
+        "Nothing changes for ordering, because the broker re-hashes the existing records onto the 25 partitions in the background as soon as the new partition is added",
+        "Only keys that land on the new partition are affected, so about 4% of accounts see out-of-order events during the transition and the rest are fine",
+        "About 96% of keys now map to a different partition than their history, so per-key order can break while old and new events for an account sit on different partitions"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Placement is computed by the producer at write time and records never move, so after N changes the same key goes somewhere else while its older records stay behind. A key stays on its partition only with probability about 1/(N+1). Mitigations are to over-provision up front, or to create a new topic, dual-publish, drain the old one and cut over. The broker does not re-hash old records, the affected set is almost every key and not just the new partition's, and restarting consumers does nothing about records that sit in two places.",
+      "ref": "unit-1-queues-logs.md#2-queues-versus-logs-and-partitions"
+    },
+    {
+      "id": "A6-013",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "ordering"
+      ],
+      "difficulty": 1,
+      "prompt": "In a consumer group, what is the committed offset of a partition?",
+      "choices": [
+        "The number of messages the group has processed since it was created",
+        "The offset of the last message the group finished processing",
+        "The offset of the next message the group will read after a restart",
+        "The offset of the newest message in the partition"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "By convention the committed offset is the next one to read: committing message 17 stores 18. The 'last processed' reading is off by one, 'newest in the partition' is the end offset (the difference between that and the committed offset is the lag), and a count of processed messages is not an offset at all once retention has deleted old records.",
+      "ref": "unit-1-queues-logs.md#3-consumer-groups-ordering-and-rebalancing"
+    },
+    {
+      "id": "A6-014",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "ordering",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "A topic has 12 partitions and you start 15 consumers in the same group. What happens?",
+      "choices": [
+        "Twelve consumers each own one partition and the other three sit idle as standbys",
+        "All 15 consume: twelve own one partition each and three share partitions, so throughput rises by 25% over twelve consumers",
+        "The three extra consumers each receive a copy of the whole topic, because consumers beyond the partition count are given replicas of the stream",
+        "The group refuses to start until the partition count is raised to at least 15, because assignment requires one partition per member"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A partition is assigned to at most one member of a group at a time, to preserve its order, so useful parallelism is capped by the partition count. The idle three are failover capacity. Copies for other consumers come from separate consumer groups, not from extra members, and the broker does not refuse extra members.",
+      "ref": "unit-1-queues-logs.md#3-consumer-groups-ordering-and-rebalancing"
+    },
+    {
+      "id": "A6-015",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "partitioning",
+        "multitenancy"
+      ],
+      "difficulty": 2,
+      "prompt": "Events are keyed by tenant ID on a 12-partition topic. One credit union generates 40% of all events; its partition's consumer falls further behind every minute while the other consumers are mostly idle. Adding four consumers changes nothing. What should you do?",
+      "choices": [
+        "Increase max.poll.records so the hot partition's single consumer reads larger batches and drains the backlog faster",
+        "Switch the whole topic to random partitioning so load spreads evenly, and sort out per-tenant ordering afterwards if anyone complains",
+        "Use a finer key (tenant plus account) or a dedicated topic for the giant tenant, because the partition is the unit of parallelism",
+        "Keep adding consumers until the lag stops growing, since each new consumer takes a share of the hot partition's backlog"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "All of that tenant's traffic is in one partition and a partition has one consumer, so extra consumers have nothing to read. A finer key spreads the tenant over many partitions while keeping each account ordered; a dedicated topic isolates the giant. Larger batches do not give a single thread more throughput, and random partitioning silently destroys per-tenant and per-account ordering for every consumer that relied on it.",
+      "ref": "unit-1-queues-logs.md#3-consumer-groups-ordering-and-rebalancing"
+    },
+    {
+      "id": "A6-016",
+      "type": "numeric",
+      "tags": [
+        "messaging",
+        "estimation",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A consumer group pauses for 30 s during a rebalance while 3,000 events/s keep arriving. Its capacity is 4,500 events/s. How many seconds after consumption resumes until the lag is gone?",
+      "value": 60,
+      "tolerance": 0.1,
+      "unit": "s",
+      "explanation": "The pause creates 30 x 3,000 = 90,000 events of lag. After the pause the group has 4,500 - 3,000 = 1,500 events/s of spare capacity, so the lag clears in 90,000 / 1,500 = 60 s. If rebalances recur every minute the group never catches up, which is why rolling deploys with eager rebalancing hurt.",
+      "ref": "unit-1-queues-logs.md#3-consumer-groups-ordering-and-rebalancing"
+    },
+    {
+      "id": "A6-017",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "concurrency",
+        "ordering"
+      ],
+      "difficulty": 3,
+      "prompt": "A consumer hands polled messages to 8 worker goroutines and commits the offset of the highest message any worker has finished. The worker for offset 7 finishes before the worker for offset 5, and then the process crashes. What happens after restart?",
+      "choices": [
+        "Consumption restarts at offset 5, so offset 7 is processed twice, which is the only cost of committing the highest finished offset",
+        "Consumption restarts at offset 8, so offsets 5 and 6 (never finished) are lost; only the contiguous watermark is safe to commit",
+        "Nothing is lost, because the broker tracks which individual offsets were acknowledged and redelivers 5 and 6 to the next owner",
+        "The consumer is fenced because its commit skipped offsets, and the partition is skipped until an operator resets the group"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Offsets are a single position per partition, not per-message acknowledgements: committing 8 declares everything below it done. Only the contiguous prefix of finished offsets (here, nothing past 5 until 5 and 6 finish) is safe to commit; the unfinished tail is then redelivered, which an idempotent consumer tolerates. A log has no per-message ack, so it cannot remember that 7 finished but 5 did not, and fencing concerns stale generations, not this bug.",
+      "ref": "unit-1-queues-logs.md#3-consumer-groups-ordering-and-rebalancing"
+    },
+    {
+      "id": "A6-018",
+      "type": "multi",
+      "tags": [
+        "messaging",
+        "consistency",
+        "idempotency"
+      ],
+      "difficulty": 3,
+      "prompt": "A rebalance increments the consumer group's generation. Select ALL statements that are true.",
+      "choices": [
+        "The generation check rolls back the paused member's external side effects",
+        "A member that was paused through the rebalance may already have performed side effects (database writes, HTTP calls) that the generation check cannot undo",
+        "A commit from a member that still holds the previous generation is rejected",
+        "After a rebalance, polled-but-uncommitted messages can be delivered again, possibly to a different member"
+      ],
+      "answer": [
+        1,
+        2,
+        3
+      ],
+      "explanation": "The generation fences the offset bookkeeping: stale commits are refused, and the new owner resumes from the committed offset, so uncommitted work is repeated. It cannot touch effects in other systems, which is why consumers need idempotency or fencing tokens of their own. Rolling back external side effects is not something a coordinator can do.",
+      "ref": "unit-1-queues-logs.md#3-consumer-groups-ordering-and-rebalancing"
+    },
+    {
+      "id": "A6-019",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "operations",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A 12-pod consumer group on the eager rebalance protocol pauses all consumption for about 20 s every time a pod restarts, and lag never recovers during rolling deploys. Which change attacks the cause directly?",
+      "choices": [
+        "Raise max.poll.records so each poll reads bigger batches and the group catches up faster after every restart",
+        "Use cooperative rebalancing and static membership, so a restarting pod does not make the whole group give up its partitions",
+        "Turn on auto-commit so offsets are committed more often and the group has less to catch up on after each pause",
+        "Double the partition count to 24 so each pod owns fewer partitions and therefore pauses for less time during a rebalance"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The cost is that every membership change makes every member give up all partitions. Cooperative rebalancing revokes only the partitions that move, and static membership lets a restarted pod rejoin within the session timeout without any rebalance. More partitions still rebalance, auto-commit changes nothing about pauses (and risks loss), and bigger batches make a slow member more likely to miss its poll deadline.",
+      "ref": "unit-1-queues-logs.md#3-consumer-groups-ordering-and-rebalancing"
+    },
+    {
+      "id": "A6-020",
+      "type": "numeric",
+      "tags": [
+        "messaging",
+        "partitioning",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A topic has six partitions with six equally fast consumers, but one key carries 50% of all messages and therefore one partition carries at least 50% of the load. What is the best possible speed-up of the group over a single consumer?",
+      "value": 2,
+      "tolerance": 0.1,
+      "unit": "times",
+      "explanation": "The group finishes when its slowest partition finishes. That partition holds at least half of all the work, so the best case is a single consumer doing half the work: speed-up = 1 / 0.5 = 2x, no matter how many other consumers exist. This is why per-partition lag, not total lag, is the number to watch, and why the key matters more than the consumer count.",
+      "ref": "unit-1-queues-logs.md#3-consumer-groups-ordering-and-rebalancing"
+    },
+    {
+      "id": "A6-021",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "reliability",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "A consumer polls a batch of 10 messages and commits all 10 offsets immediately, then processes them one by one. It crashes after finishing the side effect of the 6th. What happens to the other four?",
+      "choices": [
+        "They are processed twice, because the replacement re-reads the whole batch from the last offset it saw acknowledged",
+        "They are never processed: the replacement starts after offset 10, so the messages are lost (at-most-once)",
+        "They are redelivered, because the broker notices that processing of the batch did not finish and rewinds the offsets for the next member",
+        "They are moved to a dead-letter queue automatically, because the broker treats a consumer crash as a failed delivery"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Committing first records the work as done before it is. After the crash the committed offset is past all 10, so messages 7-10 are lost. Re-reading the batch would happen only if the commit came after processing. A broker cannot know the application's work was unfinished (it only sees offsets or acks), and dead-lettering is triggered by repeated failure, not by a crash.",
+      "ref": "unit-1-queues-logs.md#4-delivery-guarantees-and-commit-timing"
+    },
+    {
+      "id": "A6-022",
+      "type": "numeric",
+      "tags": [
+        "messaging",
+        "reliability",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "A consumer polls a batch of 20 messages, applies each message's side effect in order and commits once at the end of the batch. It crashes right after completing the side effect of the 12th message. How many messages will have their side effect applied a second time after the replacement starts?",
+      "value": 12,
+      "tolerance": 0.1,
+      "unit": "messages",
+      "explanation": "Nothing from this batch was committed, so the replacement re-reads all 20; the 12 whose effects already happened are applied again and the remaining 8 are applied for the first time. Committing after each message would shrink the duplicate window to one message; committing once per batch makes the window the whole batch, which is why idempotency is required.",
+      "ref": "unit-1-queues-logs.md#4-delivery-guarantees-and-commit-timing"
+    },
+    {
+      "id": "A6-023",
+      "type": "single",
+      "tags": [
+        "queues",
+        "messaging",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "A queue's visibility timeout is 30 s and a worker needs 45 s to process one message. What happens?",
+      "choices": [
+        "After 30 s the message becomes visible again and a second worker starts the same job while the first is still running",
+        "The queue extends the visibility timeout automatically for as long as the worker keeps its connection open, so processing finishes once",
+        "The message is deleted at 30 s because the lease expired, so the work is lost without any second attempt",
+        "The first worker is terminated by the broker at 30 s so that a second worker can safely take the message"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Visibility timeout is a lease on the message: if the ack does not arrive in time, the queue assumes the worker died and hands the message out again. The fix is a timeout above p99 processing time or periodic extension while working, plus an idempotent job. Brokers do not extend leases on their own, they do not delete a message that has not been acked, and they cannot kill your process.",
+      "ref": "unit-1-queues-logs.md#4-delivery-guarantees-and-commit-timing"
+    },
+    {
+      "id": "A6-024",
+      "type": "multi",
+      "tags": [
+        "messaging",
+        "idempotency",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL realistic sources of duplicate messages in an at-least-once pipeline.",
+      "choices": [
+        "A producer retries after a timeout although the first attempt was appended",
+        "A consumer that commits before processing and never crashes",
+        "A rebalance moves a partition to a new member that restarts from the committed offset",
+        "A consumer crashes after applying the effect but before committing"
+      ],
+      "answer": [
+        0,
+        2,
+        3
+      ],
+      "explanation": "Ambiguous timeouts, the window between effect and commit, and rebalances all lead to redelivery of work that may already have happened. A consumer that commits first and never crashes processes each message once; committing first produces loss on a crash, not duplicates.",
+      "ref": "unit-1-queues-logs.md#4-delivery-guarantees-and-commit-timing"
+    },
+    {
+      "id": "A6-025",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "idempotency",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "A consumer reads topic A, calls the core-banking REST API to post a credit, then writes a result to topic B using Kafka transactions with exactly-once processing enabled. The process crashes after the core call but before the transaction commits. What is true after restart?",
+      "choices": [
+        "The core call is rolled back when the Kafka transaction aborts, because the abort covers all effects of the batch",
+        "The transaction aborts and the input is read again, so the core call is repeated: it needs its own idempotency key",
+        "The core call is not repeated, because exactly-once processing means every effect in the pipeline happens once",
+        "The broker retries the HTTP call itself using the transaction ID, so the core receives the credit exactly once"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Kafka transactions make writes to Kafka topics and the consumed offsets atomic. A side effect outside Kafka cannot be rolled back by an abort, and the replayed input triggers it again. Exactly-once in this context is bounded by the broker's own operations. Brokers do not issue your HTTP calls.",
+      "ref": "unit-1-queues-logs.md#4-delivery-guarantees-and-commit-timing"
+    },
+    {
+      "id": "A6-026",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "idempotency",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "A consumer credits accounts in Postgres from an ordered log with one consumer per partition. Which design gives effectively-once processing without broker transactions?",
+      "choices": [
+        "Rely on the broker's idempotent producer setting, which deduplicates repeated deliveries to the consumer",
+        "Commit the offset to the broker first, then update the balance, so a redelivered message is never seen twice",
+        "Store the partition's next offset in the same database transaction as the balance change, and seek to it on start",
+        "Update the balance, then commit the offset to the broker asynchronously in a background thread so throughput stays high"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "When the position and the effect are one atomic write, a crash leaves both or neither, and a redelivered record is recognised by its offset being below the stored one. Committing first can lose a message, committing later can repeat it, and the idempotent producer only dedupes the producer's own retries, not consumer-side redelivery.",
+      "ref": "unit-1-queues-logs.md#4-delivery-guarantees-and-commit-timing"
+    },
+    {
+      "id": "A6-027",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "reliability"
+      ],
+      "difficulty": 1,
+      "prompt": "Why is a timer-based auto-commit dangerous when messages are processed asynchronously after poll()?",
+      "choices": [
+        "It prevents the consumer from joining a group because the coordinator rejects members that commit on a timer",
+        "It commits the positions of polled records, not finished ones, so a crash loses everything still in flight",
+        "It commits offsets for the wrong partition whenever messages are handed to other goroutines, so progress is recorded incorrectly",
+        "It commits too rarely, so after a crash the consumer always re-reads a large backlog and produces many duplicates"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Auto-commit records the position of what poll returned at the next poll after the interval, regardless of whether your goroutines finished. If they have not, a crash loses those messages. It is not about commit frequency, group membership or partitions.",
+      "ref": "unit-1-queues-logs.md#4-delivery-guarantees-and-commit-timing"
+    },
+    {
+      "id": "A6-028",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "idempotency",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "A colleague says: 'we use a broker that offers exactly-once delivery, so our consumer does not need to be idempotent.' What is the best response?",
+      "choices": [
+        "That is correct as long as the consumer always commits after processing, because then no message can be seen twice",
+        "That is correct: exactly-once delivery means each message is processed once, whatever the consumer does with it afterwards, including external side effects",
+        "That is correct if the broker is replicated across availability zones, because replication removes duplicate deliveries",
+        "The guarantee covers operations inside the broker; a crash between your external effect and the ack repeats the effect, so it must still be idempotent"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "End-to-end, exactly-once is a property of the whole pipeline: the broker cannot see whether your database write or HTTP call happened, and it cannot tell that two different messages carry the same business event. Commit order and replication change which failures you get, not whether an effect can repeat.",
+      "ref": "unit-1-queues-logs.md#4-delivery-guarantees-and-commit-timing"
+    },
+    {
+      "id": "A6-029",
+      "type": "single",
+      "tags": [
+        "outbox",
+        "messaging",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "A service commits its database transaction and then publishes an event. During deploys a small fraction of requests are killed between the two steps, and downstream systems drift from the ledger. What is the failure, and the structural fix?",
+      "choices": [
+        "Committed changes with no event; write the event as a row in an outbox table in the same transaction and let a relay publish it",
+        "Slow publishing; wrap the publish call in a retry loop inside the request so it eventually goes through",
+        "Events for changes that never happened; publish before committing so the broker always knows about the change first",
+        "Duplicate events; add a unique constraint on the broker topic so the second publish of an event is rejected"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The database and the broker are two systems, so a crash between the commit and the publish loses the event. Publishing first reverses the failure (phantom events for rolled-back changes). A retry loop in the request cannot help when the process itself dies, and a broker constraint does not address a message that was never sent. The outbox makes the announcement part of the transaction's data and moves delivery to an at-least-once relay.",
+      "ref": "unit-2-outbox-consumers.md#1-the-dual-write-problem-and-the-transactional-outbox"
+    },
+    {
+      "id": "A6-030",
+      "type": "numeric",
+      "tags": [
+        "outbox",
+        "estimation",
+        "reliability"
+      ],
+      "difficulty": 1,
+      "prompt": "0.05% of 1,000,000 daily requests are killed between the database commit and the publish. How many committed changes per day never get an event?",
+      "value": 500,
+      "tolerance": 0.1,
+      "unit": "events",
+      "explanation": "0.0005 x 1,000,000 = 500 per day. That is small enough to be invisible in dashboards and large enough that a reconciliation job has to exist forever.",
+      "ref": "unit-2-outbox-consumers.md#1-the-dual-write-problem-and-the-transactional-outbox"
+    },
+    {
+      "id": "A6-031",
+      "type": "single",
+      "tags": [
+        "outbox",
+        "messaging",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "A service publishes TransferPosted and then commits its transaction. Occasionally the commit fails with a serialization error. What does a downstream notification service observe?",
+      "choices": [
+        "Nothing at all, because the event is lost along with the failed transaction",
+        "An event for a transfer that never happened (a phantom event)",
+        "The event twice, once from the original publish and once when the commit is retried",
+        "The event, but only after the commit has been retried and finally succeeded"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Publish-then-commit trades lost events for phantom ones: the announcement is out before the state change is durable, and a failed commit leaves it dangling. 'Nothing' describes commit-then-publish with a crash, duplicates come from retries and relays, and a failed commit is not retried by the publish.",
+      "ref": "unit-2-outbox-consumers.md#1-the-dual-write-problem-and-the-transactional-outbox"
+    },
+    {
+      "id": "A6-032",
+      "type": "multi",
+      "tags": [
+        "outbox",
+        "messaging",
+        "ordering"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL statements that are true of a transactional outbox with a polling relay.",
+      "choices": [
+        "The outbox makes publishing exactly-once",
+        "The relay delivers at least once, so consumers can receive the same event ID twice",
+        "The state change and the event row commit atomically",
+        "Per-key ordering across several relays needs an explicit rule, such as not claiming a row while an earlier unsent row for the same key exists"
+      ],
+      "answer": [
+        1,
+        2,
+        3
+      ],
+      "explanation": "Atomic creation of the event with the state is the point of the pattern. The relay can crash after publishing and before marking the row sent, so duplicates are inevitable, and several relays can publish one key's rows out of order unless claiming is constrained. Exactly-once publishing would need the relay's publish and mark-sent to be atomic across the broker and the database, which is the problem the outbox exists to avoid.",
+      "ref": "unit-2-outbox-consumers.md#1-the-dual-write-problem-and-the-transactional-outbox"
+    },
+    {
+      "id": "A6-033",
+      "type": "single",
+      "tags": [
+        "outbox",
+        "consistency",
+        "ordering"
+      ],
+      "difficulty": 3,
+      "prompt": "A polling relay remembers the highest outbox id it has published and queries WHERE id > last. Months later a few events are missing downstream with no errors anywhere. What is the most likely cause?",
+      "choices": [
+        "The broker silently drops a small fraction of messages under load, and the relay has no way to notice that",
+        "Clock skew between the database and the relay made the relay skip rows whose timestamps were slightly in the future",
+        "Ids are assigned at insert, not commit: a slow transaction with a smaller id committed after the relay had moved past it",
+        "The relay's retries published duplicates, and the consumer's dedupe discarded events that it had never actually seen before"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Auto-increment values are allocated in insert order but become visible in commit order, so a relay with a high-water mark can skip a row that commits late. Polling on a sent flag (with claims) or reading the log in commit order (CDC) avoids it. A dropping broker or discarded duplicates would not make specific rows vanish permanently, and clock skew is irrelevant to an id comparison.",
+      "ref": "unit-2-outbox-consumers.md#1-the-dual-write-problem-and-the-transactional-outbox"
+    },
+    {
+      "id": "A6-034",
+      "type": "single",
+      "tags": [
+        "outbox",
+        "concurrency",
+        "ordering"
+      ],
+      "difficulty": 2,
+      "prompt": "Two relay instances poll the same outbox with no claim or lease. What do you observe?",
+      "choices": [
+        "Nothing unusual: the database prevents two readers from selecting the same unsent row at the same time",
+        "Every row is published exactly once, because both relays mark each row sent as soon as they have published it",
+        "Both publish the same rows, and can interleave one key's events out of order; a lease-based claim fixes it",
+        "The second relay blocks until the first one exits, because the first holds a lock on the whole outbox table"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Reads do not exclude each other: with no claim, both relays select the same unsent rows. A lease-based claim (UPDATE ... SET claimed_by, lease_until, with FOR UPDATE SKIP LOCKED to avoid blocking) assigns rows to one relay and lets another take over after the lease expires. Marking sent happens after publishing, so it cannot prevent the duplicate publish, and nothing blocks the second relay: plain reads do not take locks that exclude another reader for long.",
+      "ref": "unit-2-outbox-consumers.md#1-the-dual-write-problem-and-the-transactional-outbox"
+    },
+    {
+      "id": "A6-035",
+      "type": "single",
+      "tags": [
+        "outbox",
+        "concurrency",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "A relay's lease expired during a long GC pause and another relay took its rows and published them. When the first relay resumes it tries to mark its rows as sent. What should the mark-sent operation do?",
+      "choices": [
+        "Publish the rows again to be safe, then mark them sent, since the first publish may have been lost",
+        "Succeed only if the caller still holds the claim; otherwise report the lease was lost and stop",
+        "Always succeed, because the rows were published and the only purpose of the flag is to prevent further publishing",
+        "Delete the rows so that no other relay can publish them again after the pause"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "An ownership guard (claimed_by = me) stops a stale relay from finishing rows that another relay now owns. If it marked them sent while the new owner had not yet published them, a crash of the new owner would lose the event. Deleting or re-publishing makes things worse: more duplicates or lost rows.",
+      "ref": "unit-2-outbox-consumers.md#1-the-dual-write-problem-and-the-transactional-outbox"
+    },
+    {
+      "id": "A6-036",
+      "type": "single",
+      "tags": [
+        "outbox",
+        "operations",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "The outbox relay is down for an hour. What is the effect, and what should have alerted you?",
+      "choices": [
+        "Consumers receive all the events later but out of order, so the main risk is the order in which they are applied",
+        "The service stops accepting requests as soon as the outbox table fills, so the first alert is a spike in 5xx errors",
+        "Events committed during the hour are lost, because the relay never saw them and there is no other record of them",
+        "Events are delayed, not lost: they accumulate in the outbox, and the age of the oldest unsent row should have alerted you"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The events were committed with the state, so they are durable. They sit in the outbox until a relay publishes them. The risk is staleness, so the alert should be on oldest-unsent age (and relay liveness). Requests continue unless the table runs out of space, and ordering within a key is preserved by the relay when it catches up.",
+      "ref": "unit-2-outbox-consumers.md#1-the-dual-write-problem-and-the-transactional-outbox"
+    },
+    {
+      "id": "A6-037",
+      "type": "numeric",
+      "tags": [
+        "outbox",
+        "estimation",
+        "operations"
+      ],
+      "difficulty": 2,
+      "prompt": "A service commits 12 events per second. The outbox relay is down for one hour. How many rows are waiting in the outbox when it restarts?",
+      "value": 43200,
+      "tolerance": 0.1,
+      "unit": "rows",
+      "explanation": "12/s x 3,600 s = 43,200 rows. The relay then drains them in order at its own throughput, so consumers see a burst and need headroom or backpressure.",
+      "ref": "unit-2-outbox-consumers.md#1-the-dual-write-problem-and-the-transactional-outbox"
+    },
+    {
+      "id": "A6-038",
+      "type": "single",
+      "tags": [
+        "outbox",
+        "operations",
+        "databases"
+      ],
+      "difficulty": 3,
+      "prompt": "Which operational risk is specific to implementing the outbox with log tailing (CDC) on PostgreSQL logical replication?",
+      "choices": [
+        "Logical replication cannot see INSERT statements, only updates and deletes, so new outbox rows are invisible to it",
+        "The connector can only read committed outbox rows in a random order, so per-key ordering is lost",
+        "Row locks held by the connector while it reads the outbox block application writes to the same table",
+        "A stalled connector's replication slot makes the server retain WAL, which can fill the database disk"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A replication slot tells Postgres to keep WAL until the consumer has read it, so an inactive or lagging connector must be monitored. CDC reads in commit order and does not lock application rows. It does see inserts, which is exactly what the outbox connector reads.",
+      "ref": "unit-2-outbox-consumers.md#1-the-dual-write-problem-and-the-transactional-outbox"
+    },
+    {
+      "id": "A6-039",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "outbox",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "A consumer applies a credit in one database transaction and records the message ID in a dedupe table in a second transaction. Which failure produces a double credit?",
+      "choices": [
+        "Two different messages with different IDs arrive for two different transfers to the same account",
+        "The broker delivers the message once and the consumer acknowledges it after both transactions have committed normally",
+        "The process crashes after the credit commits and before the dedupe row is written, so the redelivery credits again",
+        "The credit transaction rolls back because of an error, so the redelivery is applied for the first time"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The effect and its record must commit together; with two transactions there is a window where one exists without the other. A normal single delivery, a rolled-back credit (which has no effect to repeat) and two distinct transfers are all handled correctly by this design.",
+      "ref": "unit-2-outbox-consumers.md#2-idempotent-consumers-and-dedupe"
+    },
+    {
+      "id": "A6-040",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "A consumer inserts the message ID into its dedupe table and commits, and only then applies the effect. The effect fails with a transient error. What happens when the broker redelivers?",
+      "choices": [
+        "The effect is applied on the second attempt, because the first attempt failed and so nothing was recorded",
+        "The consumer applies the effect twice, once for the original delivery and once for the redelivery",
+        "The ID is found, the message is skipped and acked, and the effect is never applied: the message is lost",
+        "The broker rejects the redelivery because it already knows the message ID from the first delivery"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Marking the message as seen before the effect turns every transient failure into a permanent loss. The dedupe record must be created in the same transaction as the effect so that a failed effect rolls it back and the retry can succeed. The broker has no knowledge of the application's dedupe table.",
+      "ref": "unit-2-outbox-consumers.md#2-idempotent-consumers-and-dedupe"
+    },
+    {
+      "id": "A6-041",
+      "type": "multi",
+      "tags": [
+        "idempotency",
+        "consistency",
+        "outbox"
+      ],
+      "difficulty": 3,
+      "prompt": "A consumer must add a credit (an increment, which is not naturally idempotent) for each message exactly once in effect. Select ALL designs that achieve this.",
+      "choices": [
+        "Send the message ID as the idempotency key to a downstream system that deduplicates by it",
+        "Check whether a credit with the same amount exists for the account in the last five minutes, then credit if not",
+        "For an ordered partition with one consumer, store the next offset in the same transaction as the update and skip records below it",
+        "Insert (consumer, message ID) with a unique constraint and apply the update in the same database transaction"
+      ],
+      "answer": [
+        0,
+        2,
+        3
+      ],
+      "explanation": "A unique dedupe key written atomically with the effect, an offset stored with the effect, and a downstream idempotency key all make a repeat a recognised no-op. Content-based dedupe fails both ways: two legitimate identical transfers get blocked, and two concurrent copies both pass the check before either has committed.",
+      "ref": "unit-2-outbox-consumers.md#2-idempotent-consumers-and-dedupe"
+    },
+    {
+      "id": "A6-042",
+      "type": "numeric",
+      "tags": [
+        "idempotency",
+        "estimation",
+        "outbox"
+      ],
+      "difficulty": 3,
+      "prompt": "Messages arrive at 2,000 per second. You keep a dedupe table with a 16-byte message ID for 7 days. Roughly how large is it in raw ID bytes, before row overhead and indexes?",
+      "value": 19.4,
+      "tolerance": 0.15,
+      "unit": "GB",
+      "explanation": "2,000/s x 604,800 s = about 1.21 billion IDs, times 16 bytes = about 19.4 GB of raw IDs. With row headers and a unique index the real footprint is a few times larger, which is why long retention pushes you toward offset-in-DB for ordered partitions or toward naturally idempotent effects.",
+      "ref": "unit-2-outbox-consumers.md#2-idempotent-consumers-and-dedupe"
+    },
+    {
+      "id": "A6-043",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "outbox",
+        "operations"
+      ],
+      "difficulty": 3,
+      "prompt": "A consumer prunes dedupe records after 24 hours. The broker retains 7 days and, after fixing a bug, an operator replays day 2. What happens?",
+      "choices": [
+        "The replay is rejected by the broker, which remembers the IDs of messages it has already delivered",
+        "The replayed messages' IDs are no longer in the table, so their effects are applied again",
+        "Nothing happens, because dedupe records are only needed for live traffic and replays bypass the consumer",
+        "The consumer crashes on the unique constraint, because the table still holds the IDs from day 2"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Dedupe retention must cover the longest redelivery or replay horizon you support. Otherwise old IDs look new. Replays go through the same consumer, so the table matters for them as much as for live traffic. The broker does not track application IDs, and a unique violation on an existing key is handled as 'already done', but here the key no longer exists. The fixes are longer retention, an offset-based mechanism, or naturally idempotent effects.",
+      "ref": "unit-2-outbox-consumers.md#2-idempotent-consumers-and-dedupe"
+    },
+    {
+      "id": "A6-044",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "integration",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "A consumer's effect is a call to a core-banking REST API that accepts a client-supplied reference. How do you make the consumer idempotent?",
+      "choices": [
+        "Generate a new random reference for each attempt, so that the core can tell the attempts apart and log them",
+        "Read the core's balance before calling and skip the call if the balance already looks high enough",
+        "Call the core first, then record the message ID in a dedupe table in a second transaction afterwards",
+        "Derive the reference deterministically from the event ID and send it on every attempt, so the core deduplicates"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A stable key derived from the event makes every retry the same request from the core's point of view. A fresh reference per attempt defeats deduplication, a dedupe row after the call leaves a crash window, and balance-based checks are racy and not tied to the specific event.",
+      "ref": "unit-2-outbox-consumers.md#2-idempotent-consumers-and-dedupe"
+    },
+    {
+      "id": "A6-045",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "messaging"
+      ],
+      "difficulty": 2,
+      "prompt": "A queue offers broker-side deduplication by message ID inside a 5-minute window. What does that protect against?",
+      "choices": [
+        "Duplicates that arrive a day later from a vendor retry, because the broker remembers every ID it has ever seen",
+        "Duplicates created by the producer's own retries within the window, not consumer crashes, redeliveries or upstream duplicates",
+        "All duplicates anywhere in the pipeline, because the broker sees every message that flows through it",
+        "Duplicates caused by a consumer crashing between the effect and the acknowledgment, since the broker remembers the ID"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Broker-side dedupe is a bounded convenience for producer retries. Consumer-side redelivery after a crash, a rebalance, or a vendor re-sending a business event with a new message ID are outside it, and anything older than the window is forgotten.",
+      "ref": "unit-2-outbox-consumers.md#2-idempotent-consumers-and-dedupe"
+    },
+    {
+      "id": "A6-046",
+      "type": "single",
+      "tags": [
+        "queues",
+        "operations",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "One message in partition 7 always crashes the handler and the consumer retries it forever. The total lag across the topic rises slowly while partition 7's lag climbs at its full arrival rate. What does this say about monitoring?",
+      "choices": [
+        "Alert on the CPU usage of the consumer pods, because a stuck handler always pegs its CPU",
+        "Alert on per-partition lag and time lag, because a sum over partitions hides a single stuck partition",
+        "Alert on total lag only, because the sum summarises every partition and is the most reliable single number",
+        "Alert on the number of partitions in the topic, because a stuck partition changes the partition count"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "A poison message blocks only its own partition, so 11 healthy partitions dilute the total. Per-partition lag (and the age of the oldest unprocessed message) pinpoints it. A crash-looping pod may even show low CPU, and partition count is static.",
+      "ref": "unit-2-outbox-consumers.md#3-poison-messages-dlqs-and-replay"
+    },
+    {
+      "id": "A6-047",
+      "type": "multi",
+      "tags": [
+        "queues",
+        "reliability",
+        "operations"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL failures that should go straight to the dead-letter queue instead of being retried on a schedule.",
+      "choices": [
+        "The core returned 503 for the last 90 seconds",
+        "A callback whose JSON can never be parsed",
+        "A deposit event that references a member whose account-created event has not arrived yet",
+        "A message that fails business validation, such as an unknown currency code"
+      ],
+      "answer": [
+        1,
+        3
+      ],
+      "explanation": "Permanent failures cannot succeed on retry, so retries only delay everything behind them. A 503 is transient and should be retried with backoff, and a missing prerequisite usually resolves when the earlier event lands, so it needs a delayed retry on a longer timescale, not an immediate DLQ.",
+      "ref": "unit-2-outbox-consumers.md#3-poison-messages-dlqs-and-replay"
+    },
+    {
+      "id": "A6-048",
+      "type": "single",
+      "tags": [
+        "queues",
+        "ordering",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "Per-account ordering matters. Message m for account A fails permanently, is parked in the DLQ, and the consumer continues with the next messages. What have you done?",
+      "choices": [
+        "Later messages for account A are processed before m, which reorders that account's stream",
+        "Nothing about ordering, because skipping a message never changes the relative order of the remaining ones",
+        "Preserved ordering, because the DLQ keeps the parked message in its original position for later replay",
+        "Stopped the whole topic, since a message in the DLQ blocks every consumer until it has been resolved"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Any scheme where one message waits while later ones proceed reorders that key. The choices are to block the key (availability cost for that account), accept reordering with version-guarded or commutative handlers, or block the partition. The DLQ keeps the message but not its position, and it does not block other consumers.",
+      "ref": "unit-2-outbox-consumers.md#3-poison-messages-dlqs-and-replay"
+    },
+    {
+      "id": "A6-049",
+      "type": "numeric",
+      "tags": [
+        "queues",
+        "estimation",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "A partition receives 80 messages/s and its consumer handles 85/s. A poison message stalls the consumer for 3 seconds before it is parked. How many seconds after the stall until the lag is cleared?",
+      "value": 48,
+      "tolerance": 0.1,
+      "unit": "s",
+      "explanation": "The stall builds 3 x 80 = 240 messages of lag. Spare capacity is 85 - 80 = 5/s, so clearing takes 240 / 5 = 48 s. High utilisation turns a brief stall into a long recovery, the same arithmetic as the backlog in Unit 1.",
+      "ref": "unit-2-outbox-consumers.md#3-poison-messages-dlqs-and-replay"
+    },
+    {
+      "id": "A6-050",
+      "type": "single",
+      "tags": [
+        "queues",
+        "operations",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "After deploying a fix you want to redrive 10,000 messages from a DLQ. Which approach is safest?",
+      "choices": [
+        "Let the consumer read the DLQ directly with no rate limit so the backlog finishes as quickly as possible",
+        "Delete the DLQ and ask the producers to resend the messages, since the originals can't be trusted",
+        "Send them through the normal idempotent consumer path with their original IDs, rate-limited, pausable and audited",
+        "Publish them all at once to the main topic with new random IDs so that nothing is treated as a duplicate"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Replay has a blast radius: unbounded redrive can recreate the overload, new IDs defeat dedupe for anything that partly succeeded the first time, and losing the DLQ loses evidence. Rate limiting, original IDs, pausing and an audit trail make a replay safe.",
+      "ref": "unit-2-outbox-consumers.md#3-poison-messages-dlqs-and-replay"
+    },
+    {
+      "id": "A6-051",
+      "type": "multi",
+      "tags": [
+        "queues",
+        "operations",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL pieces of information worth storing with a dead-lettered message.",
+      "choices": [
+        "The original payload and headers, verbatim",
+        "Only the error text, because the payload may be large",
+        "The error and stack trace, with attempt count and first and last failure times",
+        "The source topic, partition and offset (or message ID) and the tenant"
+      ],
+      "answer": [
+        0,
+        2,
+        3
+      ],
+      "explanation": "To diagnose, replay and audit later you need the original data, the failure context and where the message came from (including the tenant in a multi-tenant platform). An error string alone cannot be replayed or investigated.",
+      "ref": "unit-2-outbox-consumers.md#3-poison-messages-dlqs-and-replay"
+    },
+    {
+      "id": "A6-052",
+      "type": "numeric",
+      "tags": [
+        "messaging",
+        "estimation",
+        "reliability"
+      ],
+      "difficulty": 1,
+      "prompt": "A transfer is considered successful only if it synchronously calls four services in series, each 99.9% available. What is the best-case availability of the transfer path, in percent?",
+      "value": 99.6,
+      "tolerance": 0.001,
+      "unit": "%",
+      "explanation": "Serial dependencies multiply: 0.999^4 = 0.996, i.e. about 99.6% (roughly 2.9 hours of downtime per 30 days instead of 43 minutes). Publishing one event and letting each service subscribe removes the three non-essential services from the critical path.",
+      "ref": "unit-2-outbox-consumers.md#4-fan-out-with-topics-and-subscriptions"
+    },
+    {
+      "id": "A6-053",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "async",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "A new compliance subscriber needs every TransferPosted event from the last 30 days. Which design supports it?",
+      "choices": [
+        "Synchronous calls from the transfers service to the new subscriber, which will also cover older traffic",
+        "A queue per subscriber, since every queue keeps its messages for replay until they are explicitly deleted",
+        "A log with consumer groups and at least 30 days of retention, or a snapshot plus the log from a known offset",
+        "A push subscription that re-sends missed events on request, because the broker keeps all undelivered events"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A new consumer group can start at the earliest retained offset; for history older than retention you bootstrap from a snapshot taken at a known offset and then consume from there. A queue only contains messages published after it was created and deletes on ack. Push subscriptions do not store history, and synchronous calls only see new traffic.",
+      "ref": "unit-2-outbox-consumers.md#4-fan-out-with-topics-and-subscriptions"
+    },
+    {
+      "id": "A6-054",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "operations",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "An analytics group falls three days behind on a topic with 3-day retention. Its lag graph shows a flat, steady 4,000 messages. Why is that dangerous?",
+      "choices": [
+        "Retention only applies to messages that have been consumed, so unread messages are always kept",
+        "A flat lag graph means the consumer is idle and should be scaled down to save cost",
+        "Retention deletes unread messages, which caps how large the lag can look, so alert on skipped messages and time lag",
+        "A steady lag proves the consumer is keeping up, because the backlog is neither growing nor shrinking"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Lag is measured against what still exists, so once the oldest messages are deleted the number stops growing even though the consumer is losing data. Time lag (age at the committed offset) and a skipped/expired counter reveal it. A steady lag does not prove the consumer keeps up (it may be falling off the end), a flat graph does not mean it is idle, and retention applies regardless of consumption in a log.",
+      "ref": "unit-2-outbox-consumers.md#4-fan-out-with-topics-and-subscriptions"
+    },
+    {
+      "id": "A6-055",
+      "type": "numeric",
+      "tags": [
+        "messaging",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A topic receives 4,000 messages/s of 1 KB (about 4 MB/s). Five subscribers each receive every message. What is the total delivery rate, in MB/s?",
+      "value": 20,
+      "tolerance": 0.1,
+      "unit": "MB/s",
+      "explanation": "Fan-out multiplies egress: 4 MB/s x 5 subscribers = 20 MB/s. On a log the data is stored once, so storage does not scale with subscribers, but network egress (and its cost) does.",
+      "ref": "unit-2-outbox-consumers.md#4-fan-out-with-topics-and-subscriptions"
+    },
+    {
+      "id": "A6-056",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "api-design",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Which change to a published event schema is safe for existing subscribers within the same version?",
+      "choices": [
+        "Changing a field's type to a wider type, such as an integer to a string, which can hold the same data",
+        "Adding an optional field, which tolerant readers ignore",
+        "Removing a field that few subscribers use, since the few that do can be migrated later",
+        "Renaming a field, as long as the old name is documented as deprecated in the release notes"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Additive changes are compatible with tolerant readers. Renames, type changes and removals break any subscriber that depends on the old shape and require a new version published in parallel until the last consumer migrates.",
+      "ref": "unit-2-outbox-consumers.md#4-fan-out-with-topics-and-subscriptions"
+    },
+    {
+      "id": "A6-057",
+      "type": "single",
+      "tags": [
+        "saga",
+        "consistency",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "A transfer must touch the core banking system, the platform's database and a payment vendor's API. None of them can take part in a distributed transaction. How do you keep the outcome consistent?",
+      "choices": [
+        "Use two-phase commit across the three systems so that either all of them commit or none do",
+        "Retry every step until all of them succeed and never undo anything, so the final state is always complete",
+        "Run it as a saga: local steps with compensating actions, with progress persisted so it can resume or roll back",
+        "Wrap all three calls in one try/catch in the request handler and undo the earlier calls in the catch block"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A saga gets an eventually all-or-nothing outcome from local transactions plus explicit undo, and persisting its state lets a restarted process continue. Two-phase commit needs every participant to support prepare/commit, which vendor APIs generally do not, and it blocks on coordinator failure. Retrying forever never recovers from a definitive rejection, and a handler's catch block loses the plan when the process dies.",
+      "ref": "unit-3-sagas-backpressure.md#1-sagas-orchestration-versus-choreography"
+    },
+    {
+      "id": "A6-058",
+      "type": "single",
+      "tags": [
+        "saga",
+        "async",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Which flow is the best candidate for an orchestrated saga rather than choreography?",
+      "choices": [
+        "Invalidating a cache after a settings update, which needs no compensation and has no end-to-end deadline",
+        "A five-step money movement with compensations and deadlines, where operations must answer 'where is transfer 8841?'",
+        "Updating a search index after a profile change, which any interested service can do from the change event",
+        "Sending a welcome email after a member enrols, which is a single independent reaction to an enrolment event"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Orchestration centralises the state machine, timeouts and compensations, and gives one place to look up the end-to-end state, which a multi-step payment needs. The other examples are single, independent reactions to an event where choreography is simpler and an orchestrator would be overhead.",
+      "ref": "unit-3-sagas-backpressure.md#1-sagas-orchestration-versus-choreography"
+    },
+    {
+      "id": "A6-059",
+      "type": "single",
+      "tags": [
+        "saga",
+        "idempotency",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "An orchestrator calls the payment vendor, the vendor accepts, and the orchestrator is killed before it saves that the step completed. After restart, what must hold for the outcome to be safe?",
+      "choices": [
+        "The saga is abandoned and an operator pays the transfer manually after checking the vendor's statement",
+        "The orchestrator is guaranteed to have saved 'about to call' before the call, so nothing is ever repeated",
+        "The step is repeated with the same idempotency key and the vendor deduplicates by it",
+        "The vendor calls the orchestrator back with a new key so the original step can be matched later"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Calling a service and saving that fact are two systems, so a crash between them is always possible; the orchestrator repeats the call, and only a stable key makes the repeat harmless. Saving 'about to call' before the call does not tell you whether the call happened. Vendors do not call back with new keys, and abandoning the saga strands the funds.",
+      "ref": "unit-3-sagas-backpressure.md#1-sagas-orchestration-versus-choreography"
+    },
+    {
+      "id": "A6-060",
+      "type": "multi",
+      "tags": [
+        "saga",
+        "reliability",
+        "idempotency"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL things a saga orchestrator should do.",
+      "choices": [
+        "Apply a timeout to each step and treat it as an unknown outcome",
+        "Persist its state with a version so two runners cannot both advance the same saga",
+        "Use stable idempotency keys such as sagaID/step and sagaID/step/compensate for every call",
+        "Run compensations in the same order as the original steps"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Versioned state, stable keys and per-step deadlines are the core mechanics. Compensations run in reverse order, because later steps may depend on earlier ones (release the record before releasing the funds it refers to).",
+      "ref": "unit-3-sagas-backpressure.md#1-sagas-orchestration-versus-choreography"
+    },
+    {
+      "id": "A6-061",
+      "type": "numeric",
+      "tags": [
+        "saga",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A platform starts 1,000,000 sagas per day and each stays in flight for 10 minutes on average. About how many sagas are in flight at once on average?",
+      "value": 7000,
+      "tolerance": 0.15,
+      "unit": "sagas",
+      "explanation": "Little's law: arrival rate 1,000,000 / 86,400 = 11.6 per second, times 600 s = about 6,900, call it 7,000. A saga that waits holds a row of state, not a thread, so this is a storage and query-load question rather than a concurrency problem.",
+      "ref": "unit-3-sagas-backpressure.md#1-sagas-orchestration-versus-choreography"
+    },
+    {
+      "id": "A6-062",
+      "type": "single",
+      "tags": [
+        "saga",
+        "reliability",
+        "banking"
+      ],
+      "difficulty": 3,
+      "prompt": "The submit-to-network step of a transfer saga times out after 10 s, and experience says about 40% of such timeouts later turn out to have succeeded. What should the orchestrator do first?",
+      "choices": [
+        "Treat it as a failure and release the hold immediately, because a timeout means the vendor did not accept the transfer and no money has left",
+        "Treat it as a success and continue to the next step, because a timeout usually means the vendor accepted the request",
+        "Treat the outcome as unknown: retry the same idempotent call or look the transfer up by reference, and keep the funds held until you know",
+        "Retry with a fresh idempotency key so the vendor does not treat the retry as a duplicate of the timed-out attempt"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "A timeout says nothing about whether the vendor acted. Releasing funds on a timeout lets the transfer go out and the member spend the same money again. Continuing as if it succeeded risks the reverse. A fresh key on retry defeats deduplication and can submit the transfer twice.",
+      "ref": "unit-3-sagas-backpressure.md#2-compensations-pivots-and-isolation"
+    },
+    {
+      "id": "A6-063",
+      "type": "single",
+      "tags": [
+        "saga",
+        "reliability",
+        "operations"
+      ],
+      "difficulty": 3,
+      "prompt": "A saga's compensation 'release hold' fails for two hours because the core is in a nightly maintenance window. The orchestrator retried three times over 30 seconds and marked the saga FAILED. What is wrong with this design?",
+      "choices": [
+        "The saga should have skipped the compensation after the first failure to avoid hammering a core that is in maintenance",
+        "The orchestrator should retry the compensation forever with no backoff so it succeeds the moment the core returns",
+        "Nothing is wrong: a saga that cannot finish its compensation should simply be marked failed and left for the next day",
+        "Retries should span the outage and end in an alerting, resumable stuck state, because FAILED leaves the member's funds held"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Compensations must eventually run, so the retry horizon has to match realistic outages and exhaustion must page a human with a way to resume. Marking it failed hides the stranded hold, skipping the compensation strands the funds permanently, and unbounded immediate retries create a retry storm when the core returns.",
+      "ref": "unit-3-sagas-backpressure.md#2-compensations-pivots-and-isolation"
+    },
+    {
+      "id": "A6-064",
+      "type": "single",
+      "tags": [
+        "saga",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "In a transfer saga with the steps reserve funds, record transfer, submit to the payment network, post the ledger entry and notify the member, which step is the pivot?",
+      "choices": [
+        "Record transfer, because it is the step that writes to the platform's own database",
+        "Notify the member, because it is the last step and completes the saga from the member's point of view",
+        "Submit to the payment network, because after it succeeds the saga can only move forward",
+        "Reserve funds, because it is the first step and therefore the one everything else depends on"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The pivot is the point of no return: before it, failures can be rolled back with compensations; after it, remaining steps are retriable and retried forward. Once the network has accepted the transfer, money is on its way and you cannot simply undo it. Steps are not pivots by position or by who owns the data.",
+      "ref": "unit-3-sagas-backpressure.md#2-compensations-pivots-and-isolation"
+    },
+    {
+      "id": "A6-065",
+      "type": "multi",
+      "tags": [
+        "saga",
+        "idempotency",
+        "design"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL properties a saga compensation should have.",
+      "choices": [
+        "A literal inverse that deletes the original record from the ledger",
+        "Idempotent, because the orchestrator retries it",
+        "Not refusable by business rules, for example releasing a hold or appending a reversing entry",
+        "Safe to run even if the action it undoes never happened, and able to stop a late action"
+      ],
+      "answer": [
+        1,
+        2,
+        3
+      ],
+      "explanation": "Compensations are retried, may arrive before the action (after a timeout), and must always be possible. In banking they append new facts (a release, a reversal) rather than deleting history, which is what auditors need and what keeps them from being refused.",
+      "ref": "unit-3-sagas-backpressure.md#2-compensations-pivots-and-isolation"
+    },
+    {
+      "id": "A6-066",
+      "type": "single",
+      "tags": [
+        "saga",
+        "idempotency",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "An action times out, the orchestrator compensates it and rolls the saga back, and then the hung request finally reaches the service. What lets the service refuse it?",
+      "choices": [
+        "It recorded a tombstone when the compensation arrived first, and refuses the action with that key",
+        "The orchestrator closes the TCP connection after the timeout, which retracts the request before it is processed",
+        "The service checks whether the clock has advanced since the request was sent and refuses stale requests",
+        "The service always executes the most recent request it receives for a key and discards the older ones"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The service must remember compensations as well as actions, so that a late action for a key that was already undone becomes a no-op. Closing a connection does not retract a request already in flight, clock checks do not identify a cancelled key, and executing every late request is exactly the bug.",
+      "ref": "unit-3-sagas-backpressure.md#2-compensations-pivots-and-isolation"
+    },
+    {
+      "id": "A6-067",
+      "type": "single",
+      "tags": [
+        "saga",
+        "concurrency",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Two concurrent sagas each try to reserve $500 from an account with $600. Each reads the balance and then places a hold. What is the right fix?",
+      "choices": [
+        "Run the compensations before the reservations, so that any earlier holds are released first",
+        "Increase the transfer timeout so that the first saga has time to finish and release its hold before the second one starts",
+        "Make the reservation one atomic conditional operation at the balance's owner: place the hold only if funds cover it",
+        "Have each saga read the balance twice before placing its hold, so that a concurrent change is noticed"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Read-then-reserve across two steps is a lost-update race, and sagas have no isolation to prevent it. A semantic lock implemented as an atomic conditional write (available funds >= amount, decrement, record the hold) closes the window. Reading twice, longer timeouts and ordering compensations do not make the check atomic.",
+      "ref": "unit-3-sagas-backpressure.md#2-compensations-pivots-and-isolation"
+    },
+    {
+      "id": "A6-068",
+      "type": "single",
+      "tags": [
+        "saga",
+        "reliability",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "In a saga with the pivot already passed, the retriable step 'post the final ledger entry' keeps failing because the ledger service is down. What is the right behaviour?",
+      "choices": [
+        "Compensate the pivot and the earlier steps, so that the saga ends in a clean compensated state",
+        "Retry forward with backoff, and if it stays down end in a stuck state that alerts operators; never roll back the pivot",
+        "Delete the saga's record so the alerts stop, then recreate it when the ledger service is back",
+        "Mark the saga completed anyway, since the money has already left and the ledger entry can be added later by hand"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "After the pivot the money has left, so the saga's job is to finish the remaining retriable steps. Rolling back the pivot is not possible, pretending to complete loses the ledger entry, and deleting the saga destroys the audit trail.",
+      "ref": "unit-3-sagas-backpressure.md#2-compensations-pivots-and-isolation"
+    },
+    {
+      "id": "A6-069",
+      "type": "single",
+      "tags": [
+        "saga",
+        "consistency",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "Which of these is an example of a semantic lock countermeasure against saga isolation anomalies?",
+      "choices": [
+        "Running the whole saga in a database transaction at serializable isolation, across all three services",
+        "Retrying the saga's steps with exponential backoff until each one succeeds",
+        "Compressing the saga's event log so that concurrent readers see a consistent snapshot",
+        "A hold that reduces a member's available balance while a transfer is pending"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A semantic lock marks data as 'in flight' at the application level so other operations respect it, which is what a hold or a pending status does. A database isolation level cannot span several services, and retries or compression are unrelated to visibility of intermediate states.",
+      "ref": "unit-3-sagas-backpressure.md#2-compensations-pivots-and-isolation"
+    },
+    {
+      "id": "A6-070",
+      "type": "numeric",
+      "tags": [
+        "backpressure",
+        "estimation"
+      ],
+      "difficulty": 1,
+      "prompt": "A stage can complete 400 requests per second at 25 ms each. By Little's law, how many requests can be in flight at once at that throughput?",
+      "value": 10,
+      "tolerance": 0.1,
+      "unit": "requests",
+      "explanation": "L = lambda x W = 400/s x 0.025 s = 10. This is the natural concurrency limit for the stage; anything beyond it is queue, and the queue's bound is the latency budget times the throughput.",
+      "ref": "unit-3-sagas-backpressure.md#3-backpressure-and-load-shedding"
+    },
+    {
+      "id": "A6-071",
+      "type": "single",
+      "tags": [
+        "backpressure",
+        "multitenancy",
+        "queues"
+      ],
+      "difficulty": 2,
+      "prompt": "A credit union uploads a payroll file of 50,000 transfers that is split into one job each and enqueued on the same FIFO queue as interactive member transfers. Workers handle 200 jobs/s. What is the best fix?",
+      "choices": [
+        "Add more workers until the file clears faster, since the queue will then drain quickly enough for everyone, including the members waiting behind it",
+        "Separate lanes with priority for interactive work, a rate-limited feed for the batch, per-tenant caps and a minimum share for batch",
+        "Increase the app's timeout to 5 minutes so that interactive transfers queued behind the file can still complete",
+        "Make interactive transfers wait for the file, since a payroll batch is worth more than individual transfers"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "In one FIFO queue an interactive job waits behind 50,000 jobs / 200 per second = 250 s. Lanes with priority protect interactive work, a rate limit and per-tenant caps protect the core and other tenants, and a minimum share avoids starving the batch. More workers do not help if the core is the bottleneck, longer timeouts hide the problem, and making interactive work wait behind a batch is the failure itself, not a policy.",
+      "ref": "unit-3-sagas-backpressure.md#3-backpressure-and-load-shedding"
+    },
+    {
+      "id": "A6-072",
+      "type": "single",
+      "tags": [
+        "backpressure",
+        "autoscaling",
+        "operations"
+      ],
+      "difficulty": 3,
+      "prompt": "An autoscaler triples the number of posting workers when queue depth exceeds 1,000, but the database behind the workers tops out at 300 jobs/s. What happens, and what is a better signal?",
+      "choices": [
+        "Throughput triples, because more workers always means more parallel work and the queue drains three times faster",
+        "The queue shrinks faster, because depth is the ideal scaling signal and the database absorbs the extra load",
+        "Extra workers add contention without adding throughput; scale on age or backlog per worker, capped at the database's capacity",
+        "Nothing changes at all, since autoscaling only adds CPU and cannot affect database throughput or latency"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "When the bottleneck is downstream, scaling the stage in front of it raises connections, locks and latency while total throughput stays about the same, so depth stays high and the autoscaler keeps adding. Depth is therefore not an ideal signal, and autoscaling does not only affect CPU: more workers mean more database connections and locks. Age or backlog per worker plus a cap derived from the bottleneck's capacity avoids the feedback loop.",
+      "ref": "unit-3-sagas-backpressure.md#3-backpressure-and-load-shedding"
+    },
+    {
+      "id": "A6-073",
+      "type": "single",
+      "tags": [
+        "backpressure",
+        "queues",
+        "banking"
+      ],
+      "difficulty": 2,
+      "prompt": "Why is a bounded queue with a drop-oldest policy wrong for payment instructions?",
+      "choices": [
+        "It processes the remaining instructions in random order, which breaks the sequence of payments for an account",
+        "It accepts the instruction and later silently discards it to make room, so an acknowledged payment can vanish",
+        "It blocks producers forever once the queue reaches its bound, which stops all new payments from being accepted",
+        "It lets the queue grow beyond its configured bound, which can exhaust memory during a long overload"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Drop-oldest suits latest-value-wins data such as a live balance feed. For instructions, the producer must be told 'not accepted' (reject at the door) or be made to wait, so nothing it was promised is lost. The policy does not change the bound, ordering of what remains, or block producers.",
+      "ref": "unit-3-sagas-backpressure.md#3-backpressure-and-load-shedding"
+    },
+    {
+      "id": "A6-074",
+      "type": "multi",
+      "tags": [
+        "backpressure",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL mechanisms that apply backpressure from a slow consumer to its producer.",
+      "choices": [
+        "Pull-based consumption, where the consumer asks for work when it is ready",
+        "A bounded buffer on which the producer's send blocks when it is full",
+        "An unbounded in-memory buffer between the two stages",
+        "Credit- or window-based flow control, where the receiver grants permission to send"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "Blocking on a bounded buffer, pull, and credits or windows (TCP and HTTP/2 flow control) all make the consumer's capacity visible to the producer. An unbounded buffer hides the mismatch until memory runs out.",
+      "ref": "unit-3-sagas-backpressure.md#3-backpressure-and-load-shedding"
+    },
+    {
+      "id": "A6-075",
+      "type": "single",
+      "tags": [
+        "backpressure",
+        "latency",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "Under sustained overload with a deep FIFO queue and client timeouts, why can serving the newest requests first improve goodput?",
+      "choices": [
+        "The oldest requests have probably timed out already, so serving them wastes capacity while newer ones still have callers waiting",
+        "It guarantees that no request is ever dropped, because nothing waits in the queue long enough to expire",
+        "It lowers the arrival rate, because clients notice faster responses and send fewer requests",
+        "Newest-first ordering makes each individual request cheaper to process, because recently queued work is still in cache, so total capacity effectively rises"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Adaptive LIFO and deadline-aware dropping spend scarce capacity on requests whose callers are still there. It does not change per-request cost or arrivals, and the requests it skips are still at risk of timing out.",
+      "ref": "unit-3-sagas-backpressure.md#3-backpressure-and-load-shedding"
+    },
+    {
+      "id": "A6-076",
+      "type": "numeric",
+      "tags": [
+        "backpressure",
+        "estimation",
+        "queues"
+      ],
+      "difficulty": 2,
+      "prompt": "A stage has a capacity of 200 requests per second and callers will wait at most 2 seconds. What is the longest queue worth holding, in requests?",
+      "value": 400,
+      "tolerance": 0.1,
+      "unit": "requests",
+      "explanation": "Queue bound = latency budget x service rate = 2 s x 200/s = 400. A longer queue can only contain requests that will be served after their callers have given up.",
+      "ref": "unit-3-sagas-backpressure.md#3-backpressure-and-load-shedding"
+    },
+    {
+      "id": "A6-077",
+      "type": "single",
+      "tags": [
+        "backpressure",
+        "reliability",
+        "retries"
+      ],
+      "difficulty": 3,
+      "prompt": "After adding load shedding that returns 503 under overload, the total request rate actually increases and the system stays overloaded. What is the most likely cause?",
+      "choices": [
+        "The load balancer automatically disables shedding after a number of 503 responses, which re-admits everything",
+        "Clients retry immediately with no backoff, jitter or budget, so each shed request returns as several more",
+        "The 503 responses are slower to produce than successful responses, so shedding adds to the server's work",
+        "Shedding increases the service time of the requests that are admitted, which reduces the server's capacity"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Shedding only helps if the callers respond to it. Immediate retries multiply the offered load, a classic retry storm, so shed responses should carry Retry-After, clients should back off with jitter and a budget, and one layer should own retries. The other options are not mechanisms of shedding.",
+      "ref": "unit-3-sagas-backpressure.md#3-backpressure-and-load-shedding"
+    },
+    {
+      "id": "A6-078",
+      "type": "numeric",
+      "tags": [
+        "backpressure",
+        "multitenancy",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "An admission limit of 10 requests in flight admits bulk requests below 5, standard below 8 and critical below 10. Five bulk and three standard requests are in flight and hang. Five critical requests then arrive. How many are admitted?",
+      "value": 2,
+      "tolerance": 0.1,
+      "unit": "requests",
+      "explanation": "Eight slots are already taken (5 + 3), so only 10 - 8 = 2 critical requests fit and 3 are shed. Thresholds stop new low-priority work from being admitted, but work already admitted keeps its slot; to protect critical traffic under such arrivals, reserve capacity for it or give lower classes smaller limits and deadlines.",
+      "ref": "unit-3-sagas-backpressure.md#3-backpressure-and-load-shedding"
+    }
+  ]
+}

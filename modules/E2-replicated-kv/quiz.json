@@ -1,0 +1,747 @@
+{
+  "module": "E2",
+  "title": "Build: replicated KV store",
+  "draw": 12,
+  "questions": [
+    {
+      "id": "E2-001",
+      "type": "single",
+      "tags": [
+        "durability",
+        "wal"
+      ],
+      "difficulty": 2,
+      "prompt": "Your node appends a WAL record, fsyncs, applies it and returns 200. A test SIGKILLs the process mid-traffic, restarts it and reads every key that got a 200. What can the test legitimately conclude?",
+      "choices": [
+        "Every acknowledged write survived a process crash; nothing about a power loss",
+        "Every acknowledged write would also survive a power loss, since fsync was called",
+        "No unacknowledged write can be present after the restart",
+        "The WAL has no torn records, since the kill happened between requests"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A SIGKILL never loses the page cache, so it shows the process-crash case only; it can't distinguish fsynced from merely written data, so it says nothing about power loss even though the code fsyncs. Unacknowledged writes can be present (appended and fsynced, then killed before the response): the ambiguous outcome. The kill lands mid-request, so torn records are possible in general; recovery handles them.",
+      "ref": "unit-1-durable-node.md#2-the-node-acknowledging-only-what-is-durable"
+    },
+    {
+      "id": "E2-002",
+      "type": "single",
+      "tags": [
+        "wal",
+        "recovery"
+      ],
+      "difficulty": 2,
+      "prompt": "Recovery reads a WAL and finds records 1–40 valid, record 41 with a bad CRC, and records 42–300 that decode and checksum fine. What should it do?",
+      "choices": [
+        "Keep 1–40, truncate the file at record 41, and fsync the truncation",
+        "Keep 1–40 and 42–300, skipping only the corrupt record",
+        "Refuse to start until an operator repairs the file",
+        "Keep everything and mark record 41 as deleted"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A log's value is its order: 42–300 assume 41 happened, so applying them without it creates a history no client saw. Cut at the first bad record and make the cut durable; a replica re-fetches the suffix from the leader. Skipping, keeping everything or marking deleted all apply writes out of their history; refusing to start turns a routine crash state into an outage.",
+      "ref": "unit-1-durable-node.md#1-the-write-ahead-log-framing-checksums-and-recovery"
+    },
+    {
+      "id": "E2-003",
+      "type": "single",
+      "tags": [
+        "wal",
+        "recovery"
+      ],
+      "difficulty": 2,
+      "prompt": "After a crash, the last 4 bytes of the WAL's length field read 0xFFFFFFFF. Why must Decode reject this before allocating a buffer?",
+      "choices": [
+        "A torn or zeroed tail can hold any bytes; trusting the length means a ≈ 4 GiB allocation and a node that can't start",
+        "Because the CRC is computed over the length field and will always fail first",
+        "Because Go cannot allocate more than 1 GiB in one slice",
+        "Because 0xFFFFFFFF is reserved by the filesystem to mark end-of-file"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The length is the first thing read and the least trustworthy after a crash. Bounding it (the lab treats lengths outside [27, 4 MiB] as corrupt) keeps a garbage tail from OOM-ing recovery. The CRC covers the payload, not the header, and can only be checked after reading len bytes. Go can allocate large slices; there's no reserved filesystem marker.",
+      "ref": "unit-1-durable-node.md#1-the-write-ahead-log-framing-checksums-and-recovery"
+    },
+    {
+      "id": "E2-004",
+      "type": "multi",
+      "tags": [
+        "wal",
+        "durability"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL that are required for a newly created WAL file and its later recovery to be crash-safe against power loss.",
+      "choices": [
+        "fsync the file after each acknowledged append",
+        "fsync the directory after creating the file",
+        "fsync the file after truncating a torn tail during recovery",
+        "Rename the WAL to a new name after every append"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Contents need the file fsync; a new file's name needs the directory fsync or the data can survive while the entry pointing at it doesn't; a truncation that isn't fsynced can be undone by the next power loss, resurrecting the torn bytes in front of newly acknowledged records. Renaming per append is how you replace small files atomically (meta.json), not how you append to a log.",
+      "ref": "unit-1-durable-node.md#1-the-write-ahead-log-framing-checksums-and-recovery"
+    },
+    {
+      "id": "E2-005",
+      "type": "single",
+      "tags": [
+        "durability",
+        "restart"
+      ],
+      "difficulty": 2,
+      "prompt": "A node's data directory has meta.json saying {role: leader, epoch: 3}. A supervisor restarts it with its original flags: -role follower -epoch 1. What should it come back as, and why?",
+      "choices": [
+        "Leader at epoch 3: meta.json records what the node became; flags only seed an empty directory",
+        "Follower at epoch 1: the operator's flags are the newest instruction",
+        "Follower at epoch 3: take the role from flags and the epoch from disk",
+        "Refuse to start because flags and disk disagree"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Epochs must never go backwards across restarts or fencing breaks, and a node must remember being demoted or promoted. If flags won, an old leader restarted with its original command line would forget it had been replaced. Mixing sources is arbitrary; refusing to start makes every supervisor restart an outage. With -require-lease the restarted leader still can't write until the coordinator renews or demotes it.",
+      "ref": "unit-1-durable-node.md#2-the-node-acknowledging-only-what-is-durable"
+    },
+    {
+      "id": "E2-006",
+      "type": "single",
+      "tags": [
+        "durability",
+        "files"
+      ],
+      "difficulty": 2,
+      "prompt": "meta.json is updated with os.WriteFile in place. What crash makes the node unable to start, and what's the fix?",
+      "choices": [
+        "A crash mid-write leaves a truncated file that fails to parse; write a temp file, fsync, rename over it, fsync the directory",
+        "A crash after the write leaves the old content; call fsync twice",
+        "A crash corrupts the WAL too; store meta inside the WAL instead",
+        "None: os.WriteFile is atomic on POSIX filesystems"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "os.WriteFile truncates then writes, so a crash in between leaves a partial or empty file. rename is atomic on POSIX filesystems, so temp-and-rename always leaves either the old or the new complete file; the directory fsync makes the rename durable. Double fsync doesn't help the partial case; os.WriteFile is not atomic.",
+      "ref": "unit-1-durable-node.md#2-the-node-acknowledging-only-what-is-durable"
+    },
+    {
+      "id": "E2-007",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "durability"
+      ],
+      "difficulty": 2,
+      "prompt": "Your node fsyncs once per write under one mutex and fsync takes ≈ 4 ms. Eight clients write continuously. Roughly how many writes per second does it sustain?",
+      "value": 250,
+      "tolerance": 0.25,
+      "unit": "writes/s",
+      "explanation": "Writes are serialised behind the lock and each costs one fsync: 1 / 4 ms ≈ 250 writes/s, regardless of the number of clients. Each client waits for the other seven plus its own: ≈ 32 ms per write. The reference's break-it measured ≈ 245/s and p50 ≈ 32 ms on a Mac. Group commit would cover several writers per fsync.",
+      "ref": "unit-1-durable-node.md#3-stretch--what-fsync-costs-and-group-commit"
+    },
+    {
+      "id": "E2-008",
+      "type": "single",
+      "tags": [
+        "durability",
+        "performance"
+      ],
+      "difficulty": 2,
+      "prompt": "Group commit is proposed for the fsync-bound node. What does it change for 8 concurrent writers?",
+      "choices": [
+        "One fsync covers every write that arrived during the previous flush: throughput scales with concurrency, latency stays ≈ one to two fsyncs",
+        "It halves latency for each write but leaves throughput unchanged",
+        "It makes acknowledgements weaker, since writes are acked before their fsync",
+        "It only helps a single client writing sequentially"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Writers that would have queued for their own fsync share one, so 8 writers cost ≈ 1 fsync instead of 8. Each write is still acked only after the fsync covering it, so durability is unchanged. A sequential client never has company to batch with, so it gains nothing; latency doesn't halve, it stops growing with the queue.",
+      "ref": "unit-1-durable-node.md#3-stretch--what-fsync-costs-and-group-commit"
+    },
+    {
+      "id": "E2-009",
+      "type": "single",
+      "tags": [
+        "replication",
+        "log"
+      ],
+      "difficulty": 2,
+      "prompt": "A follower sends GET /repl/fetch?from=42&last_epoch=1 and the leader's entry 41 has epoch 1. What may the leader conclude before sending anything back?",
+      "choices": [
+        "The follower has entries 1–41 durably and matching, so 41 counts as acknowledged",
+        "The follower has applied entry 42 already",
+        "Nothing: an acknowledgement needs a separate POST from the follower",
+        "The follower has entries 1–41 in memory but may not have fsynced them"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The follower only asks for 42 after appending and fsyncing everything up to 41, and the last_epoch check confirms its entry 41 is the leader's entry 41. So from − 1 is a free, current ack (Kafka followers report position the same way). It hasn't got 42 yet. No separate ack message is needed, and the protocol requires the fsync before the next fetch.",
+      "ref": "unit-2-replication-lag.md#1-pull-replication-the-fetch-is-the-acknowledgement"
+    },
+    {
+      "id": "E2-010",
+      "type": "single",
+      "tags": [
+        "replication",
+        "log"
+      ],
+      "difficulty": 2,
+      "prompt": "A follower is killed for 90 s while the leader takes 18,000 writes. With the lab's pull design, what does the leader keep for that follower during the outage?",
+      "choices": [
+        "Only its last acked index and last fetch time; the WAL is the queue, and the follower resumes from its own last index",
+        "An in-memory queue of the 18,000 entries to push when it returns",
+        "Nothing at all, and the follower must be rebuilt from a snapshot",
+        "A copy of its WAL, so it can be restored on restart"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Pull moves delivery state to the receiver: on restart the follower reads its WAL, asks for last + 1, and the leader serves from its own log. The per-follower state is for lag reporting and semi-sync only and is rebuilt by the next fetch. A push queue would make a slow follower a memory risk for the leader; a snapshot is needed only once the leader no longer retains the follower's position.",
+      "ref": "unit-2-replication-lag.md#1-pull-replication-the-fetch-is-the-acknowledgement"
+    },
+    {
+      "id": "E2-011",
+      "type": "single",
+      "tags": [
+        "replication",
+        "concurrency"
+      ],
+      "difficulty": 3,
+      "prompt": "A follower's fetch for from=42 times out, it retries, and then both responses arrive. Without a check, it would append entries 42–60 twice. What stops the damage in the lab, at which two layers?",
+      "choices": [
+        "The follower applies a response only if its last index is still what it was when it asked, and wal.Append rejects an index that isn't LastIndex()+1",
+        "The leader deduplicates fetches by follower id",
+        "HTTP/1.1 guarantees responses arrive in request order on one connection",
+        "The follower's map overwrite makes duplicate applies harmless"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The state check drops stale responses; contiguity in Append refuses a batch starting at an index already present (ErrGap). Leader-side dedupe can't help: both responses were legitimately sent. The retry likely used a new connection, so no ordering guarantee applies. A delete-then-put sequence applied twice is not harmless, and indexes in the log would be duplicated.",
+      "ref": "unit-2-replication-lag.md#1-pull-replication-the-fetch-is-the-acknowledgement"
+    },
+    {
+      "id": "E2-012",
+      "type": "single",
+      "tags": [
+        "replication",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Semi-sync, one follower, -ack-timeout 2s. The follower is partitioned. A client PUTs. What happens?",
+      "choices": [
+        "After ≈ 2 s the client gets 503 'not replicated, outcome unknown'; the entry is in the leader's WAL and will replicate if the follower returns",
+        "After ≈ 2 s the client gets 200, and the leader falls back to async",
+        "The leader rejects the write immediately without appending it",
+        "The client waits until the partition heals"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The leader appends and fsyncs before waiting, so the entry exists; it just isn't known to be on two disks, so the honest answer is 503 with the index. MySQL-style fallback (200 after the timeout) silently weakens RPO during exactly the incidents you care about. The leader doesn't know about the partition in advance. An unbounded wait would pile up requests.",
+      "ref": "unit-2-replication-lag.md#2-async-vs-semi-sync-what-an-acknowledgement-means"
+    },
+    {
+      "id": "E2-013",
+      "type": "single",
+      "tags": [
+        "replication",
+        "durability"
+      ],
+      "difficulty": 2,
+      "prompt": "In the lab's semi-sync mode, what is guaranteed at the moment the client receives 200?",
+      "choices": [
+        "The entry is fsynced on the leader and on at least one follower",
+        "The entry is applied and readable on every follower",
+        "The entry is on a majority of all nodes",
+        "The entry is fsynced on the leader and has been sent to every follower"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The ack waits until some follower's fetch position passes the entry, and followers fsync before fetching again. It does not wait for all followers, nor for a majority (with 3 nodes, 1 follower + leader happens to be a majority, but the rule is 'at least one'), and 'sent' is not 'stored'. Readability on followers isn't guaranteed either: a follower read can still race.",
+      "ref": "unit-2-replication-lag.md#2-async-vs-semi-sync-what-an-acknowledgement-means"
+    },
+    {
+      "id": "E2-014",
+      "type": "numeric",
+      "tags": [
+        "replication",
+        "estimation",
+        "durability"
+      ],
+      "difficulty": 2,
+      "prompt": "An async leader takes 250 writes/s. Its only follower is 1.6 s behind when the leader's machine dies and the follower is promoted. Roughly how many acknowledged writes are lost?",
+      "value": 400,
+      "tolerance": 0.25,
+      "unit": "writes",
+      "explanation": "Async RPO is the replication lag at the moment of the crash: 250 writes/s × 1.6 s = 400 acknowledged writes that only the dead leader had. Semi-sync with a surviving acked follower would lose none.",
+      "ref": "unit-2-replication-lag.md#2-async-vs-semi-sync-what-an-acknowledgement-means"
+    },
+    {
+      "id": "E2-015",
+      "type": "multi",
+      "tags": [
+        "replication",
+        "tradeoffs"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL statements that are true about semi-sync replication with one follower (refuse-on-timeout, as in the lab).",
+      "choices": [
+        "It tolerates the loss of either the leader or the follower without losing an acknowledged write",
+        "If no follower is reachable, writes become unavailable rather than silently async",
+        "A client that retries a 503 without an idempotency key may create a duplicate",
+        "It makes reads on the follower linearizable"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Each acked entry is on two disks, so losing one node keeps it (assuming the survivor is the one promoted if it's the follower). Refusing on timeout trades write availability for the RPO promise. A 503 entry can still replicate, so a blind retry can double it. Follower reads may still be stale; linearizability needs the leader to prove leadership.",
+      "ref": "unit-2-replication-lag.md#2-async-vs-semi-sync-what-an-acknowledgement-means"
+    },
+    {
+      "id": "E2-016",
+      "type": "single",
+      "tags": [
+        "observability",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "A follower has been blackholed for 40 minutes. Its own /status shows leader_last_index equal to its last_index. What does that mean?",
+      "choices": [
+        "Nothing reassuring: it hasn't heard of new entries, so its self-computed lag is 0; only its last_contact_ago_ms tells the truth",
+        "It is fully caught up and safe for reads",
+        "The leader has stopped accepting writes",
+        "The partition must have healed"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A follower can't know what it hasn't been sent, so 'leader's last index as I last heard it minus mine' reads 0 during a partition. The honest signals are the leader's per-follower lag and last-fetch age, and the follower's time since last contact. The leader may be writing happily; nothing healed.",
+      "ref": "unit-2-replication-lag.md#3-measuring-lag-honestly"
+    },
+    {
+      "id": "E2-017",
+      "type": "single",
+      "tags": [
+        "observability",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does the lab compute lag_seconds on the leader as now − time(entry acked+1), using timestamps written by the leader?",
+      "choices": [
+        "One clock: the leader compares its own clock with its own timestamps, so skew doesn't enter, and an idle caught-up follower reads 0",
+        "Because followers have no clock",
+        "Because it equals the time since the last write, which is what readers feel",
+        "Because Go's time.Now is only monotonic on the leader"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Cross-machine comparisons measure clock skew as much as lag; using only the leader's clock avoids it. 'Time since last write' would make an idle, current follower look an hour behind. Followers have clocks; monotonic time is per process and not comparable across processes anyway.",
+      "ref": "unit-2-replication-lag.md#3-measuring-lag-honestly"
+    },
+    {
+      "id": "E2-018",
+      "type": "numeric",
+      "tags": [
+        "replication",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A follower keeps one fetch in flight; each round trip (including its fsync) takes 20 ms and a response carries at most 512 entries. What is the highest write rate it can keep up with?",
+      "value": 25600,
+      "tolerance": 0.25,
+      "unit": "entries/s",
+      "explanation": "512 entries per 20 ms = 25,600 entries/s. Above that, lag grows without bound. The lab's LagUnderLoad break-it shows lag rising sharply with 20 ms of added link delay. Bigger batches, pipelined fetches or streaming raise the ceiling.",
+      "ref": "unit-2-replication-lag.md#3-measuring-lag-honestly"
+    },
+    {
+      "id": "E2-019",
+      "type": "single",
+      "tags": [
+        "failover",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "Coordinator: -interval 100ms, -fail-after 3, -lease 1s. The leader is SIGKILLed (connections refused instantly). Roughly how long until a follower accepts writes?",
+      "choices": [
+        "≈ 1–1.5 s: ≈ 0.3 s to see three failed renewals, then waiting out the latest lease sent (≈ 1 s after it was sent)",
+        "≈ 0.3 s: three failed renewals and an immediate promotion",
+        "≈ 3 s: three failures × the 1 s lease",
+        "≈ 100 ms: one missed tick"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Detection = fail-after × (interval + time per failed check); refused connections fail fast, so ≈ 0.3 s. The coordinator then must wait until the latest expiry it sent (≈ 1 s after the last renewal), so ≈ 1–1.4 s; the reference logged ≈ 1.3 s. Promoting at 0.3 s risks two leaders; the lease isn't multiplied by failures; one missed tick is not a failover.",
+      "ref": "unit-3-failover-fencing.md#1-detecting-a-dead-leader-and-choosing-its-successor"
+    },
+    {
+      "id": "E2-020",
+      "type": "numeric",
+      "tags": [
+        "failover",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "Same coordinator settings, but the leader is SIGSTOPped: each renewal hangs until the 250 ms check timeout. Estimate the time from the pause to the earliest moment the coordinator may promote, in seconds.",
+      "value": 2.0,
+      "tolerance": 0.3,
+      "unit": "s",
+      "explanation": "Each failed renewal now costs ≈ 100 ms + 250 ms, so three take ≈ 1.05 s. Each of those renewals was sent with an expiry 1 s after sending, and the coordinator counts them as granted, so it must wait until ≈ 1 s after the third was sent (≈ 0.7 s into the streak) plus margin: ≈ 0.7 + 1.0 + 0.05 ≈ 1.75–2 s after the pause began.",
+      "ref": "unit-3-failover-fencing.md#1-detecting-a-dead-leader-and-choosing-its-successor"
+    },
+    {
+      "id": "E2-021",
+      "type": "single",
+      "tags": [
+        "failover",
+        "replication"
+      ],
+      "difficulty": 3,
+      "prompt": "Two followers: n2 has (last_epoch 2, last_index 38), n3 has (last_epoch 1, last_index 40). Which should the coordinator promote?",
+      "choices": [
+        "n2: an entry from a later epoch beats a longer log from an earlier one",
+        "n3: it has more entries",
+        "Either; they hold the same data up to 38",
+        "Neither; the coordinator must wait for the old leader"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Epoch 2 entries were written by a later leader; n3's entries 39–40 at epoch 1 come from a leader that was already deposed when epoch 2 began, and may conflict with epoch-2 entries at the same indexes. Comparing (last_epoch, last_index) lexicographically picks n2, and n3's suffix is truncated on rejoin. Index-only selection can discard acknowledged epoch-2 writes.",
+      "ref": "unit-3-failover-fencing.md#1-detecting-a-dead-leader-and-choosing-its-successor"
+    },
+    {
+      "id": "E2-022",
+      "type": "single",
+      "tags": [
+        "failover",
+        "consensus"
+      ],
+      "difficulty": 2,
+      "prompt": "Why is the new epoch computed as max(every epoch reported by reachable nodes) + 1 instead of the coordinator's own epoch + 1?",
+      "choices": [
+        "So a restarted coordinator that lost its memory can never reuse an epoch, as long as one node that saw the latest epoch answers",
+        "Because the coordinator does not store an epoch",
+        "To make epochs grow faster and expire old leases sooner",
+        "Because followers reject epochs that are not exactly one higher than theirs"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Epochs are fencing tokens only if no two leaders ever share one. The coordinator's in-memory epoch is lost on restart; nodes persist theirs in meta.json, so taking the max keeps epochs unique. Epoch size doesn't affect lease duration; followers accept any newer epoch, not only +1.",
+      "ref": "unit-3-failover-fencing.md#1-detecting-a-dead-leader-and-choosing-its-successor"
+    },
+    {
+      "id": "E2-023",
+      "type": "single",
+      "tags": [
+        "fencing",
+        "leases"
+      ],
+      "difficulty": 3,
+      "prompt": "While the leader was SIGSTOPped, the coordinator's three lease renewals timed out on its side. Why must failover wait until the expiry of the latest renewal SENT, not the latest acknowledged?",
+      "choices": [
+        "The timed-out renewals may sit in the leader's socket buffer and be applied when it resumes, granting a lease until those later expiries",
+        "Because the acknowledged renewal's expiry is not recorded",
+        "Because TCP retransmits failed requests automatically after the timeout",
+        "Because the leader extends every lease by its own pause duration"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A timeout on the sender says nothing about delivery. The request was written to the socket; the paused process reads it after SIGCONT and applies the absolute expiry it carries. If failover only waited for the acknowledged expiry, the zombie could hold a valid lease after the promotion: split brain. The mutation that makes this change fails TestM4_PausedZombieLeaderCannotAcceptWritesAfterFailover.",
+      "ref": "unit-3-failover-fencing.md#2-leases-epochs-and-fencing-the-zombie-leader"
+    },
+    {
+      "id": "E2-024",
+      "type": "single",
+      "tags": [
+        "fencing",
+        "leases"
+      ],
+      "difficulty": 2,
+      "prompt": "Lease renewals carry expires_unix_ms (an absolute time) instead of 'valid for 1 s'. What does that buy, and what does it assume?",
+      "choices": [
+        "A renewal delivered late can't extend the lease past the time the coordinator meant; it assumes the two clocks agree within a margin",
+        "It removes any dependence on clocks",
+        "It lets the leader renew its own lease",
+        "It makes leases valid across coordinator restarts without any assumption"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A duration restarts on receipt, so every delay lengthens authority; an absolute expiry is harmless once passed. That moves the risk to clock agreement: trivial on one host, a bounded-drift margin across machines (and clock jumps defeat it, which is why fencing tokens are still needed).",
+      "ref": "unit-3-failover-fencing.md#2-leases-epochs-and-fencing-the-zombie-leader"
+    },
+    {
+      "id": "E2-025",
+      "type": "multi",
+      "tags": [
+        "fencing",
+        "consensus"
+      ],
+      "difficulty": 3,
+      "prompt": "After a failover to epoch 2, which checks in the lab stop the old epoch-1 leader from getting a write accepted by the cluster? Select ALL that apply.",
+      "choices": [
+        "It refuses writes without a valid lease (-require-lease), and only the coordinator grants leases",
+        "Followers that know epoch 2 get 409 from it when they fetch, so it can't collect semi-sync acks",
+        "promote/follow/lease requests carrying an older epoch are refused with 409",
+        "Clients refuse to talk to any node whose epoch is lower than 2"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Three fences: the lease at the leader, the epoch check on fetches (a follower with a newer epoch can't ack for a stale leader), and epoch rules on every admin request so a delayed message can't revert a decision; meta.json persists the epoch. Clients in the lab don't check epochs; fencing has to be enforced by the resources, not by hoping clients do.",
+      "ref": "unit-3-failover-fencing.md#2-leases-epochs-and-fencing-the-zombie-leader"
+    },
+    {
+      "id": "E2-026",
+      "type": "single",
+      "tags": [
+        "fencing",
+        "leases"
+      ],
+      "difficulty": 3,
+      "prompt": "An async leader checks its lease (valid), then pauses for 3 s before appending, resumes after a failover, appends and acks. What is the outcome, and what's the lesson?",
+      "choices": [
+        "The client got a 200 for a write that is truncated when the old leader rejoins: a lease check at the holder is a race; only a token checked by the resource closes it",
+        "Impossible: the lease check and the append happen under one mutex",
+        "The new leader receives the write via replication and keeps it",
+        "The coordinator detects the late append and rolls it back"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The mutex excludes other goroutines, not a process pause. In async the ack needs only the local disk, so the stale write is acknowledged, then dropped by log matching. In semi-sync no follower at epoch 2 would ack it, which is the fence at the resource. This is Kleppmann's argument about leases and fencing tokens.",
+      "ref": "unit-3-failover-fencing.md#2-leases-epochs-and-fencing-the-zombie-leader"
+    },
+    {
+      "id": "E2-027",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "replication"
+      ],
+      "difficulty": 3,
+      "prompt": "Old leader n1 has (index:epoch) 1:1 2:1 3:1. The leader n2 (epoch 3) has 1:1 2:2 3:3 4:3. n1 fetches with from=4, last_epoch=1. What does n2 answer?",
+      "choices": [
+        "truncate_to = 1",
+        "truncate_to = 3",
+        "entries [4]",
+        "409 Conflict"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "prev = 3; n2's entry 3 has epoch 3 ≠ 1, a mismatch, so limit = prev − 1 = 2, and the last index in n2's log with epoch ≤ 1 is 1; min(1, 2) = 1. n1 drops 2–3 and the next fetch (from=2, last_epoch=1) matches. Sending entry 4 would leave n1 with a divergent 2–3; 409 is for a requester with a newer epoch.",
+      "ref": "unit-3-failover-fencing.md#3-divergent-logs-and-log-matching"
+    },
+    {
+      "id": "E2-028",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "Why can (epoch, index) identify a log entry across the whole cluster?",
+      "choices": [
+        "Only one leader ever writes in a given epoch and it assigns each index once",
+        "Because indexes are globally unique timestamps",
+        "Because entries with the same key and value are the same entry",
+        "Because the WAL's CRC is unique per entry"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Epochs are never reused and fencing stops a stale leader writing in an old epoch, so one epoch has one writer that assigns indexes uniquely; and because leaders append only after matching, agreeing on an entry implies agreeing on everything before it (Raft's log matching). Indexes alone repeat across failovers; equal content isn't identity; CRCs collide.",
+      "ref": "unit-3-failover-fencing.md#3-divergent-logs-and-log-matching"
+    },
+    {
+      "id": "E2-029",
+      "type": "single",
+      "tags": [
+        "replication",
+        "operations"
+      ],
+      "difficulty": 2,
+      "prompt": "After an async failover, the rejoining old leader truncates 2 entries it had acknowledged. What should the system do with them?",
+      "choices": [
+        "Log them (or save them to a side file) so the incident's data loss is measurable and reconcilable via idempotency keys",
+        "Re-append them to the new leader's log automatically",
+        "Nothing; they were never committed",
+        "Keep them on the old node only, as a backup"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "They were acknowledged to clients, so they are the incident's measurable data loss; MongoDB writes such rollbacks to files for exactly this. Re-appending blindly reorders them against a history they weren't decided on. 'Never committed' is false for async acks. Keeping them only on one node means replicas permanently disagree.",
+      "ref": "unit-3-failover-fencing.md#3-divergent-logs-and-log-matching"
+    },
+    {
+      "id": "E2-030",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "A member writes a new address (the leader returns index 42) and immediately reads from a follower at index 40, passing ?min_index=42, with -ryw-wait 500ms. The follower is partitioned. What does the client get?",
+      "choices": [
+        "After ≈ 500 ms, a 307 to the leader's advertised URL with the same query; following it returns the new address",
+        "Immediately, the old address with X-Index: 40",
+        "A hung request until the partition heals",
+        "Immediately, a 307 without waiting"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The follower waits up to ryw-wait for replication (usually it's ms away), then redirects. Serving 40 is the anomaly the token exists to prevent; waiting forever piles up requests on a partitioned follower; redirecting without waiting pushes every token read to the leader whenever followers are slightly behind.",
+      "ref": "unit-4-read-your-writes.md#1-read-your-writes-with-a-version-token"
+    },
+    {
+      "id": "E2-031",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "replication"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does the follower's 307 point at the leader URL from fetch responses (leader_url), not at the URL the follower itself fetches from?",
+      "choices": [
+        "The replication path may be unreachable or private to clients (a proxy, a replication network); the leader's advertised URL is the client-facing one",
+        "The replication URL changes on every fetch",
+        "Clients may only use URLs ending in /kv",
+        "HTTP forbids redirects to the same host"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "In the tests the follower reaches the leader through a fault-injecting proxy that's currently blackholed; redirecting there would hang the client. In production, replication often runs on a separate network. The replication URL is stable; there's no such HTTP rule.",
+      "ref": "unit-4-read-your-writes.md#1-read-your-writes-with-a-version-token"
+    },
+    {
+      "id": "E2-032",
+      "type": "single",
+      "tags": [
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Which statement about the lab's min_index token is correct?",
+      "choices": [
+        "It gives read-your-writes for a session; it is not linearizability, because other clients' newer writes may not be visible",
+        "It makes every follower read linearizable",
+        "It gives monotonic reads automatically, even if the client only sends the index of its writes",
+        "It is unnecessary if the follower's lag is under 1 s"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The token is a floor at the client's own write. Linearizability needs the latest value by anyone, which a follower can't know without the leader. Monotonic reads need the client to carry the max index *seen* (X-Index), not just written. Lag under 1 s still allows a read 100 ms after a write to miss it.",
+      "ref": "unit-4-read-your-writes.md#1-read-your-writes-with-a-version-token"
+    },
+    {
+      "id": "E2-033",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "failover"
+      ],
+      "difficulty": 3,
+      "prompt": "A client holds token index 42 from a write that was lost in an async failover. The new leader later writes an unrelated entry at index 42. What does the lab's index-only token do, and what's the fix?",
+      "choices": [
+        "Followers consider the token satisfied and serve whatever is there; a token of (epoch, index) lets a node detect the write was lost",
+        "Followers reject the token because the index was reused",
+        "The token is invalidated automatically by the epoch change",
+        "The new leader refuses to reuse index 42"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "An index names a slot; after truncation the slot holds a different entry, so 'applied ≥ 42' is true and wrong. With (epoch, index), a node whose entry 42 has a different epoch can answer 'write lost', so the client resubmits with its idempotency key. The lab documents this as the stretch exercise; indexes must be reused because the log is contiguous.",
+      "ref": "unit-4-read-your-writes.md#2-stretch--monotonic-reads-linearizable-reads-and-the-epoch-in-the-token"
+    },
+    {
+      "id": "E2-034",
+      "type": "single",
+      "tags": [
+        "consensus",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "The coordinator process runs on the same host as the leader, and the host dies. With -require-lease, what happens?",
+      "choices": [
+        "Nobody can promote a follower, and the followers can't take writes: the cluster is read-only until the coordinator returns",
+        "A follower promotes itself after its fetches fail",
+        "The followers elect a leader by majority",
+        "Writes continue on a follower because it has the latest data"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The single coordinator is a SPOF for failover; nodes never promote themselves (that would create one leader per partition without a majority vote). Fencing keeps it safe but unavailable. The fix is to make the coordinator's state consensus-backed (etcd/ZooKeeper with CAS, as Patroni does) or have the nodes run Raft.",
+      "ref": "unit-3-failover-fencing.md#4-stretch--the-sentinel-is-a-single-point-of-failure"
+    },
+    {
+      "id": "E2-035",
+      "type": "single",
+      "tags": [
+        "failover",
+        "reliability"
+      ],
+      "difficulty": 2,
+      "prompt": "With -fail-after 1, a healthy leader has one renewal that takes 300 ms (check timeout 250 ms). What happens?",
+      "choices": [
+        "A false-positive failover: the coordinator promotes a follower although the leader was fine",
+        "Nothing: one slow renewal is ignored",
+        "The leader's lease is extended to compensate",
+        "The follower refuses promotion because the leader is alive"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Failure detection is a timeout, therefore a guess; a threshold of 1 turns any slow moment into a failover, and the next slow moment into another (flapping). Fencing keeps it safe, but each one costs availability and possibly async data. Thresholds above 1 and timeouts above the healthy p99 trade detection speed for fewer false positives.",
+      "ref": "unit-3-failover-fencing.md#1-detecting-a-dead-leader-and-choosing-its-successor"
+    },
+    {
+      "id": "E2-036",
+      "type": "multi",
+      "tags": [
+        "observability",
+        "tradeoffs"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL signals you would alert on to catch a replication problem early in this design.",
+      "choices": [
+        "The leader's per-follower lag_seconds",
+        "The leader's per-follower last_fetch_ago_ms",
+        "A follower's self-reported records-behind (leader_last_index − last_index)",
+        "The count of semi-sync 503 timeouts"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "Leader-side lag in seconds is what readers feel; last-fetch age catches a silent follower even with no writes; semi-sync timeouts are a durability event. A follower's self-reported records-behind reads 0 exactly when it's partitioned, so alerting on it misses the case that matters.",
+      "ref": "unit-2-replication-lag.md#3-measuring-lag-honestly"
+    }
+  ]
+}

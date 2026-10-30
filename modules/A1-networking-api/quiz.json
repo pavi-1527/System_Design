@@ -1,0 +1,1309 @@
+{
+  "module": "A1",
+  "title": "Networking, API design, DNS/LB/CDN",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "A1-001",
+      "type": "single",
+      "tags": [
+        "dns",
+        "networking"
+      ],
+      "difficulty": 2,
+      "prompt": "Your platform fails over between regions with a Route 53 failover record (TTL 60 s, health check 30 s x 3). us-east-1 is degraded: it still accepts TCP connections but answers slowly with 5xx. DNS flips within about two minutes, yet some mobile clients keep hitting us-east-1 for much longer. What is the most likely reason?",
+      "choices": [
+        "Authoritative DNS servers ignore the TTL for failover records",
+        "The health check interval is too short, so the record flaps",
+        "Negative caching: resolvers cached an NXDOMAIN for the record",
+        "The clients reuse keep-alive/HTTP/2 connections that were opened to us-east-1 before the change; DNS is only consulted when a new connection is dialled"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Correct: DNS is a hint used at dial time; a degraded region that still accepts connections keeps pooled connections alive, so clients stay pinned (fix with max connection age/GOAWAY or in-band failover). Authoritative servers serve the TTL they're configured with; it's caches downstream that may misbehave. A short interval would speed detection, not cause long pinning. Negative caching applies to 'does not exist' answers, but the record exists and resolves.",
+      "ref": "unit-1-request-path.md#1-dns"
+    },
+    {
+      "id": "A1-002",
+      "type": "multi",
+      "tags": [
+        "dns",
+        "networking"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL that can lengthen the time until every client stops sending traffic to a failed region after a DNS failover record changes.",
+      "choices": [
+        "Lowering the record's TTL to 60 s a day before the incident",
+        "Long-lived keep-alive connections opened before the change",
+        "Recursive resolvers serving the cached answer until its TTL expires",
+        "Announcing the same anycast IP from more locations"
+      ],
+      "answer": [
+        1,
+        2
+      ],
+      "explanation": "Resolver caching (up to one TTL per caching layer) and pinned connections both delay the move. Lowering the TTL ahead of time shortens, not lengthens, the cached window. Anycast is the alternative steering mechanism: withdrawing a route moves traffic without waiting for DNS caches, and announcing from more PoPs does not slow DNS failover.",
+      "ref": "unit-1-request-path.md#1-dns"
+    },
+    {
+      "id": "A1-003",
+      "type": "single",
+      "tags": [
+        "dns"
+      ],
+      "difficulty": 1,
+      "prompt": "By default, what does a GeoDNS / latency-based authoritative server use to decide which answer to give?",
+      "choices": [
+        "The IP address of the recursive resolver that asks",
+        "The end user's device IP address",
+        "The CDN PoP nearest to the user",
+        "The BGP route of the user's ISP"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The authoritative server only sees the resolver's IP, unless the resolver sends EDNS Client Subnet (RFC 7871). It never sees the device IP directly; CDN PoPs and BGP routes are not inputs to a DNS answer (BGP is how anycast steers, a different mechanism).",
+      "ref": "unit-1-request-path.md#1-dns"
+    },
+    {
+      "id": "A1-004",
+      "type": "numeric",
+      "tags": [
+        "networking",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A client opens a brand-new HTTPS connection (TCP + TLS 1.2 full handshake) over a 120 ms RTT path and sends one GET. Ignoring server processing time and bandwidth, how long until the response starts arriving? Answer in milliseconds.",
+      "value": 480,
+      "tolerance": 0.1,
+      "unit": "ms",
+      "explanation": "TCP = 1 RTT, TLS 1.2 = 2 RTT, request/response = 1 RTT: 4 RTT x 120 ms = 480 ms. With TLS 1.3 it would be 3 RTT = 360 ms; on a warm keep-alive connection, 1 RTT = 120 ms.",
+      "ref": "unit-1-request-path.md#2-connection-setup-and-http-versions"
+    },
+    {
+      "id": "A1-005",
+      "type": "single",
+      "tags": [
+        "http",
+        "networking"
+      ],
+      "difficulty": 3,
+      "prompt": "A mobile banking app makes many parallel API calls on a lossy cellular network (about 3% packet loss). Moving from HTTP/1.1 over 6 connections to HTTP/2 over 1 connection made p90 latency worse. Why?",
+      "choices": [
+        "All HTTP/2 streams share one TCP connection, so one lost packet stalls every stream until it is retransmitted (TCP head-of-line blocking)",
+        "HTTP/2 needs an extra round trip per request to open a stream",
+        "HTTP/2 does not compress headers, so requests are larger",
+        "HTTP/2 disables keep-alive, so each request pays a handshake"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "TCP delivers bytes in order, so a single loss blocks all multiplexed streams and the single congestion window takes the hit; six HTTP/1.1 connections lose independently. HTTP/2 does compress headers (HPACK), opening a stream costs no extra round trip, and HTTP/2 is inherently a persistent connection. HTTP/3 (QUIC) exists largely to fix this case.",
+      "ref": "unit-1-request-path.md#2-connection-setup-and-http-versions"
+    },
+    {
+      "id": "A1-006",
+      "type": "single",
+      "tags": [
+        "http",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "Your CDN supports TLS 1.3 0-RTT early data. Which request is acceptable to allow in early data?",
+      "choices": [
+        "POST /v1/transfers",
+        "DELETE /v1/sessions/current",
+        "GET /v1/rates (public, read-only)",
+        "PATCH /v1/payees/p_1"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "0-RTT data can be replayed by a network attacker and the server can't tell, so only safe requests like a read-only GET belong there. POST and PATCH change state (a replayed transfer moves money twice). DELETE is idempotent but still unsafe: a replay can delete something the user just recreated, or log them out; servers typically reject non-safe methods in early data (425 Too Early).",
+      "ref": "unit-1-request-path.md#2-connection-setup-and-http-versions"
+    },
+    {
+      "id": "A1-007",
+      "type": "single",
+      "tags": [
+        "connection-pooling",
+        "networking"
+      ],
+      "difficulty": 2,
+      "prompt": "A Go vendor adapter shares one http.Client with the default Transport. At about 200 concurrent requests to the vendor host, metrics show hundreds of new connections per second and a growing TIME_WAIT count. What is the most effective fix?",
+      "choices": [
+        "Raise Transport.MaxIdleConns from 100 to 1000",
+        "Increase IdleConnTimeout from 90 s to 10 minutes",
+        "Set DisableKeepAlives: true so connections are closed cleanly",
+        "Raise Transport.MaxIdleConnsPerHost to roughly the expected concurrency (the default per-host idle limit is 2)"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "http.DefaultMaxIdleConnsPerHost is 2, so after each burst only 2 connections return to the pool and the rest are closed (TIME_WAIT) and later re-dialled. MaxIdleConns is the total across hosts; per-host is the binding limit here. Disabling keep-alive makes every request dial. A longer idle timeout doesn't help connections that were never allowed into the pool.",
+      "ref": "unit-1-request-path.md#3-connection-pooling"
+    },
+    {
+      "id": "A1-008",
+      "type": "multi",
+      "tags": [
+        "connection-pooling"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL that prevent Go's http.Transport from reusing a connection.",
+      "choices": [
+        "Setting MaxIdleConnsPerHost: 100 on a shared Transport",
+        "Not reading the response body to EOF and closing it",
+        "Creating a new http.Transport for each request",
+        "Creating a new http.Client per request that uses http.DefaultTransport"
+      ],
+      "answer": [
+        1,
+        2
+      ],
+      "explanation": "Go's docs say an unread or unclosed body may stop the connection from being reused, and a new Transport per request means a new, empty pool every time. Raising MaxIdleConnsPerHost increases reuse (the default is 2). A new http.Client without its own Transport uses the shared DefaultTransport, so its connections are pooled; the bug is new Transports, not new Clients.",
+      "ref": "unit-1-request-path.md#3-connection-pooling"
+    },
+    {
+      "id": "A1-009",
+      "type": "numeric",
+      "tags": [
+        "connection-pooling",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Your adapter sends 400 req/s to a vendor and each call takes 150 ms end to end. Using Little's law, how many connections are in use at once (the minimum pool size to avoid re-dialling)? Answer as a count.",
+      "value": 60,
+      "tolerance": 0.1,
+      "unit": "connections",
+      "explanation": "L = lambda x W = 400 req/s x 0.15 s = 60 concurrent requests, each holding a connection (HTTP/1.1). Size MaxIdleConnsPerHost at about 60 plus headroom (and use a higher latency percentile if latency is spiky).",
+      "ref": "unit-1-request-path.md#3-connection-pooling"
+    },
+    {
+      "id": "A1-010",
+      "type": "numeric",
+      "tags": [
+        "connection-pooling",
+        "networking",
+        "estimation"
+      ],
+      "difficulty": 3,
+      "prompt": "A Linux client has about 28,000 ephemeral ports and closed connections sit in TIME_WAIT for 60 s on the side that closes. Roughly how many NEW connections per second can it sustain to a single destination IP:port before running out of ports? Answer in connections/second.",
+      "value": 467,
+      "tolerance": 0.15,
+      "unit": "conn/s",
+      "explanation": "Each new connection consumes a port for its lifetime plus 60 s of TIME_WAIT, so sustained rate is about 28,000 / 60 = 467 per second. This is why connection churn (from per-request transports or too-small idle pools) becomes outages at a few hundred req/s to one vendor.",
+      "ref": "unit-1-request-path.md#3-connection-pooling"
+    },
+    {
+      "id": "A1-011",
+      "type": "single",
+      "tags": [
+        "load-balancing",
+        "grpc"
+      ],
+      "difficulty": 2,
+      "prompt": "A team runs gRPC services behind an AWS NLB (L4). One backend sits at 90% CPU while three others idle at 10%. Nothing is unhealthy. What is the cause?",
+      "choices": [
+        "The NLB's health checks are failing on three backends",
+        "An L4 balancer picks a backend per connection, and gRPC multiplexes all of a client's requests over one long-lived HTTP/2 connection",
+        "NLB uses least-connections, which always prefers the first backend",
+        "gRPC runs over UDP, which NLB cannot balance"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "L4 balances flows, not requests; a client's HTTP/2 connection pins all its RPCs to one backend. Fixes: L7 (HTTP/2-aware) balancing, client-side round_robin, or max connection age. NLB uses a flow hash, not least-connections; gRPC runs over HTTP/2 on TCP; and the scenario says all backends are healthy.",
+      "ref": "unit-1-request-path.md#4-load-balancing-l4-vs-l7-and-picking-a-backend"
+    },
+    {
+      "id": "A1-012",
+      "type": "single",
+      "tags": [
+        "load-balancing"
+      ],
+      "difficulty": 3,
+      "prompt": "You run 50 L7 proxy instances, each tracking in-flight requests locally and using least-connections. You add a fresh backend. What happens, and what is the standard fix?",
+      "choices": [
+        "Nothing changes until the next DNS TTL expires; lower the TTL",
+        "The new backend gets no traffic until a health check passes rise times; raise the interval",
+        "All 50 proxies see it with 0 in-flight and send it their new requests at once (herding onto a cold server); use power-of-two-choices and/or slow start",
+        "Round robin would cause the same herding, so the fix is sticky sessions"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Independent least-connections views converge on the same 'best' host. P2C compares only two random candidates, which breaks the synchronisation while still preferring lightly loaded hosts; slow start ramps a new host's weight. DNS is not involved between proxy and backend; round robin wouldn't herd (it would just ignore load); sticky sessions don't address it; health-check rise only delays admission, then the herd happens anyway.",
+      "ref": "unit-1-request-path.md#4-load-balancing-l4-vs-l7-and-picking-a-backend"
+    },
+    {
+      "id": "A1-013",
+      "type": "single",
+      "tags": [
+        "load-balancing",
+        "latency"
+      ],
+      "difficulty": 3,
+      "prompt": "One of 10 backends is healthy but slow (800 ms vs 20 ms). Switching from round robin to least-requests cut its share of traffic from 10% to 3%, but p99 is still about 800 ms. Which change actually fixes the tail?",
+      "choices": [
+        "Add more load balancer instances",
+        "Eject outliers on latency (or time out and retry idempotent requests on another backend), so effectively nothing waits on the slow host",
+        "Switch from least-requests to power-of-two-choices",
+        "Switch back to round robin with equal weights"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "p99 stays bad while more than 1% of requests hit the slow host; 3% is still above 1%. Removing it from rotation (latency outlier ejection) or bounding the wait (per-try timeout + retry/hedge for idempotent requests) fixes the tail. P2C behaves similarly to least-requests here; more LB instances don't change routing; round robin makes it worse (10%).",
+      "ref": "unit-1-request-path.md#4-load-balancing-l4-vs-l7-and-picking-a-backend"
+    },
+    {
+      "id": "A1-014",
+      "type": "single",
+      "tags": [
+        "load-balancing"
+      ],
+      "difficulty": 2,
+      "prompt": "Why does Envoy's LEAST_REQUEST policy by default compare two randomly sampled hosts instead of scanning for the global minimum?",
+      "choices": [
+        "Two samples guarantee perfectly even load",
+        "Scanning all hosts is impossible because in-flight counts are not tracked",
+        "It allows sticky sessions to be implemented for free",
+        "Random sampling avoids many balancers herding onto the same host, keeps picks O(1), and still gets most of the benefit of least-loaded"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Power-of-two-choices drops the maximum load exponentially versus pure random, without the synchronised herding of everyone picking the global minimum, at constant cost. Envoy does track active requests per host; P2C does not guarantee perfect evenness; and it has nothing to do with session affinity.",
+      "ref": "unit-1-request-path.md#4-load-balancing-l4-vs-l7-and-picking-a-backend"
+    },
+    {
+      "id": "A1-015",
+      "type": "single",
+      "tags": [
+        "health-checks",
+        "availability"
+      ],
+      "difficulty": 3,
+      "prompt": "Your instances' /health endpoint checks the database. The database has a 5-second failover. What happens, and what is the better health-check design?",
+      "choices": [
+        "The LB fails over to another region automatically, which is the desired behaviour",
+        "Nothing happens because LBs ignore health checks during failovers",
+        "Only the instance connected to the failed DB node is removed, which is the desired behaviour",
+        "Every instance fails its check at once and the LB removes them all, turning a 5 s blip into a longer full outage; make LB health checks shallow (this instance can serve) and handle dependency failures in the app"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "A shared dependency makes deep checks fail everywhere simultaneously; the LB has nowhere to route, and recovery waits for rise x interval after the DB returns. Instances share the database, so it's not one instance; LBs don't special-case failovers; and region failover is a DNS/global-LB decision, not an LB health-check side effect.",
+      "ref": "unit-1-request-path.md#5-health-checks-outlier-ejection-draining-sticky-sessions"
+    },
+    {
+      "id": "A1-016",
+      "type": "multi",
+      "tags": [
+        "health-checks",
+        "deploys"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL steps that belong in removing an instance from service with zero failed requests.",
+      "choices": [
+        "Fail the readiness check / deregister so the LB stops sending new requests",
+        "Wait at least as long as the LB needs to notice (health-check detection or deregistration propagation)",
+        "Exit immediately on SIGTERM so the LB's health checks fail faster",
+        "Call http.Server.Shutdown with a deadline so in-flight requests finish and idle connections close"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "Order matters: stop new traffic, wait for the LB to act on it, then drain in-flight work with a bounded Shutdown. Exiting immediately is exactly what causes deploy-time 502s: the LB keeps routing to a dead process until its health checks catch up.",
+      "ref": "unit-1-request-path.md#5-health-checks-outlier-ejection-draining-sticky-sessions"
+    },
+    {
+      "id": "A1-017",
+      "type": "single",
+      "tags": [
+        "health-checks",
+        "load-balancing"
+      ],
+      "difficulty": 2,
+      "prompt": "Outlier detection has ejected every backend in a pool. What should a well-designed L7 proxy do?",
+      "choices": [
+        "Fail open: balance across all hosts anyway (panic mode), because partial success beats 100% errors, and cap ejection so this is rare",
+        "Return 503 to all requests until an operator re-admits hosts",
+        "Keep hosts ejected and trigger DNS failover",
+        "Retry each request on every host in turn"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Envoy's panic threshold and max_ejection_percent embody this: when too few hosts are healthy, ignore health. Returning 503 guarantees total failure; DNS failover is slow and not the proxy's job; retrying on every host multiplies load during an incident.",
+      "ref": "unit-1-request-path.md#5-health-checks-outlier-ejection-draining-sticky-sessions"
+    },
+    {
+      "id": "A1-018",
+      "type": "single",
+      "tags": [
+        "health-checks",
+        "load-balancing"
+      ],
+      "difficulty": 3,
+      "prompt": "Your reverse proxy reports a backend failure whenever the upstream round trip returns an error, with an ejection threshold of 1. Healthy backends keep getting ejected during evening peak, mostly from mobile traffic. What is the most likely bug?",
+      "choices": [
+        "Client disconnects (the inbound request's context being cancelled) are counted as backend failures",
+        "The proxy uses power-of-two-choices instead of round robin",
+        "Backends return 404 for unknown routes",
+        "The cooldown is too long"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "When a mobile client gives up, the proxy's upstream call is cancelled and surfaces as an error; counting it penalises a healthy backend. Check the inbound context before reporting (the lab's TestHandler_ClientCancelDoesNotEjectBackend). The picker doesn't cause ejections; 404s are not 5xx failures; a long cooldown affects recovery time, not why healthy hosts get ejected.",
+      "ref": "unit-1-request-path.md#5-health-checks-outlier-ejection-draining-sticky-sessions"
+    },
+    {
+      "id": "A1-019",
+      "type": "single",
+      "tags": [
+        "cdn",
+        "caching",
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "After adding a CDN rule that caches GET /api/* for 60 s, a member sees another member's balance. Which change is the right fix?",
+      "choices": [
+        "Lower the TTL from 60 s to 5 s",
+        "Purge the CDN every minute",
+        "Add the Authorization header to the cache key and keep caching",
+        "Mark personal responses Cache-Control: no-store and remove the rule that caches /api/* at the shared cache"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Personal data must never live in a shared cache, and responses should say so explicitly. Keying on Authorization might stop the cross-user leak but stores per-user entries that are never shared (no benefit) and is one misconfiguration away from leaking again. A shorter TTL or frequent purges just make the leak smaller, not gone.",
+      "ref": "unit-1-request-path.md#6-cdns"
+    },
+    {
+      "id": "A1-020",
+      "type": "numeric",
+      "tags": [
+        "cdn",
+        "caching",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "Your CDN's hit ratio improves from 96% to 99.2%. By what factor does the number of requests reaching the origin drop? Answer as a factor (e.g. 2 means half).",
+      "value": 5,
+      "tolerance": 0.05,
+      "unit": "x",
+      "explanation": "Origin load is proportional to the miss ratio: 4% to 0.8% is 4 / 0.8 = 5x fewer origin requests. Small hit-ratio gains at the top end are big origin wins.",
+      "ref": "unit-1-request-path.md#6-cdns"
+    },
+    {
+      "id": "A1-021",
+      "type": "single",
+      "tags": [
+        "cdn",
+        "deploys"
+      ],
+      "difficulty": 2,
+      "prompt": "How should you deploy a new version of a single-page banking web app behind a CDN so members never get mismatched HTML and JavaScript?",
+      "choices": [
+        "Upload the HTML first, then the assets, so members see the new version sooner",
+        "Content-hashed asset filenames cached as public, max-age=1 year, immutable, published before the HTML; HTML served no-cache; keep the previous release's assets",
+        "Give every file, including HTML, a 5-minute TTL",
+        "Purge the whole CDN cache immediately after uploading new files"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Versioned URLs make assets immutable and remove purges from the normal path; HTML revalidates so it picks up new hashes; old assets stay so old pages keep working. A full purge causes a stampede and still races; uniform 5-minute TTLs give up to 5 minutes of mismatch; HTML-first means new HTML references assets that may not be at the edge yet.",
+      "ref": "unit-1-request-path.md#6-cdns"
+    },
+    {
+      "id": "A1-022",
+      "type": "single",
+      "tags": [
+        "cdn",
+        "caching"
+      ],
+      "difficulty": 1,
+      "prompt": "What does the Cache-Control directive s-maxage do?",
+      "choices": [
+        "Sets freshness lifetime for shared caches (CDNs, proxies) only, overriding max-age there",
+        "Forbids storing the response anywhere",
+        "Tells caches to revalidate on every request",
+        "Sets freshness for the browser only"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "s-maxage targets shared caches. Browser-only caching is 'private'; forbidding storage is 'no-store'; revalidate-every-time is 'no-cache'.",
+      "ref": "unit-1-request-path.md#6-cdns"
+    },
+    {
+      "id": "A1-023",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "idempotency"
+      ],
+      "difficulty": 1,
+      "prompt": "DELETE /v1/payees/p_1 returns 204 the first time and 404 on a retry. Is DELETE still idempotent here?",
+      "choices": [
+        "Yes: idempotency is about the effect on server state (the payee is gone either way), not identical responses",
+        "No: an idempotent method must return the same response every time",
+        "Only if the server returns 204 both times",
+        "No: DELETE is not idempotent according to HTTP semantics"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "RFC 9110 defines idempotent as 'the intended effect on the server of multiple identical requests is the same as for a single request'. Responses may differ. Some APIs return 204 on repeats for client convenience, but it isn't required. DELETE is listed as idempotent in HTTP semantics.",
+      "ref": "unit-2-api-design.md#1-resources-methods-status-codes-and-errors"
+    },
+    {
+      "id": "A1-024",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "errors"
+      ],
+      "difficulty": 2,
+      "prompt": "A partner submits a well-formed transfer request but the source account has insufficient available balance. Which response fits best?",
+      "choices": [
+        "200 OK with {\"success\": false}",
+        "402 Payment Required",
+        "400 Bad Request with the message 'Insufficient funds'",
+        "422 with a stable machine-readable error code such as insufficient_funds"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "422 says 'well-formed, but a business rule rejects it' and the stable code is what clients branch on. 400 is for malformed requests (client bugs). 402 is reserved and not used in practice. 200-with-error hides failures from dashboards, proxies and retry logic.",
+      "ref": "unit-2-api-design.md#1-resources-methods-status-codes-and-errors"
+    },
+    {
+      "id": "A1-025",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "Two credit-union admins edit the same payee at the same time in your admin portal. You want the second save to be detected instead of silently overwriting the first. What should the API do?",
+      "choices": [
+        "Accept both; the last write wins, which is the HTTP default",
+        "Lock the payee row for the duration of the admin's editing session",
+        "Return an ETag on GET, require If-Match on update, and answer 412 Precondition Failed when the ETag no longer matches",
+        "Return 409 for every update to a payee that was read more than 1 minute ago"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Conditional requests implement optimistic concurrency with no server-held locks. A time-based 409 rejects valid edits and still misses fast conflicts; session-long locks block other admins and leak when browsers close; last-write-wins is exactly the silent overwrite you're trying to prevent.",
+      "ref": "unit-2-api-design.md#1-resources-methods-status-codes-and-errors"
+    },
+    {
+      "id": "A1-026",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "security",
+        "multi-tenancy"
+      ],
+      "difficulty": 2,
+      "prompt": "A fintech partner authorised for credit union A requests GET /v1/transfers/tr_123, which belongs to credit union B. What should happen?",
+      "choices": [
+        "401, because the token is for a different tenant",
+        "200, because the partner has a valid token",
+        "403, after loading the transfer and checking ownership in the handler",
+        "404, enforced by a tenant-scoped query (WHERE id = $1 AND tenant_id = $2 with the tenant from the authenticated principal)"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Returning 404 avoids confirming the ID exists across tenants, and scoping in the query makes the check impossible to forget (this is OWASP API1: Broken Object Level Authorization). Load-then-check is the pattern that produces BOLA bugs when a new endpoint forgets the check; 200 is the bug itself; 401 means 'not authenticated', which is false here.",
+      "ref": "unit-2-api-design.md#1-resources-methods-status-codes-and-errors"
+    },
+    {
+      "id": "A1-027",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "health-checks"
+      ],
+      "difficulty": 3,
+      "prompt": "A list endpoint returns 500 when a client sends an expired or garbled cursor. The service runs behind an L7 proxy with passive outlier detection (eject after 5 consecutive 5xx). What is the most likely consequence?",
+      "choices": [
+        "Nothing: proxies ignore 5xx responses from list endpoints",
+        "The proxy converts the 500s to 400s automatically",
+        "The client gets a cached copy of the previous page instead",
+        "Clients retry the 500s and a few bad cursors can eject healthy backends, while the request itself can never succeed"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Status codes are signals to infrastructure: 5xx means 'backend fault', so they drive retries and ejections. A client error should be 400 (invalid_cursor). Proxies don't special-case list endpoints, don't rewrite status codes by default, and don't serve cached pages for errors unless explicitly configured (stale-if-error).",
+      "ref": "unit-2-api-design.md#1-resources-methods-status-codes-and-errors"
+    },
+    {
+      "id": "A1-028",
+      "type": "single",
+      "tags": [
+        "pagination",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Offset pagination, page size 20, newest first. A member reads page 1; three new transactions post at the top; they request page 2 (offset 20). What do they see?",
+      "choices": [
+        "The last 3 rows of page 1 again at the top of page 2",
+        "3 rows skipped between page 1 and page 2",
+        "Exactly the next 20 rows, because OFFSET is stable",
+        "The 3 new transactions at the top of page 2"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Inserts above the reading position push every row down by 3, so offset 20 now starts 3 rows earlier in the old order: duplicates. Skips happen with deletes above the position. OFFSET counts positions, which shift. New rows sort at the very top (positions 0-2), not into page 2.",
+      "ref": "unit-2-api-design.md#2-pagination"
+    },
+    {
+      "id": "A1-029",
+      "type": "single",
+      "tags": [
+        "pagination"
+      ],
+      "difficulty": 2,
+      "prompt": "You page with WHERE created_at < :last_created_at ORDER BY created_at DESC. A nightly batch posts 400 transactions with the same created_at second, and a page boundary falls inside that batch. What happens?",
+      "choices": [
+        "Nothing goes wrong as long as created_at is indexed",
+        "The remaining rows sharing the boundary timestamp are skipped; the key needs a unique tiebreaker such as (created_at, id)",
+        "The query fails because ORDER BY on duplicate values is undefined",
+        "Rows repeat, but none are skipped"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Strict '<' jumps past every row with the boundary timestamp. Using '<=' would repeat them instead. The fix is a total order with a unique tiebreaker compared as a tuple. An index makes it fast but not correct; SQL doesn't fail on ties, it just returns them in an unspecified order.",
+      "ref": "unit-2-api-design.md#2-pagination"
+    },
+    {
+      "id": "A1-030",
+      "type": "numeric",
+      "tags": [
+        "pagination",
+        "estimation",
+        "databases"
+      ],
+      "difficulty": 2,
+      "prompt": "A client requests page 1,500 of a transaction list with LIMIT 20 OFFSET 29,980 (offset pagination). Approximately how many rows does the database have to produce to answer it? Answer as a row count.",
+      "value": 30000,
+      "tolerance": 0.05,
+      "unit": "rows",
+      "explanation": "OFFSET still produces and discards the first 29,980 rows, then returns 20: about 30,000 rows read. Keyset pagination with an index on the sort key reads about 20 (plus an index seek) at any depth.",
+      "ref": "unit-2-api-design.md#2-pagination"
+    },
+    {
+      "id": "A1-031",
+      "type": "multi",
+      "tags": [
+        "pagination",
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL properties that belong in a well-designed pagination cursor.",
+      "choices": [
+        "The full sort key of the last row, including the unique tiebreaker",
+        "A format version so the encoding can change later",
+        "The caller's tenant ID, so the server can skip the tenant filter in the query",
+        "An HMAC so the server rejects tampered or forged cursors"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "Signing, versioning and a complete sort key make cursors safe and evolvable. The cursor must never replace authorisation: the query must still filter by the authenticated principal's tenant. (You may bind the cursor to query parameters, but not trust it as the security boundary.)",
+      "ref": "unit-2-api-design.md#2-pagination"
+    },
+    {
+      "id": "A1-032",
+      "type": "single",
+      "tags": [
+        "pagination"
+      ],
+      "difficulty": 1,
+      "prompt": "Why does a keyset pagination implementation fetch limit + 1 rows?",
+      "choices": [
+        "To learn whether another page exists without a COUNT query, and avoid handing out a cursor to an empty page",
+        "To include the previous page's last row for overlap",
+        "To compensate for rows that might be deleted concurrently",
+        "Because LIMIT is exclusive in SQL"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The extra row only signals 'has more'; the cursor is built from the limit-th row. Overlap would create duplicates; it does nothing about concurrent deletes; and SQL LIMIT is not exclusive.",
+      "ref": "unit-2-api-design.md#2-pagination"
+    },
+    {
+      "id": "A1-033",
+      "type": "single",
+      "tags": [
+        "versioning",
+        "api-design"
+      ],
+      "difficulty": 2,
+      "prompt": "Which change is backwards compatible ONLY IF the API contract tells clients to ignore unknown fields?",
+      "choices": [
+        "Adding a new field to responses",
+        "Changing the default page size from 10 to 20",
+        "Making an optional request field required",
+        "Renaming a field"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Additive response fields break strict decoders (e.g. DisallowUnknownFields), so the tolerant-reader rule must be in the contract. Renames, new required fields and changed defaults are breaking regardless of client tolerance.",
+      "ref": "unit-2-api-design.md#3-versioning-and-evolution"
+    },
+    {
+      "id": "A1-034",
+      "type": "multi",
+      "tags": [
+        "versioning",
+        "api-design"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL changes that are breaking for existing API clients.",
+      "choices": [
+        "Reducing the maximum memo length from 140 to 80 characters",
+        "Adding a new optional request field with a default that preserves old behaviour",
+        "Adding a response field when the contract already requires clients to ignore unknown fields",
+        "Renaming amount to amount_cents"
+      ],
+      "answer": [
+        0,
+        3
+      ],
+      "explanation": "Renames remove a field clients use, and tightened validation rejects previously valid requests. A new response field is safe when tolerant reading is part of the contract, and an optional request field whose default preserves old behaviour is the textbook safe change.",
+      "ref": "unit-2-api-design.md#3-versioning-and-evolution"
+    },
+    {
+      "id": "A1-035",
+      "type": "single",
+      "tags": [
+        "versioning",
+        "grpc"
+      ],
+      "difficulty": 1,
+      "prompt": "What must you never do when evolving a Protobuf message used by deployed clients?",
+      "choices": [
+        "Mark a removed field number as reserved",
+        "Add a new field with a new number",
+        "Reuse or renumber an existing field number",
+        "Add a new enum value after UNSPECIFIED = 0"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Field numbers are the wire identity; reusing one makes old data decode as the wrong field. Adding fields, reserving removed numbers and adding enum values (with clients handling unknown values) are the standard compatible moves.",
+      "ref": "unit-2-api-design.md#3-versioning-and-evolution"
+    },
+    {
+      "id": "A1-036",
+      "type": "single",
+      "tags": [
+        "versioning",
+        "api-design",
+        "idempotency"
+      ],
+      "difficulty": 3,
+      "prompt": "You add a transfer status on_hold. A partner's code maps unrecognised statuses to failed and tells members to retry, causing duplicate payments when held transfers are released. What should the contract have said from day one?",
+      "choices": [
+        "Clients must use strict JSON decoding to catch new values early",
+        "Enums are open: clients must treat unknown values as 'not final, check again' rather than as failure",
+        "Every enum change requires a new major version in the URL",
+        "Status values are guaranteed never to change"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Open-enum (tolerant reader) rules make adding values safe and prevent the unsafe default. Strict decoding would have broken the partner differently; a new major version per enum value is impractical; and promising enums never change is a promise you'll break (compliance just did).",
+      "ref": "unit-2-api-design.md#3-versioning-and-evolution"
+    },
+    {
+      "id": "A1-037",
+      "type": "single",
+      "tags": [
+        "graphql",
+        "api-design",
+        "databases"
+      ],
+      "difficulty": 3,
+      "prompt": "A GraphQL query fetches a business member's 50 accounts, 5 recent transactions per account, and each transaction's merchant, with naive per-field resolvers. How many database round trips does it make, and what is the standard fix?",
+      "choices": [
+        "1; resolvers share a single SQL join",
+        "51; only the accounts level causes N+1",
+        "3; GraphQL batches automatically",
+        "301; batch per execution level with a DataLoader-style loader (about 3 queries) and add depth/complexity limits"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "1 (accounts) + 50 (transactions per account) + 250 (merchant per transaction) = 301. GraphQL does not batch by itself; both nested levels cause N+1; resolvers don't compile into one join unless you build that. Batching gives about 3 queries; complexity limits stop pathological queries.",
+      "ref": "unit-2-api-design.md#4-rest-vs-grpc-vs-graphql-and-streaming"
+    },
+    {
+      "id": "A1-038",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "grpc",
+        "graphql"
+      ],
+      "difficulty": 2,
+      "prompt": "You are designing the public transfers API for third-party fintech partners using many languages, browser admin consoles and low-code integration tools. Which interface style fits best as the primary contract?",
+      "choices": [
+        "GraphQL only",
+        "gRPC only, with Protobuf",
+        "Raw WebSockets with a custom message protocol",
+        "REST/JSON over HTTPS with an OpenAPI spec"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Reach and operability decide partner APIs: every stack speaks HTTP/JSON, and HTTP status codes, caching and idempotency keys are well understood. gRPC is great internally but needs HTTP/2 end to end and gRPC-Web in browsers; GraphQL adds query-cost and caching complexity that partners rarely need; a custom WebSocket protocol forfeits all standard tooling.",
+      "ref": "unit-2-api-design.md#4-rest-vs-grpc-vs-graphql-and-streaming"
+    },
+    {
+      "id": "A1-039",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "async",
+        "webhooks"
+      ],
+      "difficulty": 2,
+      "prompt": "A statement export takes 30 s to 4 min. Through an ALB with a 60 s idle timeout, long exports fail with 504 and clients retry, starting duplicate exports. What is the right API design?",
+      "choices": [
+        "Make the client retry with exponential backoff until the export succeeds",
+        "Return 200 immediately with an empty file and fill it in later",
+        "POST /v1/exports with an Idempotency-Key returns 202 Accepted and an operation resource to poll (with Retry-After) and/or a completion webhook",
+        "Raise the ALB idle timeout to 10 minutes"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Async operations decouple long work from connection lifetimes and make retries return the same job. Raising one timeout fights every proxy on the path and still loses work on disconnect; an empty 200 lies about the result; backoff retries still start duplicate exports.",
+      "ref": "unit-2-api-design.md#5-long-running-operations-and-webhooks"
+    },
+    {
+      "id": "A1-040",
+      "type": "multi",
+      "tags": [
+        "webhooks",
+        "idempotency",
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL things a webhook receiver must do to process at-least-once, unordered, internet-delivered events correctly.",
+      "choices": [
+        "Deduplicate by event ID, ideally in the same transaction as the effect",
+        "Compare a resource version (or fetch current state) rather than trusting arrival order",
+        "Verify an HMAC signature computed over the timestamp and the raw body, rejecting stale timestamps",
+        "Acknowledge quickly after durably enqueuing, and do the work asynchronously"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "All four are required. Signature + timestamp stops forgery and replay; dedup gives exactly-once effects; fast acks avoid sender timeouts and redeliveries; and because delivery is unordered, arrival order is not event order, so compare versions or fetch current state.",
+      "ref": "unit-2-api-design.md#5-long-running-operations-and-webhooks"
+    },
+    {
+      "id": "A1-041",
+      "type": "single",
+      "tags": [
+        "webhooks",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Your service updates a transfer's status in the database and then sends a webhook. Sometimes partners get transfer.completed for transfers that were rolled back, and sometimes events are lost when a pod dies. What pattern fixes both?",
+      "choices": [
+        "Send the webhook from a database trigger synchronously",
+        "Send the webhook before committing the transaction",
+        "Transactional outbox: write the event row in the same transaction as the state change, then deliver from the outbox",
+        "Retry the webhook three times immediately after commit"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "The outbox ties event existence to commit: rolled-back changes leave no event and a crash after commit leaves an undelivered row that the dispatcher retries. Sending before commit produces events for rollbacks; synchronous HTTP from a trigger blocks transactions on partners' endpoints; immediate retries after commit still lose events if the process dies first.",
+      "ref": "unit-2-api-design.md#5-long-running-operations-and-webhooks"
+    },
+    {
+      "id": "A1-042",
+      "type": "single",
+      "tags": [
+        "webhooks",
+        "security"
+      ],
+      "difficulty": 3,
+      "prompt": "A webhook receiver parses the JSON body, re-serialises it with json.Marshal, and verifies the HMAC over that. Valid webhooks from the provider intermittently fail verification. Why?",
+      "choices": [
+        "json.Marshal adds a trailing timestamp",
+        "The provider rotates its secret on every request",
+        "The signature covers the exact raw bytes sent; re-serialised JSON can differ in key order, whitespace, escaping or number formatting",
+        "HMAC-SHA256 is non-deterministic"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Always verify the raw body bytes, then parse. HMAC is deterministic; json.Marshal adds no timestamp, it just re-formats (sorted map keys, no whitespace, its own escaping), which is exactly the problem; providers rotate secrets rarely and with overlap, not per request.",
+      "ref": "unit-2-api-design.md#5-long-running-operations-and-webhooks"
+    },
+    {
+      "id": "A1-043",
+      "type": "single",
+      "tags": [
+        "retries",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "A client calling POST /v1/transfers (no idempotency key) sees each of these failures. Which one is safe to retry without risking a duplicate?",
+      "choices": [
+        "Connection refused before any bytes were sent",
+        "Connection reset while waiting for the response",
+        "Read timeout after the request was sent",
+        "502 Bad Gateway from the API gateway"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Only failures proving nothing was sent or processed are safe. After the request leaves the client, a timeout, reset or proxy 502 is ambiguous: the upstream may have completed the transfer. That ambiguity is why idempotency keys exist.",
+      "ref": "unit-3-idempotency-auth.md#1-retries-timeouts-and-duplicates"
+    },
+    {
+      "id": "A1-044",
+      "type": "numeric",
+      "tags": [
+        "retries",
+        "estimation"
+      ],
+      "difficulty": 2,
+      "prompt": "A request passes through 3 layers (app, gateway, adapter), and each layer retries up to 2 times on failure. If the core fails every request, how many requests can one user action produce at the core? Answer as a count.",
+      "value": 27,
+      "tolerance": 0.01,
+      "unit": "requests",
+      "explanation": "Each layer makes up to 3 attempts (1 + 2 retries), and attempts multiply across layers: 3 x 3 x 3 = 27. Retry at one layer with a budget instead.",
+      "ref": "unit-3-idempotency-auth.md#1-retries-timeouts-and-duplicates"
+    },
+    {
+      "id": "A1-045",
+      "type": "single",
+      "tags": [
+        "retries"
+      ],
+      "difficulty": 2,
+      "prompt": "1,000 clients fail at the same moment and retry with exponential backoff. Why add full jitter (a random wait in [0, backoff))?",
+      "choices": [
+        "Jitter is only needed when retries are made at multiple layers",
+        "Jitter reduces the total number of retries",
+        "Jitter guarantees each retry succeeds",
+        "Without it all clients retry in synchronised waves that re-overload the recovering service; jitter spreads retries out"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Deterministic backoff keeps clients in lockstep; each wave is as big as the original spike. Jitter changes timing, not count; it guarantees nothing about success; and herding happens even with a single retrying layer.",
+      "ref": "unit-3-idempotency-auth.md#1-retries-timeouts-and-duplicates"
+    },
+    {
+      "id": "A1-046",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "A member double-taps Send. Your service does: look up the request ID; if absent, call core banking; then insert the request ID. Both requests call core banking. What is the correct fix?",
+      "choices": [
+        "Atomically reserve the key before the side effect (INSERT ... ON CONFLICT DO NOTHING, SET NX, conditional put) so exactly one request proceeds",
+        "Add a unique constraint on the request ID column, keeping the insert after the core call",
+        "Sleep a random 0-100 ms before the lookup",
+        "Reject transfers with the same amount and accounts within 5 minutes"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Check-then-act is a race; the reservation must be one atomic conditional write before any side effect. A unique constraint after the call still lets both call the core; random sleeps make the race rarer, not impossible; content-based dedup blocks legitimate identical payments and still races.",
+      "ref": "unit-3-idempotency-auth.md#2-idempotency-keys-end-to-end"
+    },
+    {
+      "id": "A1-047",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "api-design"
+      ],
+      "difficulty": 2,
+      "prompt": "A client reuses an Idempotency-Key from a completed $500 transfer for a new $900 transfer. What should the server return?",
+      "choices": [
+        "409 Conflict with Retry-After",
+        "Execute the $900 transfer, since the body changed",
+        "The stored $500 response, marked as replayed",
+        "422: the key was used with a different request (fingerprint mismatch)"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Comparing a request fingerprint turns a client bug into a loud error. Replaying would tell the client its $900 transfer succeeded; executing makes the key meaningless; 409 means 'still in progress', which isn't the case.",
+      "ref": "unit-3-idempotency-auth.md#2-idempotency-keys-end-to-end"
+    },
+    {
+      "id": "A1-048",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "Your server crashes after core banking posted a transfer but before the idempotency record was marked completed. The in-flight lease expires and the client's retry re-executes the handler. What makes this safe?",
+      "choices": [
+        "Storing the response in Redis instead of the database",
+        "The adapter passes an idempotency key derived from the client's key to core banking, so the core returns the original posting instead of creating a new one",
+        "The lease expiry guarantees the first execution never happened",
+        "HTTP retries are idempotent by default"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Lease takeover trades liveness for a possible second execution; only downstream idempotency (or reconciliation against the core before re-calling) makes that second execution harmless. Lease expiry says nothing about what happened; POST retries are not idempotent by default; the store choice doesn't affect the downstream effect.",
+      "ref": "unit-3-idempotency-auth.md#2-idempotency-keys-end-to-end"
+    },
+    {
+      "id": "A1-049",
+      "type": "multi",
+      "tags": [
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL that an idempotency record for POST /v1/transfers should contain.",
+      "choices": [
+        "A fingerprint of the request (method, path, body hash)",
+        "The stored status, headers and body to replay",
+        "The scope (tenant/client) together with the key",
+        "The client's IP address, used to decide whether to replay"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Scope prevents cross-client collisions, the fingerprint detects key reuse, and the stored response enables exact replay (plus state/owner/expiry fields). Client IPs change (mobile networks, NAT) and must not decide replay; a retry from a new IP is still the same intent.",
+      "ref": "unit-3-idempotency-auth.md#2-idempotency-keys-end-to-end"
+    },
+    {
+      "id": "A1-050",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "trade-offs"
+      ],
+      "difficulty": 3,
+      "prompt": "Your transfer handler is NOT transactional: when it returns 500, a debit may already have happened without the matching credit. What should the idempotency layer do with that 500?",
+      "choices": [
+        "Store and replay it (as Stripe does), forcing reconciliation instead of a blind re-execution",
+        "Never store it, so a retry can run the handler again",
+        "Delete the idempotency key so a new key is required",
+        "Convert it to 200 so the client stops retrying"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Not storing 5xx is only safe when 5xx guarantees no effect; with possible partial effects, re-execution can double-debit, so replaying the error and reconciling is safer. Converting to 200 lies; deleting the key is the same as not storing it, plus it breaks the client's retry.",
+      "ref": "unit-3-idempotency-auth.md#2-idempotency-keys-end-to-end"
+    },
+    {
+      "id": "A1-051",
+      "type": "numeric",
+      "tags": [
+        "idempotency",
+        "estimation",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "Your API takes 2 million write requests per day with idempotency keys. Each stored record (metadata + response body) is about 3 KB, and records are retained for 7 days. Roughly how much live storage do the records need? Answer in GB (decimal).",
+      "value": 42,
+      "tolerance": 0.15,
+      "unit": "GB",
+      "explanation": "2e6 records/day x 3e3 bytes = 6e9 bytes/day = 6 GB/day; x 7 days = 42 GB (before replication/index overhead). With 24 h retention it would be about 6 GB.",
+      "ref": "unit-3-idempotency-auth.md#2-idempotency-keys-end-to-end"
+    },
+    {
+      "id": "A1-052",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "retries"
+      ],
+      "difficulty": 2,
+      "prompt": "A mobile SDK generates a fresh UUID Idempotency-Key for every HTTP attempt, including retries. What protection does the server's idempotency layer provide?",
+      "choices": [
+        "Protection only after the TTL expires",
+        "None for retries: each attempt looks like a new intent and executes",
+        "Protection only for concurrent duplicates",
+        "Full protection, because every request has a key"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "The key must identify the user's intent and be reused across attempts. Fresh keys per attempt never collide, so nothing is deduplicated, concurrent or sequential. TTL is irrelevant.",
+      "ref": "unit-3-idempotency-auth.md#2-idempotency-keys-end-to-end"
+    },
+    {
+      "id": "A1-053",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "replication"
+      ],
+      "difficulty": 3,
+      "prompt": "You store idempotency keys in a Redis primary with asynchronous replication. The primary fails and a replica is promoted. Shortly after, some retried transfers execute twice. Why?",
+      "choices": [
+        "Keys written just before the failover had not reached the replica, so retries of those requests found no record",
+        "Replicas reject writes for keys longer than 64 bytes",
+        "Redis TTLs are reset on failover",
+        "Redis SET NX is not atomic"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Asynchronous replication loses recent writes on failover; for money movement that window becomes duplicates. That's why the lab's notes prefer the same database transaction as the effect. Failover doesn't reset TTLs; SET NX is atomic on a single primary; there's no such key-length rule.",
+      "ref": "unit-3-idempotency-auth.md#2-idempotency-keys-end-to-end"
+    },
+    {
+      "id": "A1-054",
+      "type": "single",
+      "tags": [
+        "jwt",
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "A verifier reads the alg field from a JWT header and uses whatever algorithm it names. Which attack does this enable?",
+      "choices": [
+        "Padding-oracle decryption of the payload",
+        "Token size explosion beyond header limits",
+        "Clock-skew rejection of valid tokens",
+        "alg: none tokens with no signature, and RS256-to-HS256 confusion using the public key as an HMAC secret"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "The token's header is attacker-controlled; verifiers must allow-list algorithms per issuer/key. Signed JWTs are not encrypted (no padding oracle); clock skew and size are real JWT problems but unrelated to trusting alg.",
+      "ref": "unit-3-idempotency-auth.md#3-authentication-and-tokens"
+    },
+    {
+      "id": "A1-055",
+      "type": "single",
+      "tags": [
+        "jwt",
+        "security"
+      ],
+      "difficulty": 3,
+      "prompt": "Six internal services verify partner access tokens signed with HS256 using one shared secret. One service is compromised and its config is read. What can the attacker now do, and what is the fix?",
+      "choices": [
+        "Nothing, because HMAC secrets cannot be used to sign",
+        "Only read tokens that pass through that service; rotate the secret yearly",
+        "Decrypt all tokens; switch to JWE",
+        "Mint valid tokens for any partner and tenant; switch to asymmetric signatures (ES256/RS256) with verifiers fetching public keys via JWKS"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "With HMAC, verify-capable means sign-capable. Asymmetric keys keep signing power with the issuer only. It's much worse than reading tokens; HMAC is exactly the signing operation; signed tokens aren't encrypted, and JWE solves confidentiality, not this.",
+      "ref": "unit-3-idempotency-auth.md#3-authentication-and-tokens"
+    },
+    {
+      "id": "A1-056",
+      "type": "single",
+      "tags": [
+        "jwt",
+        "auth"
+      ],
+      "difficulty": 2,
+      "prompt": "A partner's 24-hour JWT access token leaked into a third-party log tool. Verifiers check tokens locally. What is the standard design that would have limited the damage?",
+      "choices": [
+        "Encrypting the JWT payload",
+        "Longer tokens so partners refresh less often",
+        "Base64-encoding the token twice",
+        "Short-lived access tokens (minutes) plus refresh tokens revocable at the auth server, with a jti/subject denylist for emergencies"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Local verification can't see revocations, so short lifetimes bound exposure and refresh is where revocation is enforced; a small pushed denylist handles emergencies. Longer tokens extend exposure; encryption doesn't stop a bearer token from being used; double encoding is not security.",
+      "ref": "unit-3-idempotency-auth.md#3-authentication-and-tokens"
+    },
+    {
+      "id": "A1-057",
+      "type": "single",
+      "tags": [
+        "jwt"
+      ],
+      "difficulty": 1,
+      "prompt": "Is the payload of a signed JWT (JWS) confidential?",
+      "choices": [
+        "No; it is base64url-encoded and readable by anyone who has the token",
+        "Yes, if the algorithm is HS256",
+        "Only when the typ header is JWT",
+        "Yes; the signature encrypts it"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Signing provides integrity and authenticity, not confidentiality. Use JWE (or keep sensitive data out of tokens) for confidentiality. HS256 and typ don't change that.",
+      "ref": "unit-3-idempotency-auth.md#3-authentication-and-tokens"
+    },
+    {
+      "id": "A1-058",
+      "type": "single",
+      "tags": [
+        "jwt",
+        "operations"
+      ],
+      "difficulty": 2,
+      "prompt": "Right after a VM migration, one service rejects freshly issued tokens as 'not yet valid' for about 40 seconds after login, while other services accept them. What is the likely cause and fix?",
+      "choices": [
+        "The token's kid is unknown; refresh JWKS",
+        "That host's clock is behind the issuer's; allow a small leeway on nbf/exp and fix and monitor NTP",
+        "The token is too large; increase header buffers",
+        "The token was signed with the wrong algorithm; add HS512"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "nbf is in that verifier's future because its clock lags. Leeway (tens of seconds) plus NTP monitoring fixes it. Unknown kid, algorithm or size problems would fail consistently on every host and with different errors.",
+      "ref": "unit-3-idempotency-auth.md#3-authentication-and-tokens"
+    },
+    {
+      "id": "A1-059",
+      "type": "single",
+      "tags": [
+        "oauth",
+        "auth",
+        "mobile"
+      ],
+      "difficulty": 2,
+      "prompt": "Which OAuth flow should a native mobile banking app use to obtain access tokens for your API?",
+      "choices": [
+        "Implicit flow, returning the token in the redirect fragment",
+        "Client credentials with a client secret embedded in the app",
+        "Resource owner password credentials, posting the member's password to the token endpoint",
+        "Authorization code with PKCE (S256), via the system browser"
+      ],
+      "answer": [
+        3
+      ],
+      "explanation": "Code + PKCE binds the code to the app instance and keeps tokens out of URLs (RFC 7636, RFC 8252). Implicit leaks tokens via URLs and is dropped in OAuth 2.1; a secret in a distributed app is not secret; the password grant exposes credentials to the app and is also dropped in OAuth 2.1.",
+      "ref": "unit-3-idempotency-auth.md#4-delegated-access-enterprise-sso-and-service-to-service-auth"
+    },
+    {
+      "id": "A1-060",
+      "type": "single",
+      "tags": [
+        "oauth",
+        "auth",
+        "security"
+      ],
+      "difficulty": 3,
+      "prompt": "Your transfers API accepted the OIDC ID token that the mobile app received at login as an API credential. What is the core problem?",
+      "choices": [
+        "ID tokens are opaque strings that cannot be verified",
+        "ID tokens cannot contain a subject",
+        "An ID token is meant for the client app (aud = client ID), not for the API; accepting it allows tokens minted for other clients to call the API",
+        "ID tokens are always unsigned"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "APIs must require access tokens whose audience is the API; ID tokens describe the login for the client. ID tokens are signed JWTs, contain sub, and are verifiable - none of the distractors is true.",
+      "ref": "unit-3-idempotency-auth.md#4-delegated-access-enterprise-sso-and-service-to-service-auth"
+    },
+    {
+      "id": "A1-061",
+      "type": "single",
+      "tags": [
+        "auth",
+        "oauth",
+        "security"
+      ],
+      "difficulty": 2,
+      "prompt": "Fintech partners' servers call your money-movement API. Which authentication approach best balances security and operability?",
+      "choices": [
+        "Authorization code flow with a partner employee logging in nightly",
+        "OAuth client credentials issuing short-lived, scoped, tenant-bound access tokens, with mTLS or certificate-bound tokens for money-movement scopes",
+        "A single long-lived API key per partner with full access",
+        "HTTP Basic auth with each partner's admin username and password"
+      ],
+      "answer": [
+        1
+      ],
+      "explanation": "Client credentials give rotation, scopes and short exposure; sender-constrained tokens make leaks far less useful. Long-lived unscoped keys and shared passwords are bearer secrets with large blast radius; an interactive login flow doesn't fit server-to-server automation.",
+      "ref": "unit-3-idempotency-auth.md#4-delegated-access-enterprise-sso-and-service-to-service-auth"
+    },
+    {
+      "id": "A1-062",
+      "type": "multi",
+      "tags": [
+        "saml",
+        "auth",
+        "security"
+      ],
+      "difficulty": 3,
+      "prompt": "Select ALL checks a SAML service provider must perform on an incoming assertion.",
+      "choices": [
+        "InResponseTo matches a request you sent, or replay protection exists for IdP-initiated SSO",
+        "The signature covers the exact assertion element whose subject you read",
+        "Attributes from any assertion in the response are trusted once one signature validates",
+        "The audience restriction names your SP entity ID"
+      ],
+      "answer": [
+        0,
+        1,
+        3
+      ],
+      "explanation": "Audience, exact-signed-element (defeats XML signature wrapping) and replay checks are required, along with issuer, recipient, validity window and one-time use. Trusting any assertion once one signature validates is precisely the signature-wrapping vulnerability.",
+      "ref": "unit-3-idempotency-auth.md#4-delegated-access-enterprise-sso-and-service-to-service-auth"
+    },
+    {
+      "id": "A1-063",
+      "type": "single",
+      "tags": [
+        "auth",
+        "security",
+        "microservices"
+      ],
+      "difficulty": 2,
+      "prompt": "Your gateway validates tokens and forwards X-Partner-ID and X-Tenant-ID headers to internal services over plain HTTP inside the VPC; services trust the headers. What is the risk and the fix?",
+      "choices": [
+        "Headers may be truncated; base64-encode them",
+        "The gateway becomes a bottleneck; move validation to DNS",
+        "Any process that can reach a service can forge the headers and act as any partner or tenant; use mTLS between services and/or a signed internal token that services verify",
+        "None, because the VPC is private"
+      ],
+      "answer": [
+        2
+      ],
+      "explanation": "Identity propagated as a bare header is only as trustworthy as the network, and one compromised box breaks it. mTLS proves which service set it; signed tokens prove the claims. 'Private network' is not authentication; encoding doesn't add trust; DNS has nothing to do with authorisation.",
+      "ref": "unit-3-idempotency-auth.md#4-delegated-access-enterprise-sso-and-service-to-service-auth"
+    }
+  ]
+}

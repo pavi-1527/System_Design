@@ -1,0 +1,1163 @@
+{
+  "module": "C7",
+  "title": "Case study: notification service",
+  "draw": 15,
+  "questions": [
+    {
+      "id": "C7-001",
+      "type": "single",
+      "tags": [
+        "design",
+        "requirements"
+      ],
+      "difficulty": 2,
+      "prompt": "You have time for one more clarifying question before designing a notification service for a 100 M-user consumer app. Which answer changes the design the most?",
+      "choices": [
+        "What kinds of messages are sent (security, transactional, informational, marketing), with a latency budget and a 'duplicate or miss, which is worse?' answer for each",
+        "Whether push notifications can carry images and action buttons",
+        "Which template-authoring tool the marketing team wants",
+        "How many engineers will maintain the service"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The category taxonomy carries the policy: lanes, which messages honour opt-out and quiet hours, TTLs, and the retry rule at the vendor boundary. Rich push is a payload parameter, not an architectural decision. The authoring UI is usually out of scope. Team size affects how many services you split into, not the core design.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-an-interviewer-expects"
+    },
+    {
+      "id": "C7-002",
+      "type": "multi",
+      "tags": [
+        "design",
+        "requirements",
+        "idempotency"
+      ],
+      "difficulty": 1,
+      "prompt": "Select ALL the requirements that are about not sending a notification.",
+      "choices": [
+        "Deduplication: the same event for the same user produces one message",
+        "Preferences: per-category channel opt-out and quiet hours",
+        "Frequency caps: at most N marketing messages per user per period",
+        "Expiry: a notification carries a TTL after which it is not worth sending",
+        "Provider failover to a second SMS vendor",
+        "Localised templates per channel"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "Dedupe, preferences, frequency caps and expiry are the four 'don't send' requirements; a candidate who lists only channels has described a vendor SDK. Failover is about getting a message out when a vendor fails, the opposite concern. Localisation decides what the message says, not whether it is sent.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-an-interviewer-expects"
+    },
+    {
+      "id": "C7-003",
+      "type": "single",
+      "tags": [
+        "design",
+        "requirements",
+        "latency"
+      ],
+      "difficulty": 2,
+      "prompt": "Product relaxes the OTP requirement from 'within 5 s' to 'within 60 s'. Which change to the design does that justify?",
+      "choices": [
+        "The urgent lane may share workers with transactional alerts and use one longer timeout instead of two short attempts, but it still needs a lane separate from campaigns",
+        "Lanes are no longer needed: 60 s is long enough for an OTP to wait behind anything",
+        "OTPs can move into the campaign topic with a high-priority field",
+        "Retries across a timeout are no longer needed for OTPs"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A 60 s budget relaxes the urgent lane's latency engineering (shared workers, one longer call instead of fast failover), but a campaign can take an hour to drain, so OTPs still must not share its queue. A priority field inside a topic does not reorder a partition. Whether to retry after a timeout depends on duplicate-vs-miss, which hasn't changed: a missed OTP still locks the member out.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-an-interviewer-expects"
+    },
+    {
+      "id": "C7-004",
+      "type": "single",
+      "tags": [
+        "design",
+        "exactly-once",
+        "messaging"
+      ],
+      "difficulty": 2,
+      "prompt": "An interviewer asks what delivery guarantee your notification service offers. Which answer is both honest and senior?",
+      "choices": [
+        "At-least-once to the provider, with dedupe on our side so a user doesn't see two notifications for one event, and a per-category rule for retrying after a timeout",
+        "Exactly-once, using Kafka transactions between the API and the workers",
+        "Exactly-once whenever the vendor returns 2xx, because that confirms delivery",
+        "At-most-once for every category, so nobody ever gets a duplicate"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A timed-out vendor call has an unknown outcome, so exactly-once is unavailable across the vendor boundary; Kafka transactions cover your log, not the vendor. A 2xx means accepted, not received. At-most-once everywhere is a legitimate trade-off for some categories but wrong for OTPs, where a miss locks members out.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-an-interviewer-expects"
+    },
+    {
+      "id": "C7-005",
+      "type": "single",
+      "tags": [
+        "design",
+        "multitenancy",
+        "circuit-breaker"
+      ],
+      "difficulty": 3,
+      "prompt": "Your notification service goes from one tenant to forty credit unions, each with its own SMS vendor account and contracted rate. Which change follows?",
+      "choices": [
+        "Key breakers and rate limiters by tenant + provider, throttle campaigns per tenant with a fair share of the lanes, and put the tenant id on every key, row and metric",
+        "Keep one breaker per vendor, so all tenants fail over together when any account sees errors",
+        "Accept the tenant id in the request body so callers can choose which account to bill",
+        "Use one shared rate limiter set to the sum of all forty contracts"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Per-tenant accounts make health and capacity per tenant × provider: one tenant's 429s are its account's limit, not the vendor's health. A breaker shared across tenants fails everyone over on one tenant's quota problem. The tenant comes from the authenticated principal, never the body. A summed limiter lets one tenant use another's contracted capacity, and the vendor still rejects per account.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-an-interviewer-expects"
+    },
+    {
+      "id": "C7-006",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "qps"
+      ],
+      "difficulty": 1,
+      "prompt": "570 M notifications a day across all channels. What is the average rate? Answer in notifications per second.",
+      "value": 6600,
+      "tolerance": 0.25,
+      "unit": "notifications/s",
+      "explanation": "570,000,000 / 86,400 ≈ 6,600 per second. The napkin version 570 M / 10^5 ≈ 5,700 is within tolerance. Peak at 3× is ≈ 20k/s, which is small for your own infrastructure: the vendors, not your servers, are the bottleneck.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C7-007",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "A marketing campaign must reach 10 M members by SMS. The SMS vendor accepts 1,000 messages per second on your account. Ignoring everything else, how long does the SMS leg take? Answer in hours.",
+      "value": 2.8,
+      "tolerance": 0.25,
+      "unit": "hours",
+      "explanation": "10,000,000 / 1,000 per second = 10,000 s ≈ 2.8 hours. No number of workers changes this: the contract is the ceiling. The decision is to reserve SMS capacity for urgent traffic and either let the campaign take hours, move it to push or email, or contract more throughput.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C7-008",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "concurrency"
+      ],
+      "difficulty": 2,
+      "prompt": "At a peak of 20,000 notifications per second, each provider call takes about 300 ms. How many provider calls are in flight across the fleet? Answer as a count of calls.",
+      "value": 6000,
+      "tolerance": 0.25,
+      "unit": "calls",
+      "explanation": "Little's law: in flight = arrival rate × latency = 20,000/s × 0.3 s = 6,000 calls (for example 30 workers × 200 goroutines). This is the pool you size, and the number that collapses when the vendor slows down.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C7-009",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "concurrency",
+        "latency"
+      ],
+      "difficulty": 2,
+      "prompt": "Your fleet has a fixed pool of 6,000 concurrent provider calls. The vendor's latency rises from 300 ms to 3 s during a brownout. What is the most the pool can now complete per second? Answer in messages per second.",
+      "value": 2000,
+      "tolerance": 0.25,
+      "unit": "messages/s",
+      "explanation": "Throughput = concurrency / latency = 6,000 / 3 s = 2,000 per second, down from 20,000. With 20k/s still arriving, the backlog grows by ≈ 18k/s. This is why timeouts sized to the budget, per-provider breakers and failover are capacity tools, not just error handling.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C7-010",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "storage"
+      ],
+      "difficulty": 2,
+      "prompt": "570 M notifications a day, ≈ 1.3 attempts per notification, ≈ 300 B per attempt record, kept 90 days, replicated 3 times. How much storage does the attempt log need? Answer in TB.",
+      "value": 60,
+      "tolerance": 0.25,
+      "unit": "TB",
+      "explanation": "570 M × 1.3 ≈ 740 M attempts/day × 300 B ≈ 220 GB/day; × 90 days ≈ 20 TB; × 3 replicas ≈ 60 TB. Counting notifications instead of attempts underestimates by 30%; storing rendered bodies (≈ 1 KB) instead of template id + params would roughly triple it and put PII in the log.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C7-011",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "cost",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "You send 20 M SMS a day at ≈ $0.008 each. A retry bug causes a 1% duplicate rate. What do the duplicates cost per 30-day month? Answer in USD.",
+      "value": 48000,
+      "tolerance": 0.25,
+      "unit": "USD",
+      "explanation": "20 M × 1% = 200k duplicates a day × $0.008 = $1,600 a day × 30 ≈ $48,000 a month, before the contact-centre calls. That number is why dedupe is a feature with a dollar value and why marketing SMS are never retried across a timeout.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C7-012",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "rate-limiting",
+        "retries"
+      ],
+      "difficulty": 2,
+      "prompt": "During a campaign the SMS lane's backlog grows. The vendor caps your account at 1,000 messages per second, and the on-call engineer scales the SMS workers from 100 to 500. What happens?",
+      "choices": [
+        "Throughput stays at about 1,000 per second; the extra workers produce 429s, which the retry policy multiplies into more load",
+        "Throughput rises roughly fivefold and the backlog clears",
+        "Latency per message drops because each worker has less to do",
+        "The vendor raises the cap automatically once it sees sustained demand"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The vendor's contract is the ceiling; more consumers only push requests above it and get 429s, and immediate retries multiply them. Fivefold throughput assumes your side is the bottleneck, which §2's arithmetic rules out. Per-message latency is set by the vendor, not by worker load. Caps are raised by contract, not by demand. Shape traffic instead: lanes, a campaign throttle, a per-provider limiter.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C7-013",
+      "type": "single",
+      "tags": [
+        "estimation",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Which single number most changes the design of a notification service?",
+      "choices": [
+        "The vendor's throughput cap relative to the largest burst you must deliver",
+        "The total number of registered users",
+        "The average size of a notification body",
+        "The number of templates in the catalogue"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Your side scales by adding workers and partitions; the vendor cap doesn't. It decides whether campaigns need their own lane and throttle, whether you need a second provider, and whether SMS can be a campaign channel at all. User count matters only through rates. Body size gives ≈ 20 MB/s at peak, trivial. Template count affects a cache, not the architecture.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C7-014",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "qps",
+        "backpressure"
+      ],
+      "difficulty": 1,
+      "prompt": "A campaign to 10 M members is throttled to spread evenly over one hour instead of going out in ten minutes. What is the campaign's send rate? Answer in notifications per second.",
+      "value": 2800,
+      "tolerance": 0.25,
+      "unit": "notifications/s",
+      "explanation": "10,000,000 / 3,600 s ≈ 2,800 per second, versus ≈ 17,000 per second in ten minutes (nearly a second daily peak on top of the peak). Throttling by design, in its own lane, is what keeps the campaign from crowding urgent traffic.",
+      "ref": "unit-1-guided-design.md#2-estimation-the-numbers-that-decide-the-design"
+    },
+    {
+      "id": "C7-015",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "A caller sends POST /v1/notifications with a dedupe_key that was already used within its window. What should the API return?",
+      "choices": [
+        "200 with the existing notification's id and status 'deduplicated'",
+        "409 Conflict, so the caller knows it sent a duplicate",
+        "202 Accepted with a new id, and let the worker drop the duplicate later",
+        "422 Unprocessable Entity, because the key is invalid"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A dedupe hit means the caller did the right thing and the notification already exists, so it's a success that points at the existing id. A 409 invites the caller to 'fix' it by retrying with a new key, which defeats dedupe. A new id pushes the duplicate into the pipeline. 422 is for invalid input; the key is valid, merely used.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C7-016",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "async",
+        "availability"
+      ],
+      "difficulty": 2,
+      "prompt": "The auth service team asks for POST /v1/notifications to return 200 only after the SMS vendor accepts the passcode, so they know it was sent. Why is 202 with an id the better design?",
+      "choices": [
+        "A synchronous vendor call makes the auth service inherit the vendor's latency and outages, and a caller timeout during a slow call creates the duplicate you are trying to avoid",
+        "202 is faster because the notification is never written to storage",
+        "HTTP forbids 200 for requests that trigger external side effects",
+        "The vendor's acceptance is the same as delivery, so there is nothing more to wait for"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Keeping the vendor out of callers' request paths is the point: login p99 should not track an SMS vendor's brownout, and a timed-out synchronous call is retried into a duplicate. The notification is stored before the 202, so durability isn't traded away. HTTP allows 200 for side effects. Acceptance isn't delivery; status comes from polling or a callback.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C7-017",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "audit",
+        "data-model"
+      ],
+      "difficulty": 2,
+      "prompt": "The SMS vendor's delivery receipts are matched to notifications by phone number. A member with two numbers, and a failover between two vendors, now show wrong statuses. What should receipts correlate on?",
+      "choices": [
+        "The vendor's message id, stored on the attempt row when the vendor accepted it, mapped to (notification, attempt)",
+        "The phone number plus the timestamp closest to the receipt",
+        "A hash of the rendered message body",
+        "The member's user id"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Only the provider message id identifies the exact attempt the receipt is about, including which vendor and which retry. Phone number plus nearest time still mismatches when two messages go out close together. A body hash collides for identical texts (two OTPs with the same template differ only in params, two promos are identical). User id identifies neither the notification nor the attempt.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C7-018",
+      "type": "single",
+      "tags": [
+        "webhooks",
+        "audit",
+        "reliability"
+      ],
+      "difficulty": 3,
+      "prompt": "Your receipt webhook receives a receipt for a provider message id that matches no attempt row. What should the handler do?",
+      "choices": [
+        "Park it and re-match for a few minutes (the attempt row may not be committed yet), then store it as an orphan and alert if orphans arrive at a sustained rate",
+        "Drop it; the vendor will resend it later",
+        "Create a new notification row so the receipt has somewhere to land",
+        "Return 500 forever so the vendor keeps retrying until the row appears"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The usual cause is a race: the vendor answered faster than your attempt write committed, so a short retry finds it; a sustained stream of orphans means correlation is broken (a second environment, the wrong account) and deserves an alert. Dropping loses audit evidence: vendor retries have a limited window. A synthetic notification corrupts the log. Failing the webhook for minutes pushes the problem onto the vendor's retry policy, which may give up or back off for hours.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C7-019",
+      "type": "multi",
+      "tags": [
+        "api-design",
+        "multitenancy"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the things the caller of POST /v1/notifications should decide (rather than the notification service).",
+      "choices": [
+        "The recipient user id",
+        "The category, such as security.otp or marketing.offer",
+        "The template id, version and parameters",
+        "The dedupe_key derived from the business event",
+        "The tenant id, sent in the request body",
+        "Which SMS vendor carries the message"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "The caller knows who, what kind, which template and params, and the business event behind the keys. The tenant comes from the authenticated principal; a body field would let a caller act for another tenant. The provider is chosen by the service's adapters by health, policy and tenant contract; callers choosing vendors bypass failover and breakers.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C7-020",
+      "type": "single",
+      "tags": [
+        "data-model",
+        "audit"
+      ],
+      "difficulty": 2,
+      "prompt": "After a failover, a notification row says 'delivered by vendor B', and nothing records that vendor A timed out first. A member reports two identical texts. What data-model change lets you investigate this next time?",
+      "choices": [
+        "An append-only attempts table with one row per provider call and per receipt; the notification's status is derived from it",
+        "A last_error column on the notification row, overwritten on each attempt",
+        "Store the rendered body so support can compare the two texts",
+        "Increase log verbosity in the worker and grep for the notification id"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The attempt history is the evidence: A timed out (unknown outcome, perhaps sent), B accepted. An overwritten column keeps only the latest error and loses the sequence. The body tells you what was sent, not by whom or how many times, and adds PII. Grepping logs across a fleet is the 'two-day grep' this design avoids.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C7-021",
+      "type": "single",
+      "tags": [
+        "api-design",
+        "security",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Fourteen services each render their own SMS text ('Your transfer of $2,400 to J. Smith posted') and send it to the notification API. What does moving to templates by reference (id, version, params) fix?",
+      "choices": [
+        "Consistent wording and localisation in one place, and personal data confined to typed, encrypted params rather than free text in every caller's request logs",
+        "It removes the need for an idempotency key, because identical params mean identical messages",
+        "It lets the API send synchronously, since rendering is cheap",
+        "It guarantees that SMS messages fit in one segment"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Rendering in the worker per channel and locale gives one source of truth for text, versioned and reviewable, and params can be encrypted and redacted. Identical params don't mean the same business event (two transfers of the same amount), so keys are still needed. Rendering cost was never the reason for 202. Segment length depends on the rendered text and encoding; templates make it checkable at publish time, not guaranteed.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C7-022",
+      "type": "single",
+      "tags": [
+        "design",
+        "queues",
+        "messaging"
+      ],
+      "difficulty": 2,
+      "prompt": "A colleague proposes one Kafka topic for all notifications with a priority field, and workers that 'handle urgent ones first'. A 10 M-message campaign is enqueued at 09:00. What happens to an OTP enqueued at 09:01?",
+      "choices": [
+        "It waits behind the campaign messages ahead of it in its partition; a field doesn't reorder a partition, so separate topics with separate consumer groups are what isolate lanes",
+        "Kafka delivers it first because consumers can fetch by priority",
+        "It is delivered first as long as the workers sort each batch by priority",
+        "It is delayed only if the campaign and the OTP have the same partition key"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A partition is consumed in offset order; once millions of campaign messages are ahead of the OTP, sorting within a fetched batch barely helps, and Kafka has no priority fetch. Same-partition-key matters little: with millions of campaign messages, every partition is backed up. Topic per lane × channel gives separate pools, backlogs, alerts and DLQs.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-both-paths-traced"
+    },
+    {
+      "id": "C7-023",
+      "type": "single",
+      "tags": [
+        "outbox",
+        "design",
+        "availability"
+      ],
+      "difficulty": 2,
+      "prompt": "The transfers service must trigger a 'transfer received' alert. The notification service is down for 20 minutes. Which integration loses nothing and never blocks a transfer?",
+      "choices": [
+        "Write the event to an outbox table in the same transaction as the transfer; a relay delivers it at-least-once with the event id as the Idempotency-Key",
+        "Call the notification API synchronously inside the transfer request, with three retries",
+        "Commit the transfer, then publish to a topic in a fire-and-forget call",
+        "Use a two-phase commit between the transfers database and the notification service"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The outbox makes the event durable with the transfer, and the relay retries until the notification service is back; the event id as the key makes those retries harmless. A synchronous call blocks transfers on a dependency and duplicates on timeout. Publish-after-commit loses events on crashes between the two. 2PC couples availability of both services and isn't offered by notification APIs.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-both-paths-traced"
+    },
+    {
+      "id": "C7-024",
+      "type": "single",
+      "tags": [
+        "design",
+        "idempotency",
+        "consistency"
+      ],
+      "difficulty": 2,
+      "prompt": "Where should dedupe be enforced, and where should preferences be evaluated?",
+      "choices": [
+        "Dedupe at the API, atomically and before anything is queued; preferences in the worker at send time",
+        "Both at the API, so a rejected notification never enters the queue",
+        "Both in the worker, so all decisions are in one place",
+        "Preferences at the API, dedupe in the worker after rendering"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Dedupe keys are known at request time and must be checked atomically and early so duplicates never consume capacity. Preferences can change while a message waits, and quiet hours depend on when the send happens, so they belong at send time. Preferences at the API miss late opt-outs; dedupe in the worker lets duplicates queue and race.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-both-paths-traced"
+    },
+    {
+      "id": "C7-025",
+      "type": "multi",
+      "tags": [
+        "failover",
+        "circuit-breaker",
+        "rate-limiting"
+      ],
+      "difficulty": 3,
+      "prompt": "SMS vendor A refuses connections for 30 minutes starting at 09:00, during a campaign. Vendor B is configured. Select ALL that a well-designed service does.",
+      "choices": [
+        "Opens A's breaker after a few fast failures and sends urgent SMS to B in the same pass",
+        "Throttles campaign SMS per provider, so the campaign can't saturate B's capacity",
+        "Alerts on A's error rate, breaker state and the campaign lane's queue age",
+        "Keeps OTPs queued until A recovers, so they all go through one vendor",
+        "Retries every failed campaign message immediately until A answers"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "The breaker makes A's failure cheap and B takes urgent traffic within the budget. Because B's capacity is shared, the campaign throttle must be per provider or the campaign moves its load onto B and starves urgent there too. Queueing OTPs for 30 minutes defeats failover and they'd expire anyway. Immediate retries against a dead vendor burn worker time and become the recovery wave.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-both-paths-traced"
+    },
+    {
+      "id": "C7-026",
+      "type": "numeric",
+      "tags": [
+        "timeouts",
+        "latency",
+        "failover"
+      ],
+      "difficulty": 2,
+      "prompt": "An urgent SMS has a 5 s end-to-end budget. The carrier takes ≈ 2 s, your API and queueing ≈ 0.3 s. You allow two provider calls (one failover). What per-call timeout fits? Answer in seconds.",
+      "value": 1.35,
+      "tolerance": 0.25,
+      "unit": "s",
+      "explanation": "5 − 2 − 0.3 ≈ 2.7 s for provider calls; split over two calls ≈ 1.35 s each (1.2–1.5 s is the usual pick). A timeout set to the vendor's p99 would spend the whole budget on one slow call during a brownout.",
+      "ref": "unit-2-deep-dives.md#5-provider-failover-timeouts-and-retries"
+    },
+    {
+      "id": "C7-027",
+      "type": "single",
+      "tags": [
+        "retries",
+        "timeouts",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "A call to SMS vendor A to send a one-time passcode times out after 1.5 s. What should the worker do?",
+      "choices": [
+        "Send it via vendor B immediately, with the same code, because a duplicate passcode is harmless and a missing one locks the member out",
+        "Do nothing and wait for A's receipt, because the timeout may mean it was sent",
+        "Retry on A three times before considering B",
+        "Generate a new code and send that via B, so the member has the latest one"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "For an OTP the miss is the expensive outcome, so retry across the unknown outcome, and design the OTP so a resend within its validity window repeats the same code: two texts, same six digits. Waiting for a receipt spends the budget. Three retries on a slow vendor spend three timeouts. A new code makes two different codes arrive, and the member doesn't know which to type.",
+      "ref": "unit-2-deep-dives.md#5-provider-failover-timeouts-and-retries"
+    },
+    {
+      "id": "C7-028",
+      "type": "single",
+      "tags": [
+        "retries",
+        "timeouts",
+        "cost"
+      ],
+      "difficulty": 2,
+      "prompt": "A marketing SMS call times out. The vendor offers no idempotency key and no status lookup. What is the right policy?",
+      "choices": [
+        "Don't retry; record the attempt as sent-unknown and reconcile from receipts",
+        "Retry on the same vendor once after a second",
+        "Fail over to the second vendor immediately",
+        "Retry until a 2xx arrives, since marketing has a long TTL"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "For marketing, a duplicate costs money and complaints and a miss costs nothing, so an unknown outcome is not worth a retry. Any retry, on the same vendor or another, risks a duplicate. A long TTL means late is acceptable, not that duplicates are; retrying until 2xx after timeouts can send it several times.",
+      "ref": "unit-2-deep-dives.md#5-provider-failover-timeouts-and-retries"
+    },
+    {
+      "id": "C7-029",
+      "type": "multi",
+      "tags": [
+        "circuit-breaker",
+        "errors"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the responses a per-provider circuit breaker should count as provider failures.",
+      "choices": [
+        "503 Service Unavailable",
+        "A call that hits your client timeout",
+        "A connection reset",
+        "429 Too Many Requests for the account",
+        "400 for an invalid destination number",
+        "APNs 410 Unregistered for a device token"
+      ],
+      "answer": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "explanation": "5xx, timeouts, connection errors and account-level 429s reflect the provider's health or capacity. An invalid number and a dead token are the message's problem: record the rejection, feed it back (mark the number, delete the token) and don't retry anywhere. Counting them lets a batch of bad numbers open a breaker on a healthy vendor.",
+      "ref": "unit-2-deep-dives.md#5-provider-failover-timeouts-and-retries"
+    },
+    {
+      "id": "C7-030",
+      "type": "numeric",
+      "tags": [
+        "circuit-breaker",
+        "capacity"
+      ],
+      "difficulty": 2,
+      "prompt": "A vendor is down for 10 minutes. Your breaker opens after 5 consecutive failures, stays open for 30 s, then admits one probe (which fails, re-opening it). Roughly how many calls reach the dead vendor in those 10 minutes? Answer as a count of calls.",
+      "value": 25,
+      "tolerance": 0.25,
+      "unit": "calls",
+      "explanation": "5 failures to open, then one probe per 30 s cooldown: 600 s / 30 s = 20 probes, ≈ 25 calls in total. Without a breaker every send pays a timeout to the dead vendor: thousands of calls and minutes of worker time.",
+      "ref": "unit-2-deep-dives.md#5-provider-failover-timeouts-and-retries"
+    },
+    {
+      "id": "C7-031",
+      "type": "single",
+      "tags": [
+        "retries",
+        "backpressure",
+        "rate-limiting"
+      ],
+      "difficulty": 3,
+      "prompt": "Vendor A recovers after a 25-minute outage with 100,000 sends queued and the account contracted for 1,000 per second. How do you keep the recovery from becoming a second outage?",
+      "choices": [
+        "Drain through a per-provider rate limiter at ≈ 90% of the cap, with jittered backoff, a retry budget, Retry-After honoured, and expired messages dropped before each attempt",
+        "Retry everything immediately so the backlog clears as fast as possible",
+        "Scale the worker pool up tenfold for the recovery window",
+        "Disable the breaker so no probe delays the backlog"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The backlog can only drain at the vendor's rate; the limiter keeps you under it so you don't generate 429s, jitter and a budget stop aligned retry waves, and expiry drops passcodes nobody needs any more. Immediate retries and a larger pool hit the vendor at many times its cap. Disabling the breaker removes the protection if A relapses.",
+      "ref": "unit-2-deep-dives.md#5-provider-failover-timeouts-and-retries"
+    },
+    {
+      "id": "C7-032",
+      "type": "single",
+      "tags": [
+        "observability",
+        "alerting",
+        "failover"
+      ],
+      "difficulty": 3,
+      "prompt": "Vendor A returns 200 for every send, but its delivery receipts have stopped. Your API error-rate alert is green. How should you have noticed, and what do you do?",
+      "choices": [
+        "Per-provider delivered-rate and receipt-lag SLIs: accepted climbs while delivered stays flat; fail the urgent lane over to B by config and open a vendor ticket with message ids from the attempt log",
+        "The breaker opens automatically, because missing receipts count as failures",
+        "Wait for the vendor's status page, since the API is healthy",
+        "Alert on queue depth, which rises when receipts stop"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A vendor that accepts and doesn't deliver is invisible to error rates and breakers (every call is a 2xx); only receipt-based SLIs show it. Breakers count call outcomes, not receipts. Status pages lag. Queue depth doesn't move: messages are leaving the queue, they just aren't arriving.",
+      "ref": "unit-2-deep-dives.md#5-provider-failover-timeouts-and-retries"
+    },
+    {
+      "id": "C7-033",
+      "type": "single",
+      "tags": [
+        "retries",
+        "failover",
+        "latency"
+      ],
+      "difficulty": 2,
+      "prompt": "Your HTTP client retries the same backend three times by default. Why is that wrong for an urgent SMS with a second vendor available?",
+      "choices": [
+        "Three timeouts on a slow vendor spend the member's budget and three worker slots; one attempt, then the next provider, with a breaker making the first attempt free once the vendor is known-bad, fits the budget",
+        "Retries are always wrong for SMS because they create duplicates",
+        "The vendor's SLA forbids more than one retry",
+        "It is fine as long as the retries use exponential backoff"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The budget is per message and pool throughput is per call: three retries against a brownout cost three timeouts before anything reaches the member. For OTPs a duplicate is harmless, so retries are not the problem, the target is. SLAs don't regulate client retries. Backoff makes the wait longer, which is worse for an urgent budget.",
+      "ref": "unit-2-deep-dives.md#5-provider-failover-timeouts-and-retries"
+    },
+    {
+      "id": "C7-034",
+      "type": "numeric",
+      "tags": [
+        "circuit-breaker",
+        "capacity",
+        "timeouts"
+      ],
+      "difficulty": 2,
+      "prompt": "Break-it: 1,000 urgent sends go through [dead, backup] with breakers disabled, and every call to the dead provider costs a 2 s timeout before failover. How much worker time is spent waiting on the dead provider? Answer in minutes.",
+      "value": 33,
+      "tolerance": 0.25,
+      "unit": "min",
+      "explanation": "1,000 × 2 s = 2,000 s ≈ 33 minutes of worker time. With a threshold of 3, the breaker opens after 3 calls (6 s) and every later send goes straight to the backup. For a 200-goroutine pool, 2 s per message on the dead vendor caps throughput at ≈ 100/s instead of ≈ 670/s.",
+      "ref": "unit-2-deep-dives.md#5-provider-failover-timeouts-and-retries"
+    },
+    {
+      "id": "C7-035",
+      "type": "single",
+      "tags": [
+        "idempotency",
+        "outbox"
+      ],
+      "difficulty": 2,
+      "prompt": "After a broker failover, the transfers service's outbox relay re-sends 6 hours of events. The relay generates a new UUID Idempotency-Key for every HTTP call and sends no dedupe_key. 180,000 alerts go out twice. What is the fix?",
+      "choices": [
+        "Derive the keys from the business fact: Idempotency-Key = the event id, dedupe_key = transfer-received:{transfer_id}:{user}",
+        "Shorten the dedupe window to five minutes so replays are rejected faster",
+        "Enable Kafka's idempotent producer on the relay",
+        "Dedupe in the worker by comparing rendered message bodies"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "A key per HTTP call dedupes nothing; the event id makes the relay's resend the same request, and the business dedupe key catches a second producer of the same fact. A shorter window makes it worse (the replay spans hours). The idempotent producer dedupes one producer session's retries into a partition, not a relay re-reading its outbox. Body comparison rejects legitimate identical messages (two equal transfers) and runs too late.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-036",
+      "type": "single",
+      "tags": [
+        "design",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "The low-balance rule fires on every card authorisation while the balance is under $50, and a member gets 9 pushes in 40 minutes, then disables all notifications. What is the best fix?",
+      "choices": [
+        "Make the rule edge-triggered (fire on crossing below $50, re-arm above it) with a per-topic cooldown, and use a collapse key for anything still queued",
+        "A collapse key alone, so newer alerts replace older ones",
+        "An idempotency key per authorisation event",
+        "Raise the member's marketing frequency cap so alerts count against it"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The trigger is level-based; fixing it at the source removes the duplicates, a cooldown bounds repeats, and collapse handles queued ones. Collapse alone does nothing when each alert is sent immediately: there's nothing unsent to replace. Each authorisation is a distinct event, so an idempotency key per event dedupes nothing. Mixing alerts into the marketing cap would suppress promos or alerts arbitrarily and is the wrong category.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-037",
+      "type": "single",
+      "tags": [
+        "consistency",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "A campaign is expanded at 16:00 (opted-out members filtered) and drains until 18:48. A member replies STOP at 16:30. Where must the opt-out be checked so they aren't texted at 18:00?",
+      "choices": [
+        "In the worker at send time, immediately before the provider call, and again on every retry pass",
+        "At segment expansion, which is where the campaign was built",
+        "At the API when each campaign notification is created",
+        "In a nightly job that removes opted-out members from future campaigns"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Only the check closest to the provider call sees changes made while the message waited. The expansion-time and API-time checks are optimisations that ran at 16:00. A nightly job is hours too late and doesn't touch messages already queued; regulatory STOP must take effect immediately.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-038",
+      "type": "single",
+      "tags": [
+        "rate-limiting",
+        "design"
+      ],
+      "difficulty": 3,
+      "prompt": "Product wants 'at most 3 marketing messages per member per day'. Which statement about the implementation options is correct?",
+      "choices": [
+        "A token bucket (burst 3, refill 3 per 24 h) never allows more than 3 back to back, but a 24 h window can still see up to 5; a sliding log of send times enforces exactly 3 in any 24 h",
+        "A token bucket guarantees at most 3 in any 24 h window",
+        "A per-calendar-day counter guarantees at most 3 in any 24 h window",
+        "A sliding log allows up to 6 in a short span around midnight"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "The bucket bounds the burst at 3 and the long-run rate at 3 per day: after 3 at once, one more every 8 h, so a 24 h window can contain 5. A calendar-day counter allows 6 in minutes (3 at 23:50, 3 at 00:10) and needs a time zone for 'midnight'. The sliding log is the exact one, and at N = 3 it's three timestamps per member.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-039",
+      "type": "numeric",
+      "tags": [
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "A member's marketing cap is a token bucket with burst 3, refilled continuously at 3 tokens per 24 hours. They receive 3 marketing messages at 09:00, emptying the bucket. How long until the next one may be sent? Answer in hours.",
+      "value": 8,
+      "tolerance": 0.25,
+      "unit": "hours",
+      "explanation": "Refill rate = 3 tokens / 24 h = one token every 8 hours, so the next send is allowed at 17:00. The lab's limiter.allow does exactly this: tokens += elapsed / window × burst, capped at burst.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-040",
+      "type": "single",
+      "tags": [
+        "isolation",
+        "rate-limiting",
+        "multitenancy"
+      ],
+      "difficulty": 3,
+      "prompt": "Credit union 3's OTPs have their own topic and worker pool, yet their p99 reaches 9 s while credit union 12 runs a campaign and a replay floods the high lane. What was most likely shared, and what fixes it?",
+      "choices": [
+        "One first-come-first-served rate limiter in front of the SMS vendor; reserve a share per lane (urgent never waits for a lower lane's token, idle reservation lent downward) and give tenants weighted fair shares in the bulk lanes",
+        "The Kafka cluster; give the urgent lane a separate cluster",
+        "The database connection pool; double its size",
+        "Nothing; 9 s is within normal vendor variance"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Topics and pools isolate queueing and threads; the provider's capacity is the third shared layer, and FCFS hands it to whoever asks most. Per-lane reservations and per-tenant fair shares close that gap. A Kafka cluster at ≈ 20 MB/s is not the bottleneck. The connection pool isn't on the vendor path. A 9 s OTP violates a 5 s budget; it isn't noise.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-041",
+      "type": "multi",
+      "tags": [
+        "availability",
+        "design",
+        "consistency"
+      ],
+      "difficulty": 3,
+      "prompt": "The preference cache is unreachable for five minutes. Select ALL the correct send policies.",
+      "choices": [
+        "Marketing SMS: fail closed, wait in the retry topic",
+        "OTP: fail open, because service messages don't consult opt-out",
+        "Transactional alert: use the last known preferences if cached, otherwise defer within its TTL",
+        "OTP: fail closed until preferences are reachable, to be safe",
+        "Marketing SMS: fail open, since cache outages are rare"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "The policy is per category. Texting someone who said stop is a legal problem and a late promo isn't, so marketing waits. OTPs need only the phone number or token, and blocking them locks members out. Transactional alerts tolerate a minutes-stale channel choice. Fail-closed OTPs and fail-open marketing are each the wrong global policy applied to the wrong category.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-042",
+      "type": "numeric",
+      "tags": [
+        "estimation",
+        "idempotency",
+        "caching"
+      ],
+      "difficulty": 2,
+      "prompt": "Dedupe keys are stored in Redis with a 24 h window. At 570 M notifications a day and ≈ 100 B per key (key, value, expiry, overhead), how much memory does the window need? Answer in GB.",
+      "value": 57,
+      "tolerance": 0.25,
+      "unit": "GB",
+      "explanation": "570 M × 100 B ≈ 57 GB for one day of keys: a few Redis shards, split by tenant, plus a unique index on (tenant, dedupe_key) as the durable backstop. Cheap next to a 1% duplicate rate on SMS (≈ $48k a month).",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-043",
+      "type": "single",
+      "tags": [
+        "design",
+        "clocks"
+      ],
+      "difficulty": 2,
+      "prompt": "Quiet hours are stored as '22:00–08:00' and evaluated against the server's UTC clock. A digest deferred until 08:00 reaches a Seattle member at 01:00 local time. What is the right design?",
+      "choices": [
+        "Store an IANA time zone per member, evaluate quiet hours in that zone at send time, defer to the end with jitter, and record expiry if the end is past the TTL",
+        "Store a UTC offset per member, such as -08:00",
+        "Drop any normal notification that falls in quiet hours",
+        "Evaluate quiet hours once at the API, when the notification is created"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "An IANA zone handles DST; a fixed offset is wrong for half the year. Deferring keeps the message; jitter avoids a 2 M-message spike at 08:00; a TTL check stops stale content. Dropping loses digests silently. Evaluating at creation is wrong for anything that waits, which is exactly what deferred messages do.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-044",
+      "type": "single",
+      "tags": [
+        "messaging",
+        "retries",
+        "security"
+      ],
+      "difficulty": 3,
+      "prompt": "You replay a lane's dead-letter queue after a vendor outage. Which rule is correct?",
+      "choices": [
+        "Re-publish with the same notification ids to the lane's retry topic, re-running send-time rules: never send expired notifications, re-evaluate preferences and caps, and replay only retryable reasons",
+        "Send every dead letter again through the API with new idempotency keys, so dedupe doesn't reject them",
+        "Replay everything as urgent so the backlog clears quickly",
+        "Replay all reasons, including invalid numbers, since the vendor may have been the cause"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Same ids keep receipts and the audit trail correlated; the send-time rules stop a yesterday's passcode (a security incident) and honour opt-outs made since. New keys through the API create new notifications and defeat dedupe. Replaying as urgent steals the OTP lane's reserved capacity. Invalid numbers and dead tokens are message problems that will fail again.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-045",
+      "type": "single",
+      "tags": [
+        "concurrency",
+        "go",
+        "idempotency"
+      ],
+      "difficulty": 2,
+      "prompt": "In your dispatcher, Enqueue checks the dedupe map under the lock, releases it, then takes the lock again to insert. 50 goroutines enqueue the same OTP id at once. What is the bug, and how would it show up?",
+      "choices": [
+        "Several callers can pass the check before any of them inserts, so more than one can be accepted and the passcode delivered more than once; check and insert must be one critical section",
+        "There is no bug: each map access is individually locked, so exactly one caller is accepted",
+        "The race detector reports a data race on the map, and that report is the only symptom",
+        "The provider deduplicates by notification id, so the member still sees one text"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Locking each access separately leaves a window between check and insert: a check-then-act race with no data race, so -race may stay quiet while TestEnqueue_ConcurrentDuplicatesAreAcceptedOnce sees several accepted. Production's equivalent is SET NX or a unique index, one atomic step. Most vendors don't dedupe on your id, which is the whole reason the service must.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-046",
+      "type": "single",
+      "tags": [
+        "go",
+        "design"
+      ],
+      "difficulty": 1,
+      "prompt": "In labs/c7/dispatch, a Normal notification is processed at 02:00 while the member's quiet hours run until 08:00. What does the contract require?",
+      "choices": [
+        "Record it as deferred with NextAt = 08:00 and requeue it so NextDue returns 08:00; an Urgent notification at the same moment is sent",
+        "Record it as suppressed and drop it",
+        "Leave it at the head of the queue and re-check on every Process call",
+        "Defer both Normal and Urgent notifications until 08:00"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Quiet hours defer, they don't drop: the record says deferred, the item is requeued at the end, and TestProcess_QuietHoursDeferNormalAndPassUrgent checks NextDue. Suppressed is the rate-limit outcome. Leaving it due would spin Process. Urgent bypasses opt-out, quiet hours and the cap.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-047",
+      "type": "multi",
+      "tags": [
+        "concurrency",
+        "go",
+        "circuit-breaker"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the statements that are part of the labs/c7/dispatch contract.",
+      "choices": [
+        "d.mu is never held during a provider call",
+        "A half-open breaker admits exactly one probe at a time",
+        "A provider that panics counts as a failed attempt",
+        "An opted-out notification is requeued and retried after backoff",
+        "Quiet hours drop the notification and record the reason"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Holding the lock across Send would block every Enqueue behind a slow vendor. One probe at a time keeps a recovering vendor from a burst. A recovered panic is a failed attempt, not a dead worker. Opt-out drops (recorded, never retried), and quiet hours defer rather than drop.",
+      "ref": "unit-2-deep-dives.md#5-provider-failover-timeouts-and-retries"
+    },
+    {
+      "id": "C7-048",
+      "type": "single",
+      "tags": [
+        "circuit-breaker",
+        "retries",
+        "go"
+      ],
+      "difficulty": 3,
+      "prompt": "In the lab, every provider for a notification's channel has an open breaker, so no call is made in this pass, and attempts remain. When should the notification next be due?",
+      "choices": [
+        "At the later of now + Backoff(retries) and the earliest time an open breaker may admit a probe",
+        "Immediately, so the next Process call tries again",
+        "Never: it goes to the dead-letter list because no provider is available",
+        "At now + Backoff(retries), regardless of the breakers"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "With nothing callable, retrying before any breaker can half-open is wasted work, so the due time is pushed to the earliest reopen if that is later than the backoff (TestProcess_RetryWaitsForBreakerCooldownWhenAllProvidersAreOpen). Immediate requeue spins Process. Dead-lettering is for exhausted attempts or a channel with no provider at all. Ignoring breakers wakes up only to skip them again.",
+      "ref": "unit-2-deep-dives.md#5-provider-failover-timeouts-and-retries"
+    },
+    {
+      "id": "C7-049",
+      "type": "multi",
+      "tags": [
+        "observability",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "Select ALL the statements about what 'delivered' means that are correct.",
+      "choices": [
+        "A 2xx from APNs or FCM means the push service accepted it; the device may be off for days, and there is no receipt unless your app reports one",
+        "An SMS vendor's 2xx means accepted; a carrier receipt (delivered or undelivered) arrives later, sometimes never",
+        "An email 'open' is an estimate from a tracking pixel and over-counts when mail clients pre-fetch images",
+        "A 2xx from an SMS vendor means the handset has received the message"
+      ],
+      "answer": [
+        0,
+        1,
+        2
+      ],
+      "explanation": "Every 'sent' counter is 'accepted by someone else'. Push gives you acceptance only; SMS adds asynchronous carrier receipts; email adds delivery, bounce and complaint events, and opens are a noisy product metric. Treating an SMS 2xx as receipt is how a vendor that accepts and never delivers stays invisible.",
+      "ref": "unit-1-guided-design.md#1-requirements-and-the-questions-an-interviewer-expects"
+    },
+    {
+      "id": "C7-050",
+      "type": "single",
+      "tags": [
+        "observability",
+        "alerting",
+        "slo"
+      ],
+      "difficulty": 2,
+      "prompt": "Which metric should page on-call for the urgent lane?",
+      "choices": [
+        "The age of the oldest message in the urgent queue, for example above 500 ms",
+        "The number of messages in the urgent queue",
+        "CPU utilisation of the urgent workers",
+        "Total notifications sent per day"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Age measures what members feel (how long a passcode waits) whatever the arrival rate. Depth is ambiguous: 1,000 messages is fine at 10k/s and a disaster at 10/s. CPU is not the bottleneck when the vendor is. Daily totals are a capacity report, not a page.",
+      "ref": "unit-1-guided-design.md#4-high-level-design-both-paths-traced"
+    },
+    {
+      "id": "C7-051",
+      "type": "single",
+      "tags": [
+        "observability",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "A third of your 'delivered' pushes turn out to have gone to device tokens that APNs answers with 410 Unregistered. What should the service do with that response?",
+      "choices": [
+        "Record a rejection, delete the token if it is older than the device's last registration, and not count it toward the provider's breaker",
+        "Retry on FCM, since APNs may be unhealthy",
+        "Count it as a provider failure so the breaker opens",
+        "Ignore it; the push service will drop the message anyway"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "410 is a per-token signal: the app was uninstalled or the token rotated. Feeding it back to the token store stops 'sending' to wiped phones and makes the delivered metric honest. FCM can't deliver to an APNs token. Counting it against the breaker lets dead tokens open a breaker on a healthy vendor. Ignoring it keeps a third of your volume going nowhere.",
+      "ref": "unit-1-guided-design.md#3-api-and-data-model"
+    },
+    {
+      "id": "C7-052",
+      "type": "numeric",
+      "tags": [
+        "cost",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "STRETCH. A 120-character SMS template gains one emoji, which switches the message from GSM-7 to UCS-2 (70 characters in a single segment, 67 per segment when concatenated). How many segments is it now? Answer as a count of segments.",
+      "value": 2,
+      "tolerance": 0.25,
+      "unit": "segments",
+      "explanation": "In GSM-7, 120 characters fit one 160-character segment. In UCS-2 it exceeds 70, so it is concatenated at 67 per segment: ceil(120 / 67) = 2 segments, so twice the price per message. Check length and encoding per locale when the template version is published.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-053",
+      "type": "single",
+      "tags": [
+        "security",
+        "privacy",
+        "design"
+      ],
+      "difficulty": 2,
+      "prompt": "STRETCH. You add click tracking to emails. Which link design avoids leaking PII and avoids an open redirect?",
+      "choices": [
+        "An opaque random token mapped server-side to (notification, link); the redirect goes only to the URL stored for that token",
+        "A link with ?email=<address>&url=<destination> so attribution needs no lookup",
+        "A link with the member id base64-encoded and the destination URL as a query parameter",
+        "No redirect: append the member id to the destination URL for the marketing site to read"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Query strings land in proxy logs, browser history and third-party analytics, so they must carry nothing personal; base64 is encoding, not protection. Taking the destination from the request makes your domain an open redirect for phishing. Appending the member id to the destination leaks it to the destination site and its analytics.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-054",
+      "type": "single",
+      "tags": [
+        "observability",
+        "privacy"
+      ],
+      "difficulty": 2,
+      "prompt": "STRETCH. Email open rate jumps from 22% to 45% after a mail-client privacy update. What is the right interpretation?",
+      "choices": [
+        "The tracking pixel is now fetched on the user's behalf whether or not they read the message, so opens over-count; report it as a caveated product metric, never as a delivery SLI",
+        "Engagement doubled; scale up the campaign",
+        "The delivery rate doubled, because opens require delivery",
+        "Bot traffic is opening emails, so the vendor is compromised"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Privacy features pre-fetch remote images, so the pixel fires without a human reading. Engagement didn't double; delivery is measured by vendor delivery events, not opens. Automated fetching is a known behaviour, not a compromise. Opens and clicks are product metrics with caveats; scanners also inflate clicks.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    },
+    {
+      "id": "C7-055",
+      "type": "single",
+      "tags": [
+        "retries",
+        "idempotency",
+        "cost"
+      ],
+      "difficulty": 2,
+      "prompt": "A transactional 'payment posted' SMS times out at vendor A. Vendor A supports a client reference and a status lookup by that reference. What should the worker do?",
+      "choices": [
+        "Look the message up by its client reference (the attempt id) before deciding; retry or fail over only if the vendor has no record of it",
+        "Fail over to vendor B immediately, as for an OTP",
+        "Never retry, as for marketing",
+        "Retry on A immediately with a new client reference"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "For transactional alerts a duplicate confuses ('was I charged twice?') and a miss is a support ticket, so resolve the unknown outcome when the vendor makes it possible. The OTP rule accepts duplicates, which transactional can't. The marketing rule accepts misses, which transactional shouldn't when a lookup exists. A new reference defeats the lookup and the correlation.",
+      "ref": "unit-2-deep-dives.md#5-provider-failover-timeouts-and-retries"
+    },
+    {
+      "id": "C7-056",
+      "type": "single",
+      "tags": [
+        "design",
+        "rate-limiting"
+      ],
+      "difficulty": 2,
+      "prompt": "Why should the opt-out check run before the frequency-cap check in the send-time pipeline?",
+      "choices": [
+        "So a message the member opted out of doesn't consume one of their capped slots, which would suppress a message they do want",
+        "Because the cap check is slower than the preference lookup",
+        "Because opt-outs only apply to messages that pass the cap",
+        "The order doesn't matter; both drop the message"
+      ],
+      "answer": [
+        0
+      ],
+      "explanation": "Order is a design decision: dedupe first (so duplicates never touch caps), then expiry, preferences, the cap, and the shared provider limiter last. Speed is not the reason; both are in-memory. Opt-out applies regardless of the cap. Order matters because the cap is stateful: consuming a token for a message you then drop changes what the member receives later.",
+      "ref": "unit-2-deep-dives.md#6-deciding-not-to-send-dedupe-preferences-caps-and-lanes"
+    }
+  ]
+}

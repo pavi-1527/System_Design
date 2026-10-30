@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "id": "E3",
+  "slug": "job-pipeline",
+  "title": "Build: async job / notification pipeline",
+  "track": "E",
+  "status": "written",
+  "core": true,
+  "summary": "Broker, workers and a fake vendor as separate processes on localhost: a durable leased queue, retries with backoff + jitter, idempotency at both ends, dead letters and replay, backpressure and graceful drain, all proven by failure injection.",
+  "hours": {
+    "core": 15,
+    "stretch": 3,
+    "total": 18
+  },
+  "prerequisites": [
+    "A6",
+    "A7",
+    "B0"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/E3-job-pipeline",
+    "readme": "modules/E3-job-pipeline/README.md",
+    "quiz": "modules/E3-job-pipeline/quiz.json",
+    "design_exercise": "modules/E3-job-pipeline/design-exercise.md",
+    "teachback": "modules/E3-job-pipeline/teachback.md",
+    "lab": "labs/e3",
+    "solution": "solutions/e3"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "A durable queue and a pool of workers",
+      "file": "modules/E3-job-pipeline/unit-1-durable-queue.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "jobq"
+      ]
+    },
+    {
+      "n": 2,
+      "title": "Retries and idempotency at the vendor boundary",
+      "file": "modules/E3-job-pipeline/unit-2-retries-idempotency.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "jobq"
+      ]
+    },
+    {
+      "n": 3,
+      "title": "Dead letters, backpressure, drain and the failure run",
+      "file": "modules/E3-job-pipeline/unit-3-dead-letters-backpressure.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "jobq"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "jobq",
+      "title": "Job pipeline as three processes: broker (checksummed log, leases, nack delays, producer keys, DLQ and replay, depth bound), worker (bounded pool, classification, backoff + jitter, stable idempotency key, drain) and a fake vendor; milestone and failure-injection tests",
+      "unit": 1,
+      "core": true
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Implement a durable job broker on an append-only, checksummed log that survives SIGKILL and a torn tail, and explain which writes must be fsynced before acknowledging and which may not be.",
+      "core": true
+    },
+    {
+      "text": "Implement leases with visibility timeouts and per-attempt lease tokens, and explain why that makes delivery at-least-once and what a lease expiry means for a job that is still running.",
+      "core": true
+    },
+    {
+      "text": "Build a worker pool with bounded concurrency and long-polling that survives a broker outage or partition without exiting, spinning or overloading the vendor.",
+      "core": true
+    },
+    {
+      "text": "Classify vendor responses (timeout, 429, 5xx, other 4xx) into retryable and permanent, and implement exponential backoff with full or equal jitter and Retry-After as a floor, without overflow.",
+      "core": true
+    },
+    {
+      "text": "Make the pipeline effectively exactly-once at the vendor with a producer idempotency key at the broker and a stable consumer key per job, and show with a SIGKILL between effect and ack that it holds.",
+      "core": true
+    },
+    {
+      "text": "Dead-letter permanent failures, exhausted retries and jobs that keep killing workers with their attempt history, keep a poison job from blocking the queue, and replay safely after a fix.",
+      "core": true
+    },
+    {
+      "text": "Apply backpressure with a depth bound that answers 429 + Retry-After (and still recognises a producer's retry), and size the bound from drain time and memory.",
+      "core": true
+    },
+    {
+      "text": "Drain a worker on SIGTERM without losing or duplicating work, with a bounded drain time, and relate it to an orchestrator's grace period.",
+      "core": true
+    },
+    {
+      "text": "Write a design rationale that predicts the behaviour of every failure-injection scenario, then compare it with what the processes did and explain every difference.",
+      "core": true
+    },
+    {
+      "text": "Compact the log, add a shared retry budget across workers, and place the producer's transactional outbox and a partitioned broker in the design.",
+      "core": false
+    }
+  ]
+}

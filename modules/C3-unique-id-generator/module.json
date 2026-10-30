@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "C3",
+  "slug": "unique-id-generator",
+  "title": "Case study: unique ID generator",
+  "track": "C",
+  "status": "written",
+  "core": true,
+  "summary": "64-bit time-ordered ids with no coordinator on the hot path: the bit budget, a sequence that never wraps, clocks that step backwards, and node ids as leases with tokens, deadlines and floors.",
+  "hours": {
+    "core": 5,
+    "stretch": 1,
+    "total": 6
+  },
+  "prerequisites": [
+    "A4",
+    "A5"
+  ],
+  "gate": {
+    "requires": [
+      "quiz",
+      "lab",
+      "design",
+      "teachback"
+    ]
+  },
+  "paths": {
+    "dir": "modules/C3-unique-id-generator",
+    "readme": "modules/C3-unique-id-generator/README.md",
+    "quiz": "modules/C3-unique-id-generator/quiz.json",
+    "design_exercise": "modules/C3-unique-id-generator/design-exercise.md",
+    "teachback": "modules/C3-unique-id-generator/teachback.md",
+    "lab": "labs/c3",
+    "solution": "solutions/c3"
+  },
+  "units": [
+    {
+      "n": 1,
+      "title": "Guided design: requirements, bit budget, API and model, candidates and HLD, three deep dives (sequence, clock, node ids)",
+      "file": "modules/C3-unique-id-generator/unit-1-unique-id-generator.md",
+      "hours": {
+        "core": 5,
+        "stretch": 1
+      },
+      "labs": [
+        "snowflake"
+      ]
+    }
+  ],
+  "labs": [
+    {
+      "package": "snowflake",
+      "title": "Time + node + sequence ids: bit layout, a concurrent generator with overflow and clock-regression handling, node-id leases with tokens, deadlines and floors",
+      "unit": 1,
+      "core": true
+    }
+  ],
+  "outcomes": [
+    {
+      "text": "Scope an id-generator prompt in ≤ 6 minutes: uniqueness scope, size (64 bits, and 2^53 for JavaScript), the strength of ordering (none, k-sorted, per-producer, total), rates and bursts, processes and regions, behaviour during coordination outages, information leakage and gaps, and say which box each answer moves.",
+      "core": true
+    },
+    {
+      "text": "Estimate the bit budget: time bits from the tick and lifetime (and the end date for a given epoch), node bits from processes plus churn, sequence bits from the hottest producer, and key bytes saved against 128-bit ids, and tie each number to a decision.",
+      "core": true
+    },
+    {
+      "text": "Design the API and data model: an in-process library that returns errors instead of guesses, a batch service for clients that can't embed it, ids as strings in JSON, and the node-lease record (token, expiry, high-water).",
+      "core": true
+    },
+    {
+      "text": "Compare UUIDv4, UUIDv7/ULID, database sequences with interleaved offsets, ticket servers, leased ranges and time + node + sequence on size, ordering, coordination per id, dependency failure and index locality, and defend a choice with a flip condition.",
+      "core": true
+    },
+    {
+      "text": "Explain sequence overflow policies (wait, borrow within a bound, error; never wrap), why k-sorted is not linearizable, and why id % N sharding concentrates load on one shard.",
+      "core": true
+    },
+    {
+      "text": "Choose a clock-regression policy (wait out small steps, refuse large ones, bounded run-ahead, a floor at startup) for slews, steps, leap seconds, resumed VMs and restarts, and say what each costs.",
+      "core": true
+    },
+    {
+      "text": "Assign node ids safely with leases: a fencing token per grant, a holder-side deadline measured from the send time, a floor for the next holder, and a TTL sized against registry outages and churn.",
+      "core": true
+    },
+    {
+      "text": "Implement the layout, a concurrent generator with overflow and regression handling, a lease registry and a leased worker, and show with break-its what a naive generator, a shared node id and a paused holder do (labs/c3/snowflake).",
+      "core": true
+    },
+    {
+      "text": "Explain index locality of random vs time-ordered keys, why time-ordered ids must not lead a range-partition key, and what ordering ids from several regions really have.",
+      "core": false
+    }
+  ]
+}
